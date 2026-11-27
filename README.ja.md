@@ -2,21 +2,19 @@
 
 [简体中文](README.md) | [English](README.en.md) | [繁體中文](README.zh-TW.md) | **日本語**
 
-省メモリな純 Rust 製 Telegram ユーザーボットです。静的リンクされた単一のネイティブバイナリ（GC なし・C システムライブラリ依存なし）として動作し、コマンドはプログラムに組み込まれ、状態は JSON ファイルに保存されます。
+省メモリな純 Rust 製 Telegram ユーザーボットです。上流の Go 版 `mibot-lite` をベースに全面リライトし、静的リンクされた単一のネイティブバイナリ（GC なし・C システムライブラリ依存なし）として動作し、コマンドと状態はそれぞれバイナリと JSON ファイルに収まります。
 
-[MiBox](https://github.com/MiCat-S/Mi-Box) の軽量版にあたります。アカウント、セッション、`config.json`、コマンド名は
-互換性を維持しているため、MiBox からそのまま乗り換えられ、設定もコマンド 1 つで移行できます。省いたのはプラグイン機構で、
-JavaScript ランタイムも SQLite もガベージコレクタも使わず、追加の共有ライブラリも不要です。
+Go 原版および [MiBox](https://github.com/MiCat-S/Mi-Box) との互換性を維持しており、アカウント、`config.json`、セッションファイル、コマンド名そのままですぐに乗り換えられ、MiBox 設定もコマンド 1 つで移行できます（JavaScript ランタイム・SQLite・プラグインサンドボックスなし）。
 
-| | MiBox（Node） | MiBot Lite（Rust） |
+| | MiBot Lite（Go 原版 / `main`） | MiBot Lite（Rust 版 / `rust`） |
 |---|---|---|
-| 実装・ランタイム | TypeScript / Node.js（V8 + GC） | **純 Rust ネイティブバイナリ（Tokio 非同期・GC なし・C 依存ゼロ）** |
-| インストールサイズ | node_modules、約 237 パッケージ | **単一の静的ファイル（Linux `musl` strip 後 約 34 MB）** |
-| MTProto スタック | GramJS | **純 Rust `grammers` + `rustls`（`ring`）** |
-| プラグインランタイム | V8 | なし（組み込みコマンド + 3 プール有界スケジューラ） |
-| データ保存 | better-sqlite3 | JSON ファイル（アトミック書き込み + デバウンス永続化） |
-| 画像処理 | sharp（libvips） | **純 Rust `image` + `fast_image_resize` + `tiny-skia` + `ab_glyph`** |
-| コマンドの追加 | `.tpm install` | Rust コードを変更して再ビルド |
+| 言語・メモリモデル | Go 1.26（GC ランタイムあり） | **純 Rust 2024（Tokio 非同期・GC なし・C 依存ゼロ）** |
+| バイナリサイズ | 約 21 MB | **Linux `musl` strip 後 約 34 MB（完全静的単一ファイル）** |
+| MTProto スタック | `gotd/td`（Layer 229） | **純 Rust `grammers =0.12.0` + `rustls`（`ring`）** |
+| 並行制御・ディスパッチ | Goroutine + 3 プールチャネル | **Tokio + 3 プール有界セマフォ（Panic 隔離・ドレイン対応）** |
+| 画像処理・状態カード | `image/draw` + `golang.org/x/image` | **`image` + `fast_image_resize` + `tiny-skia` + `ab_glyph`** |
+| セッション・状態形式 | `gotd-session.json` + `updates.json` | **上位互換 + GramJS / Telethon 変換 + `.cursor` 差分永続化** |
+| コマンド・安全基準 | 45 コマンド群・`.sudo` 許可リスト・IP マスク | **45 コマンド群完全互換 + fail-closed ガード + UTF-16 エンティティ整合** |
 
 `Cargo.lock` の監査により `openssl-sys` や `libsqlite3-sys` などの禁止された C システム依存を含まないことを検証済みです。スタンプ生成時に一時的に起動する `ffmpeg` の子プロセスは常駐しません（[設計上の判断](#設計上の判断)を参照）。
 

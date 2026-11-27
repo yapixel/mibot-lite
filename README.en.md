@@ -2,21 +2,19 @@
 
 [简体中文](README.md) | **English** | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md)
 
-A memory-light, pure Rust Telegram userbot: compiled into a single static native binary (no GC, no C system library dependencies), with commands compiled in and state kept in JSON files.
+A memory-light, pure Rust Telegram userbot rewritten from upstream Go `mibot-lite`: compiled into a single static native binary (no GC, no C system library dependencies), with commands compiled in and state kept in JSON files.
 
-It is a lightweight stand-in for [MiBox](https://github.com/MiCat-S/Mi-Box). The account, session, `config.json`
-and command names remain compatible, so you can switch over from MiBox directly and bring its settings along with a
-single command. What it leaves out is the plugin system: no JavaScript runtime, no SQLite, and no garbage collector.
+Drop-in compatible with both the Go edition and [MiBox](https://github.com/MiCat-S/Mi-Box): accounts, `config.json`, session files, and command names stay identical for seamless migration, with no JavaScript runtime, no SQLite, and no plugin sandbox.
 
-| | MiBox (Node) | MiBot Lite (Rust) |
+| | MiBot Lite (Go / `main`) | MiBot Lite (Rust / `rust`) |
 |---|---|---|
-| Runtime | TypeScript / Node.js (V8 + GC) | **Pure Rust native binary (Tokio async, no GC, zero C system deps)** |
-| Install size | node_modules, about 237 packages | **One static file (~34 MB stripped on Linux `musl`)** |
-| MTProto stack | GramJS | **Pure Rust `grammers` + `rustls` (`ring`)** |
-| Plugin runtime | V8 | None (compiled-in commands + 3-pool bounded scheduler) |
-| Storage | better-sqlite3 | JSON files (atomic writes + debounced cursor persistence) |
-| Image processing | sharp (libvips) | **Pure Rust `image` + `fast_image_resize` + `tiny-skia` + `ab_glyph`** |
-| Adding a command | `.tpm install` | Edit the Rust code and rebuild |
+| Language & runtime | Go 1.26 (with GC runtime) | **Pure Rust 2024 (Tokio async, no GC, zero C system deps)** |
+| Binary size | ~21 MB | **~34 MB stripped on Linux `musl` (static single binary)** |
+| MTProto stack | `gotd/td` (Layer 229) | **Pure Rust `grammers =0.12.0` + `rustls` (`ring`)** |
+| Concurrency & dispatch | Goroutines + 3-pool channels | **Tokio + 3-pool bounded semaphore dispatcher (panic-isolated & drainable)** |
+| Imaging & status card | `image/draw` + `golang.org/x/image` | **`image` + `fast_image_resize` + `tiny-skia` + `ab_glyph`** |
+| Session & state files | `gotd-session.json` + `updates.json` | **Drop-in compatible + GramJS / Telethon adapters + `.cursor` persistence** |
+| Command & safety parity | 45 command groups, `.sudo` allowlist, IP masking | **Full 45-group parity + fail-closed guards + UTF-16 entity alignment** |
 
 The `Cargo.lock` dependency audit verifies zero banned C system libraries (`openssl-sys`, `libsqlite3-sys`, etc.);
 the brief `ffmpeg` child process spawned while making video stickers does not stay resident (see [Design notes](#design-notes)).

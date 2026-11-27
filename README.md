@@ -2,21 +2,19 @@
 
 **简体中文** | [English](README.en.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md)
 
-一个省内存的纯 Rust Telegram UserBot：编译为单一静态原生二进制（无 GC、无 C 系统库依赖），命令编译进程序，状态与配置存成 JSON 文件。
+一个省内存的纯 Rust Telegram UserBot：基于上游 Go 版 `mibot-lite` 全量重构，编译为单一静态原生二进制（无 GC、无 C 系统库依赖），命令编译进程序，状态与配置存成 JSON 文件。
 
-它是 [MiBox](https://github.com/MiCat-S/Mi-Box) 的轻量替身：账号、会话、`config.json` 和命令名保持兼容，
-可以从 MiBox 直接切过来，配置也能一条命令搬走。去掉的是插件系统：没有 JavaScript 运行时、
-没有 SQLite、没有垃圾回收器，也不用装任何第三方动态库。
+保留与原版及 [MiBox](https://github.com/MiCat-S/Mi-Box) 的完整兼容性：账号、`config.json`、会话文件和命令名完全兼容，可直接平滑切换，也能一条命令迁移 MiBox 配置；无插件沙箱、无 JavaScript 运行时、无 SQLite。
 
-| | MiBox（Node） | MiBot Lite（Rust） |
+| | MiBot Lite（Go 原版 / `main`） | MiBot Lite（Rust 版 / `rust`） |
 |---|---|---|
-| 实现与运行时 | TypeScript / Node.js（V8 + GC） | **纯 Rust 原生二进制（Tokio 异步，无 GC，零 C 系统库依赖）** |
-| 安装体积 | node_modules，约 237 个包 | **单一静态文件（Linux `musl` strip 后约 34 MB）** |
-| MTProto 协议栈 | GramJS | **纯 Rust `grammers` + `rustls`（`ring`）** |
-| 插件运行时 | V8 | 无（内置命令 + 三池有界调度） |
-| 数据存储 | better-sqlite3 | JSON 文件（原子写入 + 防抖游标落盘） |
-| 图像处理 | sharp（libvips） | **纯 Rust `image` + `fast_image_resize` + `tiny-skia` + `ab_glyph`** |
-| 加命令 | `.tpm install` | 改 Rust 代码、重新编译 |
+| 语言与内存模型 | Go 1.26（含 GC 运行时） | **纯 Rust 2024（Tokio 异步，无 GC，零 C 系统库依赖）** |
+| 单文件体积 | 约 21 MB | **Linux `musl` strip 后约 34 MB（静态单文件）** |
+| MTProto 协议栈 | `gotd/td`（Layer 229） | **纯 Rust `grammers =0.12.0` + `rustls`（`ring`）** |
+| 并发与调度 | Goroutine + 三池信道 | **Tokio + 三池有界信号量调度（含 Panic 隔离与排空）** |
+| 图像处理与卡片 | `image/draw` + `golang.org/x/image` | **`image` + `fast_image_resize` + `tiny-skia` + `ab_glyph`** |
+| 会话与状态格式 | `gotd-session.json` + `updates.json` | **原格式兼容 + GramJS / Telethon 互转 + `.cursor` 增量落盘** |
+| 命令与安全基线 | 45 组命令、`.sudo` 白名单、IP 打码 | **45 组命令全量对等 + fail-closed 护栏 + UTF-16 实体精修** |
 
 产物经 `Cargo.lock` 审计确认不含 `openssl-sys`、`libsqlite3-sys` 等禁用 C 系统依赖；生成动态贴纸时临时调用的 `ffmpeg` 子进程不常驻内存（见[设计取舍](#设计取舍)）。
 
