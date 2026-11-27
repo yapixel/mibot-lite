@@ -230,7 +230,7 @@ bash ../scripts/build.sh  # バージョン番号付きでビルド
 ./mibot-lite --verify --root /デプロイ先ディレクトリ
 ```
 
-### 検証サマリー（v0.4.0）
+### 検証サマリー（v0.4.1）
 
 - **ワークスペース**：`rust/` 配下の **22 クレート**（全 45 コマンド群とランタイムを網羅）。
 - **静的解析**：`cargo clippy --locked --all-targets -- -D warnings` — **警告ゼロ**で通過。

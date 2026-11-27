@@ -233,7 +233,7 @@ deletes them). One account cannot be connected twice at once, so stop the servic
 ./mibot-lite --verify --root /deployment/dir
 ```
 
-### Verification summary (v0.4.0)
+### Verification summary (v0.4.1)
 
 - **Workspace**: **22 crates** under `rust/` covering all 45 command groups and runtime subsystems.
 - **Lint**: `cargo clippy --locked --all-targets -- -D warnings` — **0 warnings**.
