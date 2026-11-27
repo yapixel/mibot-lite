@@ -112,7 +112,8 @@ pub fn plain_copy(text: &str) -> String {
     for (idx, ch) in text.char_indices() {
         units += ch.len_utf16();
         if units > LIMIT {
-            return format!("{}\n…（内容过长，已截断）", &text[..idx]);
+            let suffix = mibot_i18n::tr("… (truncated)", "…（内容过长，已截断）");
+            return format!("{}\n{suffix}", &text[..idx]);
         }
     }
     text.to_owned()
@@ -479,8 +480,8 @@ mod tests {
 
         let truncated = plain_copy(&"😀".repeat(3000));
         assert!(utf16_len(&truncated) <= 4096);
-        assert!(truncated.ends_with("已截断）"));
-        assert_eq!(plain_copy("短"), "短");
+        assert!(truncated.ends_with("… (truncated)"));
+        assert_eq!(plain_copy("short"), "short");
 
         assert!(rich_rejected(&BotError::Invocation(InvocationError::Rpc(
             RpcError {

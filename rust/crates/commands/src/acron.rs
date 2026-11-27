@@ -25,14 +25,14 @@ const TASK_TYPES: &[&str] = &["send", "copy", "forward", "del", "del_re", "pin",
 
 fn type_label(kind: &str) -> &str {
     match kind {
-        "send" => "发送",
-        "cmd" => "命令",
-        "copy" => "复制",
-        "forward" => "转发",
-        "del" => "删除",
-        "del_re" => "正则删除",
-        "pin" => "置顶",
-        "unpin" => "取消置顶",
+        "send" => kit::tr("send", "发送"),
+        "cmd" => kit::tr("cmd", "命令"),
+        "copy" => kit::tr("copy", "复制"),
+        "forward" => kit::tr("forward", "转发"),
+        "del" => kit::tr("del", "删除"),
+        "del_re" => kit::tr("del_re", "正则删除"),
+        "pin" => kit::tr("pin", "置顶"),
+        "unpin" => kit::tr("unpin", "取消置顶"),
         other => other,
     }
 }
@@ -335,14 +335,20 @@ fn sunday_seven(field: &str) -> String {
 fn parse_cron(expression: &str) -> Result<Cron, CmdError> {
     let mut fields: Vec<String> = expression.split_whitespace().map(str::to_owned).collect();
     if fields.len() != 6 {
-        return Err(kit::fail("Cron 表达式要写 6 段：秒 分 时 日 月 星期"));
+        return Err(kit::fail(kit::tr(
+            "Cron expression must have 6 fields: sec min hour day month weekday",
+            "Cron 表达式要写 6 段：秒 分 时 日 月 星期",
+        )));
     }
     fields[5] = sunday_seven(&fields[5]);
     let joined = fields.join(" ");
     let parser = CronParser::builder().seconds(Seconds::Required).build();
-    parser
-        .parse(&joined)
-        .map_err(|_| kit::fail("Cron 表达式无效，6 段依次是 秒 分 时 日 月 星期"))
+    parser.parse(&joined).map_err(|_| {
+        kit::fail(kit::tr(
+            "Invalid Cron expression; expected 6 fields: sec min hour day month weekday",
+            "Cron 表达式无效，6 段依次是 秒 分 时 日 月 星期",
+        ))
+    })
 }
 
 fn next_run(expression: &str, now: SystemTime) -> Option<SystemTime> {
@@ -373,7 +379,10 @@ fn compile_regex(raw: &str) -> Result<Regex, CmdError> {
     }).into_owned();
     let pattern = pattern_owned.as_str();
     if pattern.is_empty() {
-        return Err(kit::fail("正则表达式是空的"));
+        return Err(kit::fail(kit::tr(
+            "Regular expression is empty",
+            "正则表达式是空的",
+        )));
     }
     let mut modifiers = String::new();
     for flag in flags.chars() {
@@ -384,7 +393,13 @@ fn compile_regex(raw: &str) -> Result<Regex, CmdError> {
                 }
             }
             'g' | 'u' => {}
-            _ => return Err(kit::fail(format!("不支持正则标志 {flag}，能用的是 i、m、s"))),
+            _ => {
+                return Err(kit::fail(if kit::is_zh() {
+                    format!("不支持正则标志 {flag}，能用的是 i、m、s")
+                } else {
+                    format!("Unsupported regex flag {flag}; supported flags are i, m, s")
+                }));
+            }
         }
     }
     let final_pat = if modifiers.is_empty() {
@@ -392,7 +407,12 @@ fn compile_regex(raw: &str) -> Result<Regex, CmdError> {
     } else {
         format!("(?{modifiers}){pattern}")
     };
-    Regex::new(&final_pat).map_err(|_| kit::fail("正则表达式无效（不支持环视和反向引用）"))
+    Regex::new(&final_pat).map_err(|_| {
+        kit::fail(kit::tr(
+            "Invalid regular expression (lookaround and backreferences are unsupported)",
+            "正则表达式无效（不支持环视和反向引用）",
+        ))
+    })
 }
 
 fn message_id_i32(value: &str) -> i32 {
@@ -513,13 +533,15 @@ fn chat_label(client: Option<&Client>, t: &Task) -> String {
     if let tl::enums::Peer::User(u) = &peer
         && u.user_id == c.self_id()
     {
-        return "收藏夹".into();
+        return kit::tr("Saved Messages", "收藏夹").into();
     }
     let title = c.peers().title(&peer);
     if title.is_empty() || title == t.chat_id {
         fallback
-    } else {
+    } else if kit::is_zh() {
         format!("{}（{}）", escape(&title), code(&t.chat))
+    } else {
+        format!("{} ({})", escape(&title), code(&t.chat))
     }
 }
 
@@ -714,7 +736,11 @@ impl Service {
             );
             let _ = self.update_task(id, |task| {
                 task.delivery = DELIVERY_PENDING.into();
-                task.last_error = "上次执行没等到结果进程就停了，这次跳过，免得重复".into();
+                task.last_error = kit::tr(
+                    "Previous run did not finish before shutdown; skipped to avoid duplicates",
+                    "上次执行没等到结果进程就停了，这次跳过，免得重复",
+                )
+                .into();
             });
             return;
         }
@@ -731,7 +757,7 @@ impl Service {
         let res = tokio::select! {
             _ = tokio::time::sleep(Duration::from_secs(600)) => {
                 run_cancel.cancel();
-                Err(kit::fail("执行超时"))
+                Err(kit::fail(kit::tr("Execution timed out", "执行超时")))
             }
             r = self.run(&run_cancel, client, &t) => r,
         };
@@ -742,7 +768,7 @@ impl Service {
                 String::new(),
                 String::new(),
                 if cancel.is_cancelled() {
-                    "服务停了，没执行完".into()
+                    kit::tr("Service stopped before completion", "服务停了，没执行完").into()
                 } else {
                     brief(e.as_ref())
                 },
@@ -779,7 +805,7 @@ impl Service {
                 };
                 without_ip_privacy(|| client.send_plain(&peer, &t.message, (!entities.is_empty()).then_some(entities), opts))
                     .await?;
-                Ok(("已发送 1 条消息".into(), chat_id))
+                Ok((kit::tr("Sent 1 message", "已发送 1 条消息").into(), chat_id))
             }
             "cmd" => {
                 let r = self.run_command(client, &peer, &t.message, reply_to).await?;
@@ -787,31 +813,47 @@ impl Service {
             }
             "copy" => {
                 copy_message(client, t, &peer, reply_to).await?;
-                Ok(("已复制发送 1 条消息".into(), chat_id))
+                Ok((
+                    kit::tr("Copied and sent 1 message", "已复制发送 1 条消息").into(),
+                    chat_id,
+                ))
             }
             "forward" => {
                 let (from, id) = source(client, t)?;
                 client
                     .forward_messages(&from, &peer, &[id], (reply_to > 0).then_some(reply_to))
                     .await?;
-                Ok(("已转发 1 条消息".into(), chat_id))
+                Ok((
+                    kit::tr("Forwarded 1 message", "已转发 1 条消息").into(),
+                    chat_id,
+                ))
             }
             "del" => {
                 let id = message_id_i32(&t.msg_id);
                 if id == 0 {
-                    return Err(kit::fail("消息 ID 无效"));
+                    return Err(kit::fail(kit::tr("Invalid message ID", "消息 ID 无效")));
                 }
                 client.delete_messages(&peer, &[id]).await?;
-                Ok((format!("已尝试删除消息 {}", t.msg_id), chat_id))
+                let msg = if kit::is_zh() {
+                    format!("已尝试删除消息 {}", t.msg_id)
+                } else {
+                    format!("Attempted to delete message {}", t.msg_id)
+                };
+                Ok((msg, chat_id))
             }
             "del_re" => {
                 let deleted = delete_matching(client, &peer, t).await?;
-                Ok((format!("匹配并删除 {deleted} 条"), chat_id))
+                let msg = if kit::is_zh() {
+                    format!("匹配并删除 {deleted} 条")
+                } else {
+                    format!("Matched and deleted {deleted} message(s)")
+                };
+                Ok((msg, chat_id))
             }
             "pin" | "unpin" => {
                 let id = message_id_i32(&t.msg_id);
                 if id == 0 {
-                    return Err(kit::fail("消息 ID 无效"));
+                    return Err(kit::fail(kit::tr("Invalid message ID", "消息 ID 无效")));
                 }
                 let unpin = t.kind == "unpin";
                 client
@@ -824,13 +866,23 @@ impl Service {
                     })
                     .await?;
                 let msg = if unpin {
-                    format!("已取消置顶消息 {}", t.msg_id)
-                } else {
+                    if kit::is_zh() {
+                        format!("已取消置顶消息 {}", t.msg_id)
+                    } else {
+                        format!("Unpinned message {}", t.msg_id)
+                    }
+                } else if kit::is_zh() {
                     format!("已置顶消息 {}", t.msg_id)
+                } else {
+                    format!("Pinned message {}", t.msg_id)
                 };
                 Ok((msg, chat_id))
             }
-            _ => Err(kit::fail(format!("不认识的任务类型 {}", t.kind))),
+            _ => Err(kit::fail(if kit::is_zh() {
+                format!("不认识的任务类型 {}", t.kind)
+            } else {
+                format!("Unknown task type {}", t.kind)
+            })),
         }
     }
 
@@ -842,10 +894,13 @@ impl Service {
         reply_to: i32,
     ) -> Result<String, CmdError> {
         if text.trim().is_empty() {
-            return Err(kit::fail("任务里没有命令"));
+            return Err(kit::fail(kit::tr("No command in task", "任务里没有命令")));
         }
         if self.invokes_self(text) {
-            return Err(kit::fail("命令是 .acron 本身，执行一次就会再加一个任务，已跳过；请删掉这个任务"));
+            return Err(kit::fail(kit::tr(
+                "Command invokes .acron itself, which would recursively add tasks; skipped — please delete this task",
+                "命令是 .acron 本身，执行一次就会再加一个任务，已跳过；请删掉这个任务",
+            )));
         }
         let updates = without_ip_privacy(|| {
             client.send_plain(
@@ -892,9 +947,16 @@ impl Service {
             DispatchOutcome::NotCommand
         };
         match outcome {
-            DispatchOutcome::Queued => Ok("已提交执行命令".into()),
-            DispatchOutcome::Rejected(_) => Err(kit::fail("命令已发出，但当时同时执行的命令太多（或服务正在更新、退出），没有执行")),
-            DispatchOutcome::NotCommand => Ok("已发送命令（未执行：不是可用的命令，检查前缀和命令名）".into()),
+            DispatchOutcome::Queued => Ok(kit::tr("Command queued for execution", "已提交执行命令").into()),
+            DispatchOutcome::Rejected(_) => Err(kit::fail(kit::tr(
+                "Command sent, but not executed (too many concurrent commands or service is updating/stopping)",
+                "命令已发出，但当时同时执行的命令太多（或服务正在更新、退出），没有执行",
+            ))),
+            DispatchOutcome::NotCommand => Ok(kit::tr(
+                "Command sent (not executed: not a valid command; check prefix and command name)",
+                "已发送命令（未执行：不是可用的命令，检查前缀和命令名）",
+            )
+            .into()),
         }
     }
 
@@ -907,11 +969,19 @@ impl Service {
             "disable" | "off" => self.disable(inv, &sub).await,
             "enable" | "on" => self.enable(inv, &sub).await,
             _ if is_task_type(&sub) => self.add(inv, &sub).await,
-            _ => Err(kit::fail(format!(
-                "没有这个子命令：{}，{}help acron 看用法",
-                inv.arg(0),
-                inv.prefix()
-            ))),
+            _ => Err(kit::fail(if kit::is_zh() {
+                format!(
+                    "没有这个子命令：{}，{}help acron 看用法",
+                    inv.arg(0),
+                    inv.prefix()
+                )
+            } else {
+                format!(
+                    "Unknown subcommand: {}; use {}help acron for usage",
+                    inv.arg(0),
+                    inv.prefix()
+                )
+            })),
         }
     }
 
@@ -920,7 +990,10 @@ impl Service {
         let (head, body) = body_text.split_once('\n').unwrap_or((body_text, ""));
         let fields: Vec<&str> = head.split_whitespace().collect();
         if fields.len() < 8 {
-            return Err(kit::fail("Cron 表达式要写 6 段：秒 分 时 日 月 星期"));
+            return Err(kit::fail(kit::tr(
+                "Cron expression must have 6 fields: sec min hour day month weekday",
+                "Cron 表达式要写 6 段：秒 分 时 日 月 星期",
+            )));
         }
         let expression = fields[2..8].join(" ");
         let _ = parse_cron(&expression)?;
@@ -930,10 +1003,16 @@ impl Service {
             (String::new(), String::new())
         };
         if chat.is_empty() {
-            return Err(kit::fail("请写上对话：数字 ID、@用户名或 me"));
+            return Err(kit::fail(kit::tr(
+                "Specify target chat: numeric ID, @username, or me",
+                "请写上对话：数字 ID、@用户名或 me",
+            )));
         }
         if !reply_to.is_empty() && message_id_i32(&reply_to) == 0 {
-            return Err(kit::fail("对话后面「|」之后要写消息 ID 或话题 ID"));
+            return Err(kit::fail(kit::tr(
+                "After '|' in chat target, specify a message ID or topic ID",
+                "对话后面「|」之后要写消息 ID 或话题 ID",
+            )));
         }
         let rest = &fields[9..];
         let arg = |i: usize| rest.get(i).copied().unwrap_or("");
@@ -953,34 +1032,54 @@ impl Service {
             "cmd" => {
                 t.message = body.trim().to_owned();
                 if t.message.is_empty() {
-                    return Err(kit::fail(format!(
-                        "要执行的命令写在第二行，{}help acron 有例子",
-                        inv.prefix()
-                    )));
+                    return Err(kit::fail(if kit::is_zh() {
+                        format!("要执行的命令写在第二行，{}help acron 有例子", inv.prefix())
+                    } else {
+                        format!(
+                            "Put the command on the second line; see {}help acron for examples",
+                            inv.prefix()
+                        )
+                    }));
                 }
                 if self.invokes_self(&t.message) {
-                    return Err(kit::fail(format!(
-                        "定时执行的命令不能是 {}acron：每执行一次就会再添加一个任务",
-                        inv.prefix()
-                    )));
+                    return Err(kit::fail(if kit::is_zh() {
+                        format!(
+                            "定时执行的命令不能是 {}acron：每执行一次就会再添加一个任务",
+                            inv.prefix()
+                        )
+                    } else {
+                        format!(
+                            "Scheduled command cannot be {}acron: each run would add another task",
+                            inv.prefix()
+                        )
+                    }));
                 }
             }
             "copy" | "forward" => {
                 let Some(reply) = kit::reply_msg(inv).await? else {
-                    return Err(kit::fail("请回复一条要复制或转发的消息"));
+                    return Err(kit::fail(kit::tr(
+                        "Reply to a message to copy or forward",
+                        "请回复一条要复制或转发的消息",
+                    )));
                 };
                 t.from_chat_id = reply.chat_id;
                 t.from_msg_id = reply.id.to_string();
             }
             "del" | "unpin" | "pin" => {
                 if message_id_i32(arg(0)) == 0 {
-                    return Err(kit::fail("请写上消息 ID（正整数）"));
+                    return Err(kit::fail(kit::tr(
+                        "Specify a valid message ID (positive integer)",
+                        "请写上消息 ID（正整数）",
+                    )));
                 }
                 t.msg_id = arg(0).to_owned();
                 used = 1;
                 if kind == "pin" {
                     if arg(1).is_empty() || arg(2).is_empty() {
-                        return Err(kit::fail("请写上发不发通知、是不是只对自己置顶，如 1 0 或 true false"));
+                        return Err(kit::fail(kit::tr(
+                            "Specify notify and pm-only flags, e.g. 1 0 or true false",
+                            "请写上发不发通知、是不是只对自己置顶，如 1 0 或 true false",
+                        )));
                     }
                     t.notify = parse_flag(arg(1));
                     t.pm_one_side = parse_flag(arg(2));
@@ -990,10 +1089,17 @@ impl Service {
             "del_re" => {
                 let limit = arg(0).parse::<usize>().ok().filter(|&v| (1..=MAX_SCAN).contains(&v));
                 let Some(limit) = limit else {
-                    return Err(kit::fail(format!("请写上 1–{MAX_SCAN} 之间的整数条数")));
+                    return Err(kit::fail(if kit::is_zh() {
+                        format!("请写上 1–{MAX_SCAN} 之间的整数条数")
+                    } else {
+                        format!("Specify an integer count between 1 and {MAX_SCAN}")
+                    }));
                 };
                 if arg(1).is_empty() {
-                    return Err(kit::fail("请写上消息的正则表达式"));
+                    return Err(kit::fail(kit::tr(
+                        "Specify a regular expression for matching messages",
+                        "请写上消息的正则表达式",
+                    )));
                 }
                 let _ = compile_regex(arg(1))?;
                 t.limit = limit.to_string();
@@ -1026,46 +1132,57 @@ impl Service {
 
         let mut display = t.display.clone();
         if !resolved {
-            display.push_str("（现在找不到这个对话，到时间再找）");
+            display.push_str(kit::tr(
+                " (chat not resolved yet; will resolve at run time)",
+                "（现在找不到这个对话，到时间再找）",
+            ));
         }
         let title = match kind {
-            "send" => "已添加定时发送任务",
-            "cmd" => "已添加定时命令任务",
-            "copy" => "已添加定时复制任务",
-            "forward" => "已添加定时转发任务",
-            "del" => "已添加删除消息的定时任务",
-            "del_re" => "已添加正则删除的定时任务",
-            "pin" => "已添加置顶消息的定时任务",
-            "unpin" => "已添加取消置顶的定时任务",
-            _ => "已添加定时任务",
+            "send" => kit::tr("Scheduled send task added", "已添加定时发送任务"),
+            "cmd" => kit::tr("Scheduled command task added", "已添加定时命令任务"),
+            "copy" => kit::tr("Scheduled copy task added", "已添加定时复制任务"),
+            "forward" => kit::tr("Scheduled forward task added", "已添加定时转发任务"),
+            "del" => kit::tr("Scheduled delete task added", "已添加删除消息的定时任务"),
+            "del_re" => kit::tr("Scheduled regex delete task added", "已添加正则删除的定时任务"),
+            "pin" => kit::tr("Scheduled pin task added", "已添加置顶消息的定时任务"),
+            "unpin" => kit::tr("Scheduled unpin task added", "已添加取消置顶的定时任务"),
+            _ => kit::tr("Scheduled task added", "已添加定时任务"),
         };
         let mut lines = vec![
             format!("✅ {title}"),
-            format!("ID：{}", code(&t.id)),
-            format!("对话：{display}"),
+            format!("{}{}", kit::tr("ID: ", "ID："), code(&t.id)),
+            format!("{}{display}", kit::tr("Chat: ", "对话：")),
         ];
         if !t.reply_to.is_empty() {
-            let lbl = if kind == "forward" { "话题" } else { "回复" };
-            lines.push(format!("{lbl}：{}", code(&t.reply_to)));
+            let lbl = if kind == "forward" {
+                kit::tr("Topic: ", "话题：")
+            } else {
+                kit::tr("Reply: ", "回复：")
+            };
+            lines.push(format!("{lbl}{}", code(&t.reply_to)));
         }
         if !t.msg_id.is_empty() {
-            lines.push(format!("消息 ID：{}", code(&t.msg_id)));
+            lines.push(format!("{}{}", kit::tr("Message ID: ", "消息 ID："), code(&t.msg_id)));
         }
         if kind == "del_re" {
-            lines.push(format!("最近条数：{}", code(&t.limit)));
-            lines.push(format!("匹配：{}", code(&t.regex)));
+            lines.push(format!("{}{}", kit::tr("Recent limit: ", "最近条数："), code(&t.limit)));
+            lines.push(format!("{}{}", kit::tr("Pattern: ", "匹配："), code(&t.regex)));
         }
         if kind == "pin" {
-            lines.push(format!("通知：{}", kit::on_off_text(t.notify)));
-            lines.push(format!("只对自己置顶：{}", kit::on_off_text(t.pm_one_side)));
+            lines.push(format!("{}{}", kit::tr("Notify: ", "通知："), kit::on_off_text(t.notify)));
+            lines.push(format!(
+                "{}{}",
+                kit::tr("PM one-side: ", "只对自己置顶："),
+                kit::on_off_text(t.pm_one_side)
+            ));
         }
         if !t.remark.is_empty() {
-            lines.push(format!("备注：{}", escape(&t.remark)));
+            lines.push(format!("{}{}", kit::tr("Remark: ", "备注："), escape(&t.remark)));
         }
         if let Some(next) = next_run(&t.cron, now) {
-            lines.push(format!("下次执行：{}", format_time(next)));
+            lines.push(format!("{}{}", kit::tr("Next run: ", "下次执行："), format_time(next)));
         }
-        lines.push(format!("复制：{}", copy_html(&t, inv.prefix())));
+        lines.push(format!("{}{}", kit::tr("Copy: ", "复制："), copy_html(&t, inv.prefix())));
         inv.edit(&lines.join("\n")).await?;
         Ok(())
     }
@@ -1079,10 +1196,17 @@ impl Service {
             } else if is_task_type(&lower) && kind.is_empty() {
                 kind = lower;
             } else {
-                return Err(kit::fail(format!(
-                    "列表只能按 all 和任务类型筛选，{}help acron 看用法",
-                    inv.prefix()
-                )));
+                return Err(kit::fail(if kit::is_zh() {
+                    format!(
+                        "列表只能按 all 和任务类型筛选，{}help acron 看用法",
+                        inv.prefix()
+                    )
+                } else {
+                    format!(
+                        "List filter only accepts 'all' and task types; use {}help acron for usage",
+                        inv.prefix()
+                    )
+                }));
             }
         }
         let st = self.read()?;
@@ -1119,7 +1243,12 @@ impl Service {
             return Err(not_found(inv, id));
         }
         self.unschedule(id).await;
-        inv.edit(&format!("✅ 已删除定时任务 {}", code(id))).await?;
+        let msg = if kit::is_zh() {
+            format!("✅ 已删除定时任务 {}", code(id))
+        } else {
+            format!("✅ Removed scheduled task {}", code(id))
+        };
+        inv.edit(&msg).await?;
         Ok(())
     }
 
@@ -1139,7 +1268,12 @@ impl Service {
             return Err(not_found(inv, id));
         }
         self.unschedule(id).await;
-        inv.edit(&format!("✅ 已关闭定时任务 {}", code(id))).await?;
+        let msg = if kit::is_zh() {
+            format!("✅ 已关闭定时任务 {}", code(id))
+        } else {
+            format!("✅ Disabled scheduled task {}", code(id))
+        };
+        inv.edit(&msg).await?;
         Ok(())
     }
 
@@ -1154,7 +1288,11 @@ impl Service {
         };
         let mut t = st.tasks[idx].clone();
         if parse_cron(&t.cron).is_err() {
-            return Err(kit::fail(format!("定时任务 {id} 的 Cron 表达式无效，没法开启")));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("定时任务 {id} 的 Cron 表达式无效，没法开启")
+            } else {
+                format!("Scheduled task {id} has an invalid Cron expression and cannot be enabled")
+            }));
         }
         self.schedule(id, &t.cron).await;
         if let Err(err) = self.update_task(id, |task| task.disabled = false) {
@@ -1162,11 +1300,16 @@ impl Service {
             return Err(err);
         }
         t.disabled = false;
-        let mut lines = vec![format!("✅ 已开启定时任务 {}", code(id))];
+        let head = if kit::is_zh() {
+            format!("✅ 已开启定时任务 {}", code(id))
+        } else {
+            format!("✅ Enabled scheduled task {}", code(id))
+        };
+        let mut lines = vec![head];
         if let Some(next) = next_run(&t.cron, SystemTime::now()) {
-            lines.push(format!("下次执行：{}", format_time(next)));
+            lines.push(format!("{}{}", kit::tr("Next run: ", "下次执行："), format_time(next)));
         }
-        lines.push(format!("复制：{}", copy_html(&t, inv.prefix())));
+        lines.push(format!("{}{}", kit::tr("Copy: ", "复制："), copy_html(&t, inv.prefix())));
         inv.edit(&lines.join("\n")).await?;
         Ok(())
     }
@@ -1174,20 +1317,34 @@ impl Service {
 
 async fn fill_send(inv: &Invocation, t: &mut Task) -> CmdResult {
     let Some(reply) = kit::reply_msg(inv).await? else {
-        return Err(kit::fail("请回复一条文字消息，到时间发的就是它的文字"));
+        return Err(kit::fail(kit::tr(
+            "Reply to a text message to schedule sending its text",
+            "请回复一条文字消息，到时间发的就是它的文字",
+        )));
     };
     let raw = reply.raw;
     if let Some(media) = &raw.media {
         match media {
             tl::enums::MessageMedia::WebPage(_) | tl::enums::MessageMedia::Empty => {}
-            _ => return Err(kit::fail("定时发送只存文字，带媒体的消息请用 copy 或 forward")),
+            _ => {
+                return Err(kit::fail(kit::tr(
+                    "Scheduled send only supports plain text; use copy or forward for media",
+                    "定时发送只存文字，带媒体的消息请用 copy 或 forward",
+                )));
+            }
         }
     }
     if raw.reply_markup.is_some() {
-        return Err(kit::fail("定时发送只存文字，带按钮的消息请用 copy 或 forward"));
+        return Err(kit::fail(kit::tr(
+            "Scheduled send only supports plain text; use copy or forward for messages with buttons",
+            "定时发送只存文字，带按钮的消息请用 copy 或 forward",
+        )));
     }
     if raw.message.trim().is_empty() {
-        return Err(kit::fail("被回复的消息里没有文字"));
+        return Err(kit::fail(kit::tr(
+            "Replied message has no text",
+            "被回复的消息里没有文字",
+        )));
     }
     t.message = raw.message;
     t.entities = encode_entities(raw.entities.as_deref().unwrap_or(&[]));
@@ -1201,17 +1358,24 @@ async fn target(client: &Client, t: &Task) -> Result<(tl::enums::InputPeer, Stri
         return Ok((peer, t.chat_id.clone()));
     }
     if t.chat.trim().is_empty() {
-        return Err(kit::fail("任务里没有对话"));
+        return Err(kit::fail(kit::tr("Task has no target chat", "任务里没有对话")));
     }
-    let peer = client
-        .resolve_target(&t.chat)
-        .await
-        .map_err(|e| kit::fail_with(format!("找不到对话 {}", t.chat), e))?;
+    let peer = client.resolve_target(&t.chat).await.map_err(|e| {
+        let label = if kit::is_zh() {
+            format!("找不到对话 {}", t.chat)
+        } else {
+            format!("Chat {} not found", t.chat)
+        };
+        kit::fail_with(label, e)
+    })?;
     let chat_id = peer_of(&peer, client.self_id())
         .map(|p| peer_id(&p))
         .unwrap_or_default();
     if t.resolved_peer && !t.chat_id.is_empty() && t.chat_id != chat_id {
-        return Err(kit::fail("目标已指向另一个对话，请重新添加任务"));
+        return Err(kit::fail(kit::tr(
+            "Target now points to a different chat; please recreate this task",
+            "目标已指向另一个对话，请重新添加任务",
+        )));
     }
     Ok((peer, chat_id))
 }
@@ -1219,11 +1383,11 @@ async fn target(client: &Client, t: &Task) -> Result<(tl::enums::InputPeer, Stri
 fn source(client: &Client, t: &Task) -> Result<(tl::enums::InputPeer, i32), CmdError> {
     let id = message_id_i32(&t.from_msg_id);
     if id == 0 {
-        return Err(kit::fail("源消息 ID 无效"));
+        return Err(kit::fail(kit::tr("Invalid source message ID", "源消息 ID 无效")));
     }
     let from = client
         .input_peer_from_chat_id(&t.from_chat_id)
-        .map_err(|e| kit::fail_with("找不到源消息所在的对话", e))?;
+        .map_err(|e| kit::fail_with(kit::tr("Source chat not found", "找不到源消息所在的对话"), e))?;
     Ok((from, id))
 }
 
@@ -1231,7 +1395,7 @@ async fn copy_message(client: &Client, t: &Task, to: &tl::enums::InputPeer, repl
     let (from, id) = source(client, t)?;
     let found = client.get_messages(&from, &[id]).await?;
     let Some(original) = found.into_iter().find(|m| m.id == id) else {
-        return Err(kit::fail("源消息已经不在了"));
+        return Err(kit::fail(kit::tr("Source message no longer exists", "源消息已经不在了")));
     };
     let media = copy_media(&original)?;
     let raw_ents = original.entities.as_deref().unwrap_or(&[]);
@@ -1270,7 +1434,10 @@ async fn copy_message(client: &Client, t: &Task, to: &tl::enums::InputPeer, repl
         return Ok(());
     }
     if original.message.trim().is_empty() {
-        return Err(kit::fail("源消息里没有能复制的内容"));
+        return Err(kit::fail(kit::tr(
+            "Source message has no copyable content",
+            "源消息里没有能复制的内容",
+        )));
     }
     let has_preview = matches!(original.media, Some(tl::enums::MessageMedia::WebPage(_)));
     client
@@ -1312,7 +1479,10 @@ fn copy_media(message: &tl::types::Message) -> Result<Option<tl::enums::InputMed
                     .into(),
                 ));
             }
-            Err(kit::fail("这种消息没法复制，可以改用 forward 定时转发"))
+            Err(kit::fail(kit::tr(
+                "This message type cannot be copied; use forward instead",
+                "这种消息没法复制，可以改用 forward 定时转发",
+            )))
         }
         tl::enums::MessageMedia::Document(d) => {
             if let Some(tl::enums::Document::Document(doc)) = &d.document {
@@ -1333,7 +1503,10 @@ fn copy_media(message: &tl::types::Message) -> Result<Option<tl::enums::InputMed
                     .into(),
                 ));
             }
-            Err(kit::fail("这种消息没法复制，可以改用 forward 定时转发"))
+            Err(kit::fail(kit::tr(
+                "This message type cannot be copied; use forward instead",
+                "这种消息没法复制，可以改用 forward 定时转发",
+            )))
         }
         tl::enums::MessageMedia::Geo(g) => {
             if let tl::enums::GeoPoint::Point(pt) = &g.geo {
@@ -1349,7 +1522,10 @@ fn copy_media(message: &tl::types::Message) -> Result<Option<tl::enums::InputMed
                     .into(),
                 ));
             }
-            Err(kit::fail("这种消息没法复制，可以改用 forward 定时转发"))
+            Err(kit::fail(kit::tr(
+                "This message type cannot be copied; use forward instead",
+                "这种消息没法复制，可以改用 forward 定时转发",
+            )))
         }
         tl::enums::MessageMedia::Venue(v) => {
             if let tl::enums::GeoPoint::Point(pt) = &v.geo {
@@ -1370,7 +1546,10 @@ fn copy_media(message: &tl::types::Message) -> Result<Option<tl::enums::InputMed
                     .into(),
                 ));
             }
-            Err(kit::fail("这种消息没法复制，可以改用 forward 定时转发"))
+            Err(kit::fail(kit::tr(
+                "This message type cannot be copied; use forward instead",
+                "这种消息没法复制，可以改用 forward 定时转发",
+            )))
         }
         tl::enums::MessageMedia::Contact(c) => Ok(Some(
             tl::types::InputMediaContact {
@@ -1420,16 +1599,26 @@ fn copy_media(message: &tl::types::Message) -> Result<Option<tl::enums::InputMed
                 .into(),
             ))
         }
-        _ => Err(kit::fail("这种消息没法复制，可以改用 forward 定时转发")),
+        _ => Err(kit::fail(kit::tr(
+            "This message type cannot be copied; use forward instead",
+            "这种消息没法复制，可以改用 forward 定时转发",
+        ))),
     }
 }
 
 async fn delete_matching(client: &Client, peer: &tl::enums::InputPeer, t: &Task) -> Result<usize, CmdError> {
     let Some(limit) = t.limit.trim().parse::<usize>().ok().filter(|&v| (1..=MAX_SCAN).contains(&v)) else {
-        return Err(kit::fail(format!("条数要在 1–{MAX_SCAN} 之间")));
+        return Err(kit::fail(if kit::is_zh() {
+            format!("条数要在 1–{MAX_SCAN} 之间")
+        } else {
+            format!("Count must be between 1 and {MAX_SCAN}")
+        }));
     };
     if t.regex.trim().is_empty() {
-        return Err(kit::fail("任务里没有正则表达式"));
+        return Err(kit::fail(kit::tr(
+            "Task has no regular expression",
+            "任务里没有正则表达式",
+        )));
     }
     let pattern = compile_regex(&t.regex)?;
     let messages = recent_messages(client, peer, limit).await?;
@@ -1497,9 +1686,9 @@ fn render_list<F: Fn(&Task) -> String>(
     now: SystemTime,
 ) -> String {
     let mut title = if all {
-        "全部定时任务".to_owned()
+        kit::tr("All Scheduled Tasks", "全部定时任务").to_owned()
     } else {
-        "当前对话的定时任务".to_owned()
+        kit::tr("Scheduled Tasks Here", "当前对话的定时任务").to_owned()
     };
     if !kind.is_empty() {
         title.push_str(" · ");
@@ -1507,13 +1696,27 @@ fn render_list<F: Fn(&Task) -> String>(
     }
     if tasks.is_empty() {
         let hint = if all {
-            format!("还没有，{} 看怎么添加", code(&format!("{prefix}help acron")))
-        } else {
+            if kit::is_zh() {
+                format!("还没有，{} 看怎么添加", code(&format!("{prefix}help acron")))
+            } else {
+                format!(
+                    "None yet; see {} for how to add one",
+                    code(&format!("{prefix}help acron"))
+                )
+            }
+        } else if kit::is_zh() {
             format!("还没有，{} 看全部", code(&format!("{prefix}acron la")))
+        } else {
+            format!("None yet; use {} to view all", code(&format!("{prefix}acron la")))
         };
         return format!("⏰ <b>{title}</b>\n\n{hint}");
     }
-    let mut lines = vec![format!("⏰ <b>{title}</b>（{} 个）", tasks.len())];
+    let header = if kit::is_zh() {
+        format!("⏰ <b>{title}</b>（{} 个）", tasks.len())
+    } else {
+        format!("⏰ <b>{title}</b> ({})", tasks.len())
+    };
+    let mut lines = vec![header];
     for disabled in [false, true] {
         let group_tasks: Vec<&Task> = tasks.iter().filter(|t| t.disabled == disabled).collect();
         if group_tasks.is_empty() {
@@ -1534,82 +1737,163 @@ fn task_lines(t: &Task, prefix: &str, chat: &str, now: SystemTime) -> Vec<String
     if !t.remark.is_empty() {
         head.push_str(&format!(" · {}", escape(&t.remark)));
     }
-    let mut lines = vec![head, format!("对话：{chat}")];
+    let mut lines = vec![head, format!("{}{chat}", kit::tr("Chat: ", "对话："))];
     if !t.disabled {
         let cid = kit::or_default(&t.chat_id, &t.chat);
         if !t.msg_id.is_empty() {
-            lines.push(format!("消息：{}", message_link(cid, &t.msg_id)));
+            lines.push(format!(
+                "{}{}",
+                kit::tr("Message: ", "消息："),
+                message_link(cid, &t.msg_id)
+            ));
         }
         if !t.from_chat_id.is_empty() && !t.from_msg_id.is_empty() {
-            lines.push(format!("源消息：{}", message_link(&t.from_chat_id, &t.from_msg_id)));
+            lines.push(format!(
+                "{}{}",
+                kit::tr("Source: ", "源消息："),
+                message_link(&t.from_chat_id, &t.from_msg_id)
+            ));
         }
         if !t.reply_to.is_empty() && t.kind == "forward" {
-            lines.push(format!("话题：{}", message_link(cid, &t.reply_to)));
+            lines.push(format!(
+                "{}{}",
+                kit::tr("Topic: ", "话题："),
+                message_link(cid, &t.reply_to)
+            ));
         } else if !t.reply_to.is_empty() && matches!(t.kind.as_str(), "send" | "cmd" | "copy") {
-            lines.push(format!("回复：{}", message_link(cid, &t.reply_to)));
+            lines.push(format!(
+                "{}{}",
+                kit::tr("Reply: ", "回复："),
+                message_link(cid, &t.reply_to)
+            ));
         }
         if let Some(next) = next_run(&t.cron, now) {
-            lines.push(format!("下次执行：{}", format_time(next)));
+            lines.push(format!(
+                "{}{}",
+                kit::tr("Next run: ", "下次执行："),
+                format_time(next)
+            ));
         }
     }
     if let Some(at) = parse_millis(&t.last_run_at) {
-        lines.push(format!("上次执行：{}", format_time(at)));
+        lines.push(format!(
+            "{}{}",
+            kit::tr("Last run: ", "上次执行："),
+            format_time(at)
+        ));
     }
     if !t.last_result.is_empty() {
-        lines.push(format!("结果：{}", escape(&t.last_result)));
+        lines.push(format!(
+            "{}{}",
+            kit::tr("Result: ", "结果："),
+            escape(&t.last_result)
+        ));
     }
     if !t.last_error.is_empty() {
-        lines.push(format!("错误：{}", escape(&t.last_error)));
+        lines.push(format!(
+            "{}{}",
+            kit::tr("Error: ", "错误："),
+            escape(&t.last_error)
+        ));
     }
-    lines.push(format!("复制：{}", copy_html(t, prefix)));
+    lines.push(format!(
+        "{}{}",
+        kit::tr("Copy: ", "复制："),
+        copy_html(t, prefix)
+    ));
     lines
 }
 
 fn not_found(inv: &Invocation, id: &str) -> CmdError {
-    kit::fail(format!(
-        "没有 ID 是 {id} 的定时任务，{}acron la 可以看全部",
-        inv.prefix()
-    ))
+    kit::fail(if kit::is_zh() {
+        format!(
+            "没有 ID 是 {id} 的定时任务，{}acron la 可以看全部",
+            inv.prefix()
+        )
+    } else {
+        format!(
+            "No scheduled task with ID {id}; use {}acron la to list all",
+            inv.prefix()
+        )
+    })
 }
 
 fn help(prefix: &str) -> String {
     let p = escape(prefix);
     let c = |text: &str| format!("<code>{p}acron {}</code>", escape(text));
-    format!(
-        "⏰ <b>定时任务</b>\n\n\
-         按六段 Cron 定时发送、复制、转发、删除、置顶消息，或者执行命令。Cron 依次是 秒 分 时 日 月 星期，按北京时间；下面的 {} 是每天 2 点。\n\n\
-         对话写数字 ID、@用户名或 me（收藏夹）。send、copy、cmd 可以在对话后面加「|消息 ID」回复那条消息，论坛里写话题 ID 就发进那个话题；forward 后面只能写话题 ID。末尾都可以加备注。\n\n\
-         <b>发送</b>\n\
-         • {} 回复一条文字消息，到时间把这段文字连同格式发到对话\n\
-         • {} 回复一条消息，到时间复制过去，不带转发来源，图片和文件也行\n\
-         • {} 回复一条消息，到时间转发过去\n\n\
-         <b>执行命令</b>\n\
-         命令写在第二行，到时间发到对话，再按当前的前缀和别名执行。比如每天 2 点备份：\n\
-         <pre>{p}acron cmd 0 0 2 * * * me 定时备份\n{p}bf</pre>\n\
-         列表里的结果写明是「已提交执行命令」还是「已发送命令（未执行：原因）」。\n\n\
-         <b>删除与置顶</b>\n\
-         • {} 删除一条消息\n\
-         • {} 在最近 100 条消息里删除文字匹配正则的；条数 1–1000，正则写成 /模式/标志 或只写模式，标志可用 i、m、s，不支持环视和反向引用\n\
-         • {} 置顶；两个数字依次是发不发通知、是不是只对自己置顶（私聊里），写 1|0，也收 true|false、yes|no\n\
-         • {} 取消置顶\n\n\
-         <b>管理</b>\n\
-         • {} 当前对话的任务；all 看全部，写类型（如 del）只看这一种；{} 同 ls all\n\
-         • {} 删除任务\n\
-         • {}、{} 关闭、开启任务（也收 disable、enable）",
-        code("0 0 2 * * *"),
-        c("send 0 0 2 * * * 对话 [备注]"),
-        c("copy 0 0 2 * * * 对话 [备注]"),
-        c("forward 0 0 2 * * * 对话 [备注]"),
-        c("del 0 0 2 * * * 对话 消息 ID [备注]"),
-        c("del_re 0 0 2 * * * 对话 100 /^test/i [备注]"),
-        c("pin 0 0 2 * * * 对话 消息 ID 1 0 [备注]"),
-        c("unpin 0 0 2 * * * 对话 消息 ID [备注]"),
-        c("ls [all] [类型]"),
-        c("la"),
-        c("rm ID"),
-        c("off ID"),
-        c("on ID"),
-    )
+    if kit::is_zh() {
+        format!(
+            "⏰ <b>定时任务</b>\n\n\
+             按六段 Cron 定时发送、复制、转发、删除、置顶消息，或者执行命令。Cron 依次是 秒 分 时 日 月 星期，按北京时间；下面的 {} 是每天 2 点。\n\n\
+             对话写数字 ID、@用户名或 me（收藏夹）。send、copy、cmd 可以在对话后面加「|消息 ID」回复那条消息，论坛里写话题 ID 就发进那个话题；forward 后面只能写话题 ID。末尾都可以加备注。\n\n\
+             <b>发送</b>\n\
+             • {} 回复一条文字消息，到时间把这段文字连同格式发到对话\n\
+             • {} 回复一条消息，到时间复制过去，不带转发来源，图片和文件也行\n\
+             • {} 回复一条消息，到时间转发过去\n\n\
+             <b>执行命令</b>\n\
+             命令写在第二行，到时间发到对话，再按当前的前缀和别名执行。比如每天 2 点备份：\n\
+             <pre>{p}acron cmd 0 0 2 * * * me 定时备份\n{p}bf</pre>\n\
+             列表里的结果写明是「已提交执行命令」还是「已发送命令（未执行：原因）」。\n\n\
+             <b>删除与置顶</b>\n\
+             • {} 删除一条消息\n\
+             • {} 在最近 100 条消息里删除文字匹配正则的；条数 1–1000，正则写成 /模式/标志 或只写模式，标志可用 i、m、s，不支持环视和反向引用\n\
+             • {} 置顶；两个数字依次是发不发通知、是不是只对自己置顶（私聊里），写 1|0，也收 true|false、yes|no\n\
+             • {} 取消置顶\n\n\
+             <b>管理</b>\n\
+             • {} 当前对话的任务；all 看全部，写类型（如 del）只看这一种；{} 同 ls all\n\
+             • {} 删除任务\n\
+             • {}、{} 关闭、开启任务（也收 disable、enable）",
+            code("0 0 2 * * *"),
+            c("send 0 0 2 * * * 对话 [备注]"),
+            c("copy 0 0 2 * * * 对话 [备注]"),
+            c("forward 0 0 2 * * * 对话 [备注]"),
+            c("del 0 0 2 * * * 对话 消息 ID [备注]"),
+            c("del_re 0 0 2 * * * 对话 100 /^test/i [备注]"),
+            c("pin 0 0 2 * * * 对话 消息 ID 1 0 [备注]"),
+            c("unpin 0 0 2 * * * 对话 消息 ID [备注]"),
+            c("ls [all] [类型]"),
+            c("la"),
+            c("rm ID"),
+            c("off ID"),
+            c("on ID"),
+        )
+    } else {
+        format!(
+            "⏰ <b>Scheduled Tasks</b>\n\n\
+             Schedule sending, copying, forwarding, deleting, pinning messages, or running commands with a 6-field Cron expression (sec min hour day month weekday, UTC+8); {} below means 02:00 daily.\n\n\
+             Chat can be a numeric ID, @username, or me (Saved Messages). For send/copy/cmd, append \"|msg_id\" to reply (or topic ID in forums); forward only accepts a topic ID. Optional remarks go at the end.\n\n\
+             <b>Messages</b>\n\
+             • {} Reply to a text message to send its text and formatting on schedule\n\
+             • {} Reply to any message to copy it without forward header (media supported)\n\
+             • {} Reply to a message to forward it on schedule\n\n\
+             <b>Commands</b>\n\
+             Put the command on the second line; it is sent to the chat and dispatched using current prefixes/aliases (e.g. daily backup at 02:00):\n\
+             <pre>{p}acron cmd 0 0 2 * * * me backup\n{p}bf</pre>\n\
+             Task list shows whether it was queued or sent without execution.\n\n\
+             <b>Delete &amp; Pin</b>\n\
+             • {} Delete a message\n\
+             • {} Delete messages matching regex within last 1–1000 messages (/pattern/flags or pattern; flags: i, m, s; no lookaround/backreferences)\n\
+             • {} Pin a message; flags are notify and pm-only (1|0, true|false, yes|no)\n\
+             • {} Unpin a message\n\n\
+             <b>Management</b>\n\
+             • {} List tasks in current chat (add all or task type to filter); {} equals ls all\n\
+             • {} Remove a task\n\
+             • {}, {} Disable or enable a task (also accepts disable/enable)",
+            code("0 0 2 * * *"),
+            c("send 0 0 2 * * * chat [remark]"),
+            c("copy 0 0 2 * * * chat [remark]"),
+            c("forward 0 0 2 * * * chat [remark]"),
+            c("del 0 0 2 * * * chat msg_id [remark]"),
+            c("del_re 0 0 2 * * * chat 100 /^test/i [remark]"),
+            c("pin 0 0 2 * * * chat msg_id 1 0 [remark]"),
+            c("unpin 0 0 2 * * * chat msg_id [remark]"),
+            c("ls [all] [type]"),
+            c("la"),
+            c("rm ID"),
+            c("off ID"),
+            c("on ID"),
+        )
+    }
 }
 
 pub fn register(app: &Arc<App>) {
@@ -1628,18 +1912,21 @@ pub fn register(app: &Arc<App>) {
         serial: Mutex::new(()),
     });
     let s_cmd = Arc::clone(&svc);
-    app.registry.register(Command {
-        name: COMMAND_NAME.into(),
-        group: group::MEDIA.into(),
-        description: "定时发送、删除消息或执行命令".into(),
-        usage: "类型 Cron 对话 [参数]".into(),
-        help_fn: Some(Arc::new(help)),
-        handle: Arc::new(move |inv| {
-            let s = Arc::clone(&s_cmd);
-            Box::pin(async move { s.handle(&inv).await })
-        }),
-        ..Default::default()
-    });
+    app.registry.register(
+        Command {
+            name: COMMAND_NAME.into(),
+            group: group::MEDIA.into(),
+            description: "Schedule messages and commands".into(),
+            usage: "type cron chat [args]".into(),
+            help_fn: Some(Arc::new(help)),
+            handle: Arc::new(move |inv| {
+                let s = Arc::clone(&s_cmd);
+                Box::pin(async move { s.handle(&inv).await })
+            }),
+            ..Default::default()
+        }
+        .zh("定时发送、删除消息或执行命令", "类型 Cron 对话 [参数]"),
+    );
 
     let s_job = Arc::clone(&svc);
     app.on_ready(Arc::new(move |app, cancel| {
@@ -1724,8 +2011,8 @@ mod tests {
         assert_eq!(st.tasks[1].chat_id, "42");
         let html = render_list(&st.tasks, true, "", ".", |t| code(&t.chat), UNIX_EPOCH + Duration::from_millis(1759200000000));
         parse_html(&html, None).unwrap();
-        assert!(html.contains("（4 个）"));
-        assert!(html.contains("复制：<code>.acron send 0 0 8 * * * me 早安</code>"));
+        assert!(html.contains(" (4)"));
+        assert!(html.contains("Copy: <code>.acron send 0 0 8 * * * me 早安</code>"));
     }
 
     struct FakeTg {
@@ -1910,7 +2197,7 @@ mod tests {
         }).unwrap();
         svc.execute(&tok, &client, "1").await;
         assert!(fake.deletes.lock().unwrap().is_empty());
-        assert!(svc.read().unwrap().tasks[0].last_error.contains("另一个对话"));
+        assert!(svc.read().unwrap().tasks[0].last_error.contains("different chat"));
 
         // 2. Send preserves IP and saves chatId
         kit::update_ok(&svc.store, |s| {
@@ -1946,9 +2233,9 @@ mod tests {
         svc.execute(&tok, &client, "3").await;
         assert_eq!(dispatched.lock().unwrap().len(), 2);
         let st = svc.read().unwrap();
-        assert_eq!(st.tasks[0].last_result, "已提交执行命令");
-        assert!(st.tasks[1].last_result.starts_with("已发送命令（未执行："));
-        assert!(st.tasks[2].last_error.contains("命令是 .acron 本身"));
+        assert_eq!(st.tasks[0].last_result, "Command queued for execution");
+        assert!(st.tasks[1].last_result.starts_with("Command sent (not executed:"));
+        assert!(st.tasks[2].last_error.contains("invokes .acron itself"));
 
         // 4. Add rejects self invocation (alias/prefix)
         let mk_inv = |text: &str, reply_to: i32| {
@@ -1971,7 +2258,7 @@ mod tests {
             }
         };
         let err = svc.handle(&mk_inv(".acron cmd 0 0 2 * * * me\n.ac ls", 0)).await.unwrap_err();
-        assert!(err.to_string().contains("不能是 .acron"));
+        assert!(err.to_string().contains("cannot be .acron"));
 
         // 5. del_re matching
         {
@@ -1992,8 +2279,8 @@ mod tests {
         svc.execute(&tok, &client, "2").await;
         assert_eq!(fake.deletes.lock().unwrap()[0].id, vec![4]);
         let st2 = svc.read().unwrap();
-        assert_eq!(st2.tasks[0].last_result, "匹配并删除 1 条");
-        assert_eq!(st2.tasks[1].last_error, "条数要在 1–1000 之间");
+        assert_eq!(st2.tasks[0].last_result, "Matched and deleted 1 message(s)");
+        assert_eq!(st2.tasks[1].last_error, "Count must be between 1 and 1000");
 
         let _ = std::fs::remove_dir_all(dir);
     }

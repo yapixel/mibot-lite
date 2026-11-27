@@ -985,7 +985,10 @@ async fn current_self(client: &Client) -> Result<tl::types::User, CmdError> {
             return Ok(u);
         }
     }
-    Err(kit::fail("读不到账号自己的资料"))
+    Err(kit::fail(kit::tr(
+        "Failed to read own profile",
+        "读不到账号自己的资料",
+    )))
 }
 
 struct AcnCall<'a> {
@@ -1035,14 +1038,28 @@ impl AcnCall<'_> {
             self.service
                 .apply(&self.inv.cancel, &self.inv.client, &self.user_id, true)
                 .await
-                .map_err(|e| kit::fail_with("开启后首次更新失败", mibot_command::UserError::new(e.to_string())))?;
-            self.inv.edit_text("✅ 动态昵称已开启").await?;
+                .map_err(|e| {
+                    kit::fail_with(
+                        kit::tr("Failed to update name after enabling", "开启后首次更新失败"),
+                        mibot_command::UserError::new(e.to_string()),
+                    )
+                })?;
+            self.inv
+                .edit_text(kit::tr("✅ Auto name enabled", "✅ 动态昵称已开启"))
+                .await?;
         } else {
             self.service
                 .restore(&self.inv.client, &self.user)
                 .await
-                .map_err(|e| kit::fail_with("恢复原始昵称失败", e))?;
-            self.inv.edit_text("✅ 动态昵称已关闭").await?;
+                .map_err(|e| {
+                    kit::fail_with(
+                        kit::tr("Failed to restore original name", "恢复原始昵称失败"),
+                        e,
+                    )
+                })?;
+            self.inv
+                .edit_text(kit::tr("✅ Auto name disabled", "✅ 动态昵称已关闭"))
+                .await?;
         }
         Ok(())
     }
@@ -1054,7 +1071,13 @@ impl AcnCall<'_> {
             _ => "time",
         };
         self.change(|u| u.mode = next.into()).await?;
-        self.inv.edit(&format!("✅ 显示模式已设为 {}", code(next))).await?;
+        self.inv
+            .edit(&if kit::is_zh() {
+                format!("✅ 显示模式已设为 {}", code(next))
+            } else {
+                format!("✅ Display mode set to {}", code(next))
+            })
+            .await?;
         Ok(())
     }
 
@@ -1063,9 +1086,17 @@ impl AcnCall<'_> {
         match value.as_str() {
             "" => {
                 let p = escape(self.inv.prefix());
-                self.inv.edit(&format!(
-                    "🌍 <b>时区管理</b>\n\n• <code>{p}acn tz Asia/Shanghai</code> 设置时区\n• <code>{p}acn tz list</code> 时区列表\n• <code>{p}acn tz on|off</code> 显示控制\n• <code>{p}acn tz format GMT</code> 格式设置"
-                )).await?;
+                self.inv
+                    .edit(&if kit::is_zh() {
+                        format!(
+                            "🌍 <b>时区管理</b>\n\n• <code>{p}acn tz Asia/Shanghai</code> 设置时区\n• <code>{p}acn tz list</code> 时区列表\n• <code>{p}acn tz on|off</code> 显示控制\n• <code>{p}acn tz format GMT</code> 格式设置"
+                        )
+                    } else {
+                        format!(
+                            "🌍 <b>Timezone</b>\n\n• <code>{p}acn tz Asia/Shanghai</code> set timezone\n• <code>{p}acn tz list</code> list examples\n• <code>{p}acn tz on|off</code> toggle display\n• <code>{p}acn tz format GMT</code> set format"
+                        )
+                    })
+                    .await?;
                 return Ok(());
             }
             "list" => {
@@ -1079,7 +1110,13 @@ impl AcnCall<'_> {
                     u.display_order = with_component(&u.display_order, "timezone", on);
                 })
                 .await?;
-                self.inv.edit_text(&format!("✅ 时区显示已{}", kit::on_off_text(on))).await?;
+                self.inv
+                    .edit_text(&if kit::is_zh() {
+                        format!("✅ 时区显示已{}", kit::on_off_text(on))
+                    } else {
+                        format!("✅ Timezone display turned {}", kit::on_off_text(on))
+                    })
+                    .await?;
                 return Ok(());
             }
             "format" => return self.timezone_format().await,
@@ -1087,26 +1124,43 @@ impl AcnCall<'_> {
         }
         let zone = if value == "set" { self.inv.raw_after(2) } else { self.inv.raw_after(1) }.trim().to_owned();
         if !valid_zone(&zone) {
-            return Err(kit::fail("无效的时区标识符"));
+            return Err(kit::fail(kit::tr(
+                "Invalid timezone identifier",
+                "无效的时区标识符",
+            )));
         }
         self.change(|u| u.timezone = zone.clone()).await?;
-        self.inv.edit(&format!("✅ 时区已更新为：{}", code(&zone))).await?;
+        self.inv
+            .edit(&if kit::is_zh() {
+                format!("✅ 时区已更新为：{}", code(&zone))
+            } else {
+                format!("✅ Timezone updated to {}", code(&zone))
+            })
+            .await?;
         Ok(())
     }
 
     async fn timezone_format(&self) -> CmdResult {
         let fmt_str = self.inv.raw_after(2).trim().to_owned();
         if fmt_str.is_empty() {
-            self.inv.edit(&format!(
-                "🌐 <b>时区格式设置</b>\n当前：{}\n可用：GMT, UTC, simp, offset, custom:文字",
-                code(kit::or_default(&self.user.timezone_format, "GMT"))
-            )).await?;
+            let cur = code(kit::or_default(&self.user.timezone_format, "GMT"));
+            self.inv
+                .edit(&if kit::is_zh() {
+                    format!(
+                        "🌐 <b>时区格式设置</b>\n当前：{cur}\n可用：GMT, UTC, simp, offset, custom:文字"
+                    )
+                } else {
+                    format!(
+                        "🌐 <b>Timezone Format</b>\nCurrent: {cur}\nOptions: GMT, UTC, simp, offset, custom:text"
+                    )
+                })
+                .await?;
             return Ok(());
         }
         let lower = fmt_str.to_ascii_lowercase();
         let custom = lower.starts_with("custom:") && fmt_str.len() > 7;
         if !custom && !matches!(lower.as_str(), "gmt" | "utc" | "simp" | "offset") {
-            return Err(kit::fail("无效的时区格式"));
+            return Err(kit::fail(kit::tr("Invalid timezone format", "无效的时区格式")));
         }
         self.change(|u| {
             u.timezone_format = if custom {
@@ -1116,7 +1170,9 @@ impl AcnCall<'_> {
             };
         })
         .await?;
-        self.inv.edit_text("✅ 时区格式已更新").await?;
+        self.inv
+            .edit_text(kit::tr("✅ Timezone format updated", "✅ 时区格式已更新"))
+            .await?;
         Ok(())
     }
 
@@ -1124,14 +1180,46 @@ impl AcnCall<'_> {
         let arg = self.inv.arg(1).to_ascii_lowercase();
         let is_emoji = self.sub == "emoji";
         let (label, usage, current) = if is_emoji {
-            ("时钟表情", format!("用法：{}acn emoji on|off", self.inv.prefix()), self.user.show_clock_emoji)
+            (
+                kit::tr("Clock Emoji", "时钟表情"),
+                if kit::is_zh() {
+                    format!("用法：{}acn emoji on|off", self.inv.prefix())
+                } else {
+                    format!("Usage: {}acn emoji on|off", self.inv.prefix())
+                },
+                self.user.show_clock_emoji,
+            )
         } else {
-            ("时间显示", format!("用法：{}acn time on|off 或 {}acn time 12|24", self.inv.prefix(), self.inv.prefix()), self.user.show_time())
+            (
+                kit::tr("Time Display", "时间显示"),
+                if kit::is_zh() {
+                    format!(
+                        "用法：{}acn time on|off 或 {}acn time 12|24",
+                        self.inv.prefix(),
+                        self.inv.prefix()
+                    )
+                } else {
+                    format!(
+                        "Usage: {}acn time on|off or {}acn time 12|24",
+                        self.inv.prefix(),
+                        self.inv.prefix()
+                    )
+                },
+                self.user.show_time(),
+            )
         };
         if arg.is_empty() {
-            let mut text = format!("🏷 <b>{label}</b>\n当前：{}", code(kit::on_off_text(current)));
+            let mut text = if kit::is_zh() {
+                format!("🏷 <b>{label}</b>\n当前：{}", code(kit::on_off_text(current)))
+            } else {
+                format!("🏷 <b>{label}</b>\nCurrent: {}", code(kit::on_off_text(current)))
+            };
             if !is_emoji {
-                text.push_str(&format!("\n时间制式：{}", code(&format!("{} 小时制", hour_format_of(&self.user)))));
+                text.push_str(&if kit::is_zh() {
+                    format!("\n时间制式：{}", code(&format!("{} 小时制", hour_format_of(&self.user))))
+                } else {
+                    format!("\nHour format: {}", code(&format!("{}-hour", hour_format_of(&self.user))))
+                });
             }
             text.push_str(&format!("\n{}", escape(&usage)));
             self.inv.edit(&text).await?;
@@ -1146,8 +1234,15 @@ impl AcnCall<'_> {
             let fmt = raw_fmt.strip_suffix('h').unwrap_or(&raw_fmt);
             if fmt == "12" || fmt == "24" {
                 self.change(|u| u.hour_format = fmt.to_owned()).await?;
-                let ex = if fmt == "12" { "（如 02:32 PM）" } else { "（如 14:32）" };
-                self.inv.edit_text(&format!("✅ 已切换为 {fmt} 小时制{ex}")).await?;
+                self.inv
+                    .edit_text(&if kit::is_zh() {
+                        let ex = if fmt == "12" { "（如 02:32 PM）" } else { "（如 14:32）" };
+                        format!("✅ 已切换为 {fmt} 小时制{ex}")
+                    } else {
+                        let ex = if fmt == "12" { " (e.g. 02:32 PM)" } else { " (e.g. 14:32)" };
+                        format!("✅ Switched to {fmt}-hour format{ex}")
+                    })
+                    .await?;
                 return Ok(());
             }
         }
@@ -1165,18 +1260,36 @@ impl AcnCall<'_> {
             }
         })
         .await?;
-        self.inv.edit_text(&format!("✅ {label}已{}", kit::on_off_text(enabled))).await?;
+        self.inv
+            .edit_text(&if kit::is_zh() {
+                format!("✅ {label}已{}", kit::on_off_text(enabled))
+            } else {
+                format!("✅ {label} turned {}", kit::on_off_text(enabled))
+            })
+            .await?;
         Ok(())
     }
 
     async fn style(&self) -> CmdResult {
         let s = self.inv.arg(1).to_ascii_lowercase();
         if !ACN_STYLES.contains(&s.as_str()) {
-            self.inv.edit_text(&format!("可用样式：{}", ACN_STYLES.join(", "))).await?;
+            self.inv
+                .edit_text(&if kit::is_zh() {
+                    format!("可用样式：{}", ACN_STYLES.join(", "))
+                } else {
+                    format!("Available styles: {}", ACN_STYLES.join(", "))
+                })
+                .await?;
             return Ok(());
         }
         self.change(|u| u.text_style = s.clone()).await?;
-        self.inv.edit_text(&format!("✅ 文字样式已设为 {s}")).await?;
+        self.inv
+            .edit_text(&if kit::is_zh() {
+                format!("✅ 文字样式已设为 {s}")
+            } else {
+                format!("✅ Text style set to {s}")
+            })
+            .await?;
         Ok(())
     }
 
@@ -1187,7 +1300,14 @@ impl AcnCall<'_> {
             .filter(|s| !s.is_empty())
             .collect();
         if values.is_empty() {
-            self.inv.edit(&format!("当前顺序：{}", code(kit::or_default(&self.user.display_order, ACN_DEFAULT_ORDER)))).await?;
+            let ord = code(kit::or_default(&self.user.display_order, ACN_DEFAULT_ORDER));
+            self.inv
+                .edit(&if kit::is_zh() {
+                    format!("当前顺序：{ord}")
+                } else {
+                    format!("Current order: {ord}")
+                })
+                .await?;
             return Ok(());
         }
         let mut invalid = Vec::new();
@@ -1200,15 +1320,29 @@ impl AcnCall<'_> {
             }
         }
         if !invalid.is_empty() {
-            return Err(kit::fail(format!(
-                "无效组件：{}。可用的有：{}",
-                invalid.join("、"),
-                ACN_COMPONENTS.join("、")
-            )));
+            return Err(kit::fail(if kit::is_zh() {
+                format!(
+                    "无效组件：{}。可用的有：{}",
+                    invalid.join("、"),
+                    ACN_COMPONENTS.join("、")
+                )
+            } else {
+                format!(
+                    "Invalid component(s): {}. Available: {}",
+                    invalid.join(", "),
+                    ACN_COMPONENTS.join(", ")
+                )
+            }));
         }
         let joined = unique.join(",");
         self.change(|u| apply_order(u, &unique)).await?;
-        self.inv.edit(&format!("✅ 显示顺序已设为 {}", code(&joined))).await?;
+        self.inv
+            .edit(&if kit::is_zh() {
+                format!("✅ 显示顺序已设为 {}", code(&joined))
+            } else {
+                format!("✅ Display order set to {}", code(&joined))
+            })
+            .await?;
         Ok(())
     }
 
@@ -1222,10 +1356,19 @@ impl AcnCall<'_> {
                 .display_components
                 .clone()
                 .unwrap_or_else(|| show_defaults(&self.user.mode));
-            self.inv.edit(&format!(
-                "🎛️ <b>显示组件管理</b>\n\n当前组件：{}\n\n• <code>{p}acn show time on|off</code>\n• <code>{p}acn show text on|off</code>\n• <code>{p}acn show weather on|off</code>\n• <code>{p}acn show reset</code>",
-                code(&cur.join(", "))
-            )).await?;
+            self.inv
+                .edit(&if kit::is_zh() {
+                    format!(
+                        "🎛️ <b>显示组件管理</b>\n\n当前组件：{}\n\n• <code>{p}acn show time on|off</code>\n• <code>{p}acn show text on|off</code>\n• <code>{p}acn show weather on|off</code>\n• <code>{p}acn show reset</code>",
+                        code(&cur.join(", "))
+                    )
+                } else {
+                    format!(
+                        "🎛️ <b>Display Components</b>\n\nCurrent: {}\n\n• <code>{p}acn show time on|off</code>\n• <code>{p}acn show text on|off</code>\n• <code>{p}acn show weather on|off</code>\n• <code>{p}acn show reset</code>",
+                        code(&cur.join(", "))
+                    )
+                })
+                .await?;
             return Ok(());
         }
         if action == "reset" {
@@ -1233,84 +1376,138 @@ impl AcnCall<'_> {
                 .change(|u| u.display_components = Some(show_defaults(&u.mode)))
                 .await?;
             let list = updated.display_components.unwrap_or_default().join(", ");
-            self.inv.edit(&format!("✅ <b>已重置为默认值</b>\n\n当前模式默认组件：{}", code(&list))).await?;
+            self.inv
+                .edit(&if kit::is_zh() {
+                    format!("✅ <b>已重置为默认值</b>\n\n当前模式默认组件：{}", code(&list))
+                } else {
+                    format!("✅ <b>Reset to defaults</b>\n\nDefault components for current mode: {}", code(&list))
+                })
+                .await?;
             return Ok(());
         }
         if !matches!(action.as_str(), "time" | "text" | "weather") {
-            return Err(kit::fail("acn show 只能管理 time、text、weather"));
+            return Err(kit::fail(kit::tr(
+                "acn show only manages time, text, and weather",
+                "acn show 只能管理 time、text、weather",
+            )));
         }
         if target != "on" && target != "off" {
-            return Err(kit::fail(format!("请指定 on 或 off，用法：{}acn show {action} on|off", self.inv.prefix())));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("请指定 on 或 off，用法：{}acn show {action} on|off", self.inv.prefix())
+            } else {
+                format!("Specify on or off: {}acn show {action} on|off", self.inv.prefix())
+            }));
         }
         if action == "weather" && target == "on" && self.user.weather_location.trim().is_empty() {
-            return Err(kit::fail(format!("请先设置天气地点，用法：{}acn weather set 北京", self.inv.prefix())));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("请先设置天气地点，用法：{}acn weather set 北京", self.inv.prefix())
+            } else {
+                format!("Set a weather location first: {}acn weather set London", self.inv.prefix())
+            }));
         }
         let on = target == "on";
         let updated = self.change(|u| toggle_shown(u, &action, on)).await?;
         let list = updated.display_components.unwrap_or_default().join(", ");
-        self.inv.edit(&format!(
-            "✅ <b>组件已{}</b>\n当前组件：{}",
-            kit::on_off_text(on),
-            code(&list)
-        )).await?;
+        self.inv
+            .edit(&if kit::is_zh() {
+                format!("✅ <b>组件已{}</b>\n当前组件：{}", kit::on_off_text(on), code(&list))
+            } else {
+                format!("✅ <b>Component turned {}</b>\nCurrent: {}", kit::on_off_text(on), code(&list))
+            })
+            .await?;
         Ok(())
     }
 
     async fn config(&self) -> CmdResult {
         let u = &self.user;
         let count = self.doc.random_texts.len();
+        let none = kit::tr("None", "无");
         let next_text = if count > 0 {
             ((u.text_index.rem_euclid(count as isize)) + 1).to_string()
         } else {
-            "无".into()
+            none.into()
         };
+        let not_fetched = kit::tr("Not fetched", "尚未获取");
         let weather_time = if u.weather_cache_ts > 0 {
             DateTime::<Utc>::from_timestamp_millis(u.weather_cache_ts)
                 .map(|d| d.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
-                .unwrap_or_else(|| "尚未获取".into())
+                .unwrap_or_else(|| not_fetched.into())
         } else {
-            "尚未获取".into()
+            not_fetched.into()
         };
-        let rows = [
-            ("用户", u.user_id.as_str()),
-            ("自动更新", kit::on_off_text(u.enabled)),
-            ("原始姓名", u.original_first_name.as_str()),
-            ("原始姓氏", kit::or_default(&u.original_last_name, "无")),
-            ("模式", u.mode.as_str()),
-            ("时区", u.timezone.as_str()),
-            ("时间显示", kit::on_off_text(u.show_time())),
-            ("时间制式", if u.hour_format == "12" { "12 小时制" } else { "24 小时制" }),
-            ("时钟表情", kit::on_off_text(u.show_clock_emoji)),
-            ("时区显示", kit::on_off_text(u.show_timezone)),
-            ("时区格式", kit::or_default(&u.timezone_format, "GMT")),
-            ("文字样式", kit::or_default(&u.text_style, "normal")),
-            ("组件顺序", kit::or_default(&u.display_order, ACN_DEFAULT_ORDER)),
-            ("文案数", &count.to_string()),
-            ("下条文案序号", &next_text),
-            ("天气显示", kit::on_off_text(u.weather_enabled)),
-            ("天气地点", kit::or_default(&u.weather_location, "未设置")),
-            ("天气预览", kit::or_default(&u.weather_compact, "暂无缓存")),
-            ("天气更新时间", &weather_time),
-            ("昵称更新时间", kit::or_default(&u.last_update, "尚未更新")),
-        ];
-        let mut lines = vec!["🔧 <b>你的配置</b>".to_owned()];
+        let unset = kit::tr("Unset", "未设置");
+        let no_cache = kit::tr("No cache", "暂无缓存");
+        let never = kit::tr("Never", "尚未更新");
+        let count_s = count.to_string();
+        let rows = if kit::is_zh() {
+            [
+                ("用户", u.user_id.as_str()),
+                ("自动更新", kit::on_off_text(u.enabled)),
+                ("原始姓名", u.original_first_name.as_str()),
+                ("原始姓氏", kit::or_default(&u.original_last_name, none)),
+                ("模式", u.mode.as_str()),
+                ("时区", u.timezone.as_str()),
+                ("时间显示", kit::on_off_text(u.show_time())),
+                ("时间制式", if u.hour_format == "12" { "12 小时制" } else { "24 小时制" }),
+                ("时钟表情", kit::on_off_text(u.show_clock_emoji)),
+                ("时区显示", kit::on_off_text(u.show_timezone)),
+                ("时区格式", kit::or_default(&u.timezone_format, "GMT")),
+                ("文字样式", kit::or_default(&u.text_style, "normal")),
+                ("组件顺序", kit::or_default(&u.display_order, ACN_DEFAULT_ORDER)),
+                ("文案数", &count_s),
+                ("下条文案序号", &next_text),
+                ("天气显示", kit::on_off_text(u.weather_enabled)),
+                ("天气地点", kit::or_default(&u.weather_location, unset)),
+                ("天气预览", kit::or_default(&u.weather_compact, no_cache)),
+                ("天气更新时间", &weather_time),
+                ("昵称更新时间", kit::or_default(&u.last_update, never)),
+            ]
+        } else {
+            [
+                ("User", u.user_id.as_str()),
+                ("Auto-update", kit::on_off_text(u.enabled)),
+                ("First name", u.original_first_name.as_str()),
+                ("Last name", kit::or_default(&u.original_last_name, none)),
+                ("Mode", u.mode.as_str()),
+                ("Timezone", u.timezone.as_str()),
+                ("Time display", kit::on_off_text(u.show_time())),
+                ("Hour format", if u.hour_format == "12" { "12-hour" } else { "24-hour" }),
+                ("Clock emoji", kit::on_off_text(u.show_clock_emoji)),
+                ("Timezone display", kit::on_off_text(u.show_timezone)),
+                ("Timezone format", kit::or_default(&u.timezone_format, "GMT")),
+                ("Text style", kit::or_default(&u.text_style, "normal")),
+                ("Component order", kit::or_default(&u.display_order, ACN_DEFAULT_ORDER)),
+                ("Texts count", &count_s),
+                ("Next text index", &next_text),
+                ("Weather display", kit::on_off_text(u.weather_enabled)),
+                ("Weather location", kit::or_default(&u.weather_location, unset)),
+                ("Weather preview", kit::or_default(&u.weather_compact, no_cache)),
+                ("Weather updated", &weather_time),
+                ("Name updated", kit::or_default(&u.last_update, never)),
+            ]
+        };
+        let sep = if kit::is_zh() { "：" } else { ": " };
+        let mut lines = vec![kit::tr("🔧 <b>Your Config</b>", "🔧 <b>你的配置</b>").to_owned()];
         for (k, v) in rows {
-            lines.push(format!("{}：{}", escape(k), code(v)));
+            lines.push(format!("{}{sep}{}", escape(k), code(v)));
         }
         self.inv.edit(&lines.join("\n")).await?;
         Ok(())
     }
 
     async fn update_now(&self) -> CmdResult {
+        let fail_lbl = || kit::tr("Update failed", "更新失败");
         let ok = self
             .service
             .apply(&self.inv.cancel, &self.inv.client, &self.user_id, true)
             .await
-            .map_err(|e| kit::fail_with("更新失败", mibot_command::UserError::new(e.to_string())))?;
+            .map_err(|e| kit::fail_with(fail_lbl(), mibot_command::UserError::new(e.to_string())))?;
         if !ok {
-            return Err(kit::fail("更新失败"));
+            return Err(kit::fail(fail_lbl()));
         }
-        self.inv.edit_text("✅ 昵称已手动更新").await?;
+        self.inv
+            .edit_text(kit::tr("✅ Profile name updated", "✅ 昵称已手动更新"))
+            .await?;
         Ok(())
     }
 
@@ -1319,8 +1516,18 @@ impl AcnCall<'_> {
         self.service
             .restore(&self.inv.client, &self.user)
             .await
-            .map_err(|e| kit::fail_with("恢复原始昵称失败", e))?;
-        self.inv.edit_text("✅ 已恢复原始昵称并关闭自动更新").await?;
+            .map_err(|e| {
+                kit::fail_with(
+                    kit::tr("Failed to restore original name", "恢复原始昵称失败"),
+                    e,
+                )
+            })?;
+        self.inv
+            .edit_text(kit::tr(
+                "✅ Restored original name and disabled auto-update",
+                "✅ 已恢复原始昵称并关闭自动更新",
+            ))
+            .await?;
         Ok(())
     }
 
@@ -1329,7 +1536,11 @@ impl AcnCall<'_> {
         match action.as_str() {
             "list" => {
                 if self.doc.random_texts.is_empty() {
-                    return self.inv.edit_text("还没有随机文本").await.map_err(Into::into);
+                    return self
+                        .inv
+                        .edit_text(kit::tr("No random texts yet", "还没有随机文本"))
+                        .await
+                        .map_err(Into::into);
                 }
                 let lines: Vec<String> = self
                     .doc
@@ -1343,7 +1554,9 @@ impl AcnCall<'_> {
             }
             "clear" => {
                 kit::update_ok(&self.service.store, |d| d.random_texts.clear())?;
-                self.inv.edit_text("✅ 所有文本已清空").await?;
+                self.inv
+                    .edit_text(kit::tr("✅ All texts cleared", "✅ 所有文本已清空"))
+                    .await?;
                 Ok(())
             }
             "add" => {
@@ -1355,7 +1568,10 @@ impl AcnCall<'_> {
                     .map(str::to_owned)
                     .collect();
                 if additions.is_empty() {
-                    return Err(kit::fail("没有可添加的文案（每条最长 50 字符）"));
+                    return Err(kit::fail(kit::tr(
+                        "No valid text to add (max 50 chars per line)",
+                        "没有可添加的文案（每条最长 50 字符）",
+                    )));
                 }
                 let mut added = 0usize;
                 kit::update_ok(&self.service.store, |d| {
@@ -1368,21 +1584,29 @@ impl AcnCall<'_> {
                         added += 1;
                     }
                 })?;
-                self.inv.edit_text(&format!("✅ 已添加 {added} 条")).await?;
+                self.inv
+                    .edit_text(&if kit::is_zh() {
+                        format!("✅ 已添加 {added} 条")
+                    } else {
+                        format!("✅ Added {added} text(s)")
+                    })
+                    .await?;
                 Ok(())
             }
             "del" => {
                 let s = self.inv.arg(2);
                 let idx = (!s.is_empty()).then_some(s).and_then(|v| v.parse::<usize>().ok());
                 let Some(idx) = idx.filter(|&i| i >= 1 && i <= self.doc.random_texts.len()) else {
-                    return Err(kit::fail("无效的序号"));
+                    return Err(kit::fail(kit::tr("Invalid index", "无效的序号")));
                 };
                 kit::update_ok(&self.service.store, |d| {
                     if idx <= d.random_texts.len() {
                         d.random_texts.remove(idx - 1);
                     }
                 })?;
-                self.inv.edit_text("✅ 文本已删除").await?;
+                self.inv
+                    .edit_text(kit::tr("✅ Text deleted", "✅ 文本已删除"))
+                    .await?;
                 Ok(())
             }
             "on" | "off" => {
@@ -1404,7 +1628,13 @@ impl AcnCall<'_> {
                     u.display_order = with_component(&u.display_order, "text", enabled);
                 })
                 .await?;
-                self.inv.edit_text(&format!("✅ 随机文本已{}", kit::on_off_text(enabled))).await?;
+                self.inv
+                    .edit_text(&if kit::is_zh() {
+                        format!("✅ 随机文本已{}", kit::on_off_text(enabled))
+                    } else {
+                        format!("✅ Random text turned {}", kit::on_off_text(enabled))
+                    })
+                    .await?;
                 Ok(())
             }
             _ => Err(kit::usage(self.inv.prefix(), "acn text add|list|del|clear|on|off")),
@@ -1423,16 +1653,29 @@ impl AcnCall<'_> {
                     u.weather_cache_ts = now_ms;
                 })?;
             }
-            self.inv.edit(&format!(
-                "天气：{}\n地点：{}\n预览：{}",
-                kit::on_off_text(self.user.weather_enabled),
-                escape(kit::or_default(&self.user.weather_location, "未设置")),
-                escape(kit::or_default(&preview, "暂无缓存"))
-            )).await?;
+            let unset = kit::tr("Unset", "未设置");
+            let no_cache = kit::tr("No cache", "暂无缓存");
+            self.inv
+                .edit(&if kit::is_zh() {
+                    format!(
+                        "天气：{}\n地点：{}\n预览：{}",
+                        kit::on_off_text(self.user.weather_enabled),
+                        escape(kit::or_default(&self.user.weather_location, unset)),
+                        escape(kit::or_default(&preview, no_cache))
+                    )
+                } else {
+                    format!(
+                        "Weather: {}\nLocation: {}\nPreview: {}",
+                        kit::on_off_text(self.user.weather_enabled),
+                        escape(kit::or_default(&self.user.weather_location, unset)),
+                        escape(kit::or_default(&preview, no_cache))
+                    )
+                })
+                .await?;
             return Ok(());
         }
         if action == "on" && self.user.weather_location.is_empty() {
-            return Err(kit::fail("请先设置地点"));
+            return Err(kit::fail(kit::tr("Set a location first", "请先设置地点")));
         }
         if action == "on" || action == "off" {
             let on = action == "on";
@@ -1441,12 +1684,14 @@ impl AcnCall<'_> {
                 u.display_order = with_component(&u.display_order, "weather", on);
             })
             .await?;
-            self.inv.edit_text("✅ 天气配置已更新").await?;
+            self.inv
+                .edit_text(kit::tr("✅ Weather settings updated", "✅ 天气配置已更新"))
+                .await?;
             return Ok(());
         }
         let loc = if action == "set" { self.inv.raw_after(2) } else { self.inv.raw_after(1) }.trim().to_owned();
         if loc.is_empty() {
-            return Err(kit::fail("请提供地点"));
+            return Err(kit::fail(kit::tr("Provide a location", "请提供地点")));
         }
         self.change(|u| {
             u.weather_location = loc;
@@ -1456,7 +1701,9 @@ impl AcnCall<'_> {
             u.display_order = with_component(&u.display_order, "weather", true);
         })
         .await?;
-        self.inv.edit_text("✅ 天气配置已更新").await?;
+        self.inv
+            .edit_text(kit::tr("✅ Weather settings updated", "✅ 天气配置已更新"))
+            .await?;
         Ok(())
     }
 }
@@ -1468,7 +1715,10 @@ async fn acn_save(inv: &Invocation, service: &AcnService, user_id: &str) -> CmdR
             if inv.cancel.is_cancelled() {
                 e
             } else {
-                kit::fail_with("读取当前昵称失败", mibot_command::UserError::new(e.to_string()))
+                kit::fail_with(
+                    kit::tr("Failed to read current name", "读取当前昵称失败"),
+                    mibot_command::UserError::new(e.to_string()),
+                )
             }
         })?;
     let mut first = false;
@@ -1483,18 +1733,40 @@ async fn acn_save(inv: &Invocation, service: &AcnService, user_id: &str) -> CmdR
         }
         saved = cur.clone();
     })?;
-    let names = format!(
-        "姓名：{}\n姓氏：{}",
-        code(&saved.original_first_name),
-        code(kit::or_default(&saved.original_last_name, "无"))
-    );
-    if first {
-        inv.edit(&format!(
-            "🎉 <b>昵称已保存</b>\n\n{names}\n\n接下来用 {} 开启自动更新。",
-            code(&format!("{}acn on", inv.prefix()))
-        )).await?;
+    let none = kit::tr("None", "无");
+    let names = if kit::is_zh() {
+        format!(
+            "姓名：{}\n姓氏：{}",
+            code(&saved.original_first_name),
+            code(kit::or_default(&saved.original_last_name, none))
+        )
     } else {
-        inv.edit(&format!("✅ <b>原始昵称已更新</b>，其他设置保留\n\n{names}")).await?;
+        format!(
+            "First name: {}\nLast name: {}",
+            code(&saved.original_first_name),
+            code(kit::or_default(&saved.original_last_name, none))
+        )
+    };
+    if first {
+        inv.edit(&if kit::is_zh() {
+            format!(
+                "🎉 <b>昵称已保存</b>\n\n{names}\n\n接下来用 {} 开启自动更新。",
+                code(&format!("{}acn on", inv.prefix()))
+            )
+        } else {
+            format!(
+                "🎉 <b>Original Name Saved</b>\n\n{names}\n\nEnable auto-update with {}.",
+                code(&format!("{}acn on", inv.prefix()))
+            )
+        })
+        .await?;
+    } else {
+        inv.edit(&if kit::is_zh() {
+            format!("✅ <b>原始昵称已更新</b>，其他设置保留\n\n{names}")
+        } else {
+            format!("✅ <b>Original name updated</b>, other settings kept\n\n{names}")
+        })
+        .await?;
     }
     Ok(())
 }
@@ -1509,9 +1781,14 @@ async fn acn_handle(inv: &Invocation, service: &AcnService) -> CmdResult {
     match sub.as_str() {
         "status" => {
             let enabled = usize::from(doc.users.get(&user_id).is_some_and(|u| u.enabled));
-            let running = if enabled > 0 { "运行中" } else { "已停止" };
             return inv
-                .edit(&format!("📊 自动更新：{}\n开启的用户：{}", code(running), code(&enabled.to_string())))
+                .edit(&if kit::is_zh() {
+                    let running = if enabled > 0 { "运行中" } else { "已停止" };
+                    format!("📊 自动更新：{}\n开启的用户：{}", code(running), code(&enabled.to_string()))
+                } else {
+                    let running = if enabled > 0 { "running" } else { "stopped" };
+                    format!("📊 Auto-update: {}\nEnabled users: {}", code(running), code(&enabled.to_string()))
+                })
                 .await
                 .map_err(Into::into);
         }
@@ -1519,7 +1796,11 @@ async fn acn_handle(inv: &Invocation, service: &AcnService) -> CmdResult {
         _ => {}
     }
     let Some(user) = doc.users.get(&user_id).cloned().filter(|u| !u.original_first_name.is_empty()) else {
-        return Err(kit::fail(format!("请先 {}acn save", inv.prefix())));
+        return Err(kit::fail(if kit::is_zh() {
+            format!("请先 {}acn save", inv.prefix())
+        } else {
+            format!("Run {}acn save first", inv.prefix())
+        }));
     };
     let call = AcnCall {
         inv,
@@ -1542,15 +1823,25 @@ async fn acn_handle(inv: &Invocation, service: &AcnService) -> CmdResult {
         "config" => call.config().await,
         "update" | "now" => call.update_now().await,
         "reset" => call.reset().await,
-        _ => Err(kit::fail(format!("未知子命令：{sub}，{}acn help 看用法", inv.prefix()))),
+        _ => Err(kit::fail(if kit::is_zh() {
+            format!("未知子命令：{sub}，{}acn help 看用法", inv.prefix())
+        } else {
+            format!("Unknown subcommand: {sub}; run {}acn help for usage", inv.prefix())
+        })),
     }
 }
 
 fn acn_help(prefix: &str) -> String {
     let p = escape(prefix);
-    format!(
-        "🏷 <b>自动昵称</b>\n\n<b>快速开始</b>\n1. <code>{p}acn save</code> 保存当前昵称（首次必须）\n2. <code>{p}acn on</code> 开启，之后每分钟自动更新\n\n<b>基础</b>\n• <code>{p}acn on</code> / <code>off</code> 开关\n• <code>{p}acn mode</code> 循环切换 time → text → both\n• <code>{p}acn update</code> 立即更新一次\n• <code>{p}acn reset</code> 恢复原始昵称并停用\n• <code>{p}acn status</code> / <code>config</code> 查看状态\n\n<b>时区</b>\n• <code>{p}acn tz Asia/Shanghai</code> 设置时区\n• <code>{p}acn tz on</code> / <code>off</code> 是否显示时区\n• <code>{p}acn tz format GMT|UTC|simp|offset|custom:文字</code>\n\n<b>外观</b>\n• <code>{p}acn emoji on</code> / <code>off</code> 时钟表情\n• <code>{p}acn time on</code> / <code>off</code> 时间显示\n• <code>{p}acn time 12</code> / <code>24</code> 12 或 24 小时制\n• <code>{p}acn style normal|italic|double|sans|mono|outline</code>\n• <code>{p}acn order name,text,time,weather,emoji,timezone</code>（同时开关其中的时间、表情、时区）\n• <code>{p}acn show time|text|weather on</code> / <code>off</code> 只显示选中的组件，<code>{p}acn show reset</code> 恢复\n\n<b>文案</b>\n• <code>{p}acn text add 摸鱼中</code>（支持多行）\n• <code>{p}acn text list</code> / <code>del 序号</code> / <code>clear</code>\n• <code>{p}acn text on</code> / <code>off</code>\n\n<b>天气</b>\n• <code>{p}acn weather set 北京</code> 设置地点并开启\n• <code>{p}acn weather on</code> / <code>off</code>\n天气缓存 30 分钟。"
-    )
+    if kit::is_zh() {
+        format!(
+            "🏷 <b>自动昵称</b>\n\n<b>快速开始</b>\n1. <code>{p}acn save</code> 保存当前昵称（首次必须）\n2. <code>{p}acn on</code> 开启，之后每分钟自动更新\n\n<b>基础</b>\n• <code>{p}acn on</code> / <code>off</code> 开关\n• <code>{p}acn mode</code> 循环切换 time → text → both\n• <code>{p}acn update</code> 立即更新一次\n• <code>{p}acn reset</code> 恢复原始昵称并停用\n• <code>{p}acn status</code> / <code>config</code> 查看状态\n\n<b>时区</b>\n• <code>{p}acn tz Asia/Shanghai</code> 设置时区\n• <code>{p}acn tz on</code> / <code>off</code> 是否显示时区\n• <code>{p}acn tz format GMT|UTC|simp|offset|custom:文字</code>\n\n<b>外观</b>\n• <code>{p}acn emoji on</code> / <code>off</code> 时钟表情\n• <code>{p}acn time on</code> / <code>off</code> 时间显示\n• <code>{p}acn time 12</code> / <code>24</code> 12 或 24 小时制\n• <code>{p}acn style normal|italic|double|sans|mono|outline</code>\n• <code>{p}acn order name,text,time,weather,emoji,timezone</code>（同时开关其中的时间、表情、时区）\n• <code>{p}acn show time|text|weather on</code> / <code>off</code> 只显示选中的组件，<code>{p}acn show reset</code> 恢复\n\n<b>文案</b>\n• <code>{p}acn text add 摸鱼中</code>（支持多行）\n• <code>{p}acn text list</code> / <code>del 序号</code> / <code>clear</code>\n• <code>{p}acn text on</code> / <code>off</code>\n\n<b>天气</b>\n• <code>{p}acn weather set 北京</code> 设置地点并开启\n• <code>{p}acn weather on</code> / <code>off</code>\n天气缓存 30 分钟。"
+        )
+    } else {
+        format!(
+            "🏷 <b>Auto Profile Name</b>\n\n<b>Quick Start</b>\n1. <code>{p}acn save</code> save your current name (required first)\n2. <code>{p}acn on</code> enable automatic updates every minute\n\n<b>Basics</b>\n• <code>{p}acn on</code> / <code>off</code> toggle\n• <code>{p}acn mode</code> cycle time → text → both\n• <code>{p}acn update</code> update immediately\n• <code>{p}acn reset</code> restore original name and disable\n• <code>{p}acn status</code> / <code>config</code> view status\n\n<b>Timezone</b>\n• <code>{p}acn tz Asia/Shanghai</code> set timezone\n• <code>{p}acn tz on</code> / <code>off</code> toggle timezone display\n• <code>{p}acn tz format GMT|UTC|simp|offset|custom:text</code>\n\n<b>Appearance</b>\n• <code>{p}acn emoji on</code> / <code>off</code> clock emoji\n• <code>{p}acn time on</code> / <code>off</code> time display\n• <code>{p}acn time 12</code> / <code>24</code> 12- or 24-hour format\n• <code>{p}acn style normal|italic|double|sans|mono|outline</code>\n• <code>{p}acn order name,text,time,weather,emoji,timezone</code> (also toggles time, emoji, timezone)\n• <code>{p}acn show time|text|weather on</code> / <code>off</code> show only selected components; <code>{p}acn show reset</code> restore\n\n<b>Texts</b>\n• <code>{p}acn text add Working</code> (supports multiple lines)\n• <code>{p}acn text list</code> / <code>del index</code> / <code>clear</code>\n• <code>{p}acn text on</code> / <code>off</code>\n\n<b>Weather</b>\n• <code>{p}acn weather set London</code> set location and enable\n• <code>{p}acn weather on</code> / <code>off</code>\nWeather is cached for 30 minutes."
+        )
+    }
 }
 
 pub fn register(app: &Arc<App>) {
@@ -1562,19 +1853,22 @@ pub fn register(app: &Arc<App>) {
         svc.normalize_stored(app);
     }
     let s_cmd = Arc::clone(&svc);
-    app.registry.register(Command {
-        name: "acn".into(),
-        aliases: vec!["autochangename".into()],
-        group: group::ACCOUNT.into(),
-        description: "按时间或天气自动改昵称".into(),
-        usage: "[子命令]".into(),
-        help_fn: Some(Arc::new(acn_help)),
-        handle: Arc::new(move |inv| {
-            let s = Arc::clone(&s_cmd);
-            Box::pin(async move { acn_handle(&inv, &s).await })
-        }),
-        ..Default::default()
-    });
+    app.registry.register(
+        Command {
+            name: "acn".into(),
+            aliases: vec!["autochangename".into()],
+            group: group::ACCOUNT.into(),
+            description: "Auto-update profile name".into(),
+            usage: "[subcommand]".into(),
+            help_fn: Some(Arc::new(acn_help)),
+            handle: Arc::new(move |inv| {
+                let s = Arc::clone(&s_cmd);
+                Box::pin(async move { acn_handle(&inv, &s).await })
+            }),
+            ..Default::default()
+        }
+        .zh("按时间或天气自动改昵称", "[子命令]"),
+    );
 
     let s_job = Arc::clone(&svc);
     app.on_ready(Arc::new(move |app, cancel| {

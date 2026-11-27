@@ -220,6 +220,9 @@ impl App {
             &opts.root,
             proc_env.iter().map(|(k, v)| (k.as_str(), v.as_str())),
         );
+        if let Some(lang) = mibot_i18n::Lang::parse(env.get("MIBOT_LANG", "")) {
+            mibot_i18n::set(lang);
+        }
         if !opts.read_only {
             ensure_dir(&opts.root.join("data"))?;
         }

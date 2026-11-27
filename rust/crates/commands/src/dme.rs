@@ -253,17 +253,18 @@ impl Service {
                 &[("chat", &msg.chat_id), ("error", err)],
             );
         };
+        let fail_msg = || {
+            if kit::is_zh() {
+                format!("❌ 在「{title}」按触发词删除自己的消息失败，请检查权限、网络和 Telegram 限制")
+            } else {
+                format!("❌ Failed to delete own messages by trigger in \"{title}\"; check permissions, network, and Telegram limits")
+            }
+        };
         let cfg = match self.config() {
             Ok(c) => c,
             Err(err) => {
                 notify_fail(&err.to_string());
-                let _ = kit::send_self(
-                    &self.app.client,
-                    &escape(&format!(
-                        "❌ 在「{title}」按触发词删除自己的消息失败，请检查权限、网络和 Telegram 限制"
-                    )),
-                )
-                .await;
+                let _ = kit::send_self(&self.app.client, &escape(&fail_msg())).await;
                 return;
             }
         };
@@ -279,38 +280,30 @@ impl Service {
             Ok(r) => r,
             Err(err) => {
                 notify_fail(&err.to_string());
-                let _ = kit::send_self(
-                    &self.app.client,
-                    &escape(&format!(
-                        "❌ 在「{title}」按触发词删除自己的消息失败，请检查权限、网络和 Telegram 限制"
-                    )),
-                )
-                .await;
+                let _ = kit::send_self(&self.app.client, &escape(&fail_msg())).await;
                 return;
             }
         };
         if let Err(err) = run.sweep(t.count).await {
             if !cancel.is_cancelled() {
                 notify_fail(&err.to_string());
-                let _ = kit::send_self(
-                    &self.app.client,
-                    &escape(&format!(
-                        "❌ 在「{title}」按触发词删除自己的消息失败，请检查权限、网络和 Telegram 限制"
-                    )),
-                )
-                .await;
+                let _ = kit::send_self(&self.app.client, &escape(&fail_msg())).await;
             }
             return;
         }
         if run.deleted > 0 {
-            let _ = kit::send_self(
-                &self.app.client,
-                &escape(&format!(
+            let msg_text = if kit::is_zh() {
+                format!(
                     "✅ 「{title}」里有人发了触发词「{}」，已删除自己的 {} 条消息",
                     t.keyword, run.deleted
-                )),
-            )
-            .await;
+                )
+            } else {
+                format!(
+                    "✅ Trigger \"{}\" matched in \"{title}\"; deleted {} of your message(s)",
+                    t.keyword, run.deleted
+                )
+            };
+            let _ = kit::send_self(&self.app.client, &escape(&msg_text)).await;
         }
     }
 
@@ -327,13 +320,22 @@ impl Service {
         let anti = sub == "-f";
         let token = if anti { inv.arg(1) } else { inv.arg(0) };
         let Ok(count) = token.parse::<i32>() else {
-            return Err(kit::usage(inv.prefix(), "dme [-f] 条数（正整数）"));
+            return Err(kit::usage(
+                inv.prefix(),
+                kit::tr("dme [-f] count (positive integer)", "dme [-f] 条数（正整数）"),
+            ));
         };
         if !kit::is_digits(token) || count <= 0 {
-            return Err(kit::usage(inv.prefix(), "dme [-f] 条数（正整数）"));
+            return Err(kit::usage(
+                inv.prefix(),
+                kit::tr("dme [-f] count (positive integer)", "dme [-f] 条数（正整数）"),
+            ));
         }
         if !self.claim(&inv.message.chat_id) {
-            return Err(kit::fail("这个对话已有一个删除任务在执行，请等它完成"));
+            return Err(kit::fail(kit::tr(
+                "A delete task is already running in this chat; wait for it to finish",
+                "这个对话已有一个删除任务在执行，请等它完成",
+            )));
         }
         struct ClaimGuard<'a> {
             svc: &'a Service,
@@ -382,16 +384,19 @@ impl Service {
                 &[("error", &err.to_string())],
             );
             let title = self.app.peers.title(&inv.message.peer);
-            if kit::send_self(
-                &inv.client,
-                &escape(&format!(
-                    "❌ 在「{title}」删除自己的消息失败，请检查权限、网络和 Telegram 限制后重试"
-                )),
-            )
-            .await
-            .is_err()
+            let fail_text = if kit::is_zh() {
+                format!("❌ 在「{title}」删除自己的消息失败，请检查权限、网络和 Telegram 限制后重试")
+            } else {
+                format!("❌ Failed to delete own messages in \"{title}\"; check permissions, network, and Telegram limits")
+            };
+            if kit::send_self(&inv.client, &escape(&fail_text))
+                .await
+                .is_err()
             {
-                return Err(mibot_command::fail_with("删除失败", err));
+                return Err(mibot_command::fail_with(
+                    kit::tr("Delete failed", "删除失败"),
+                    err,
+                ));
             }
         }
         Ok(())
@@ -408,14 +413,18 @@ impl Service {
             return respond(inv, &text).await;
         }
         if inv.message.saved {
-            return Err(kit::fail(
+            return Err(kit::fail(kit::tr(
+                "Saved Messages has no incoming messages from others; add or remove triggers in the target chat",
                 "收藏夹里没有别人发消息，到要生效的对话里添加或删除触发词",
-            ));
+            )));
         }
         if sub == "rm" {
             let keyword = inv.raw_after(2).trim().to_owned();
             if keyword.is_empty() {
-                return Err(kit::usage(inv.prefix(), "dme kw rm 关键词"));
+                return Err(kit::usage(
+                    inv.prefix(),
+                    kit::tr("dme kw rm keyword", "dme kw rm 关键词"),
+                ));
             }
             let chat_id = inv.message.chat_id.clone();
             let kw_lower = keyword.clone();
@@ -433,17 +442,22 @@ impl Service {
                 Ok(())
             })?;
             if !removed {
-                return Err(kit::fail(format!(
-                    "这个对话没有这个触发词，{}dme kw 可以看全部",
-                    inv.prefix()
-                )));
+                return Err(kit::fail(if kit::is_zh() {
+                    format!("这个对话没有这个触发词，{}dme kw 可以看全部", inv.prefix())
+                } else {
+                    format!(
+                        "Trigger not found in this chat; use {}dme kw to list all",
+                        inv.prefix()
+                    )
+                }));
             }
             let title = self.app.peers.title(&inv.message.peer);
-            return respond(
-                inv,
-                &escape(&format!("✅ 已删除「{title}」的触发词「{keyword}」")),
-            )
-            .await;
+            let msg = if kit::is_zh() {
+                format!("✅ 已删除「{title}」的触发词「{keyword}」")
+            } else {
+                format!("✅ Removed trigger \"{keyword}\" from \"{title}\"")
+            };
+            return respond(inv, &escape(&msg)).await;
         }
 
         let trigger = parse_trigger(inv)?;
@@ -465,9 +479,11 @@ impl Service {
                 .filter(|t| t.chat_id == t_clone.chat_id)
                 .count();
             if chat_count >= MAX_CHAT_TRIGGERS {
-                return Err(kit::fail(format!(
-                    "一个对话最多 {MAX_CHAT_TRIGGERS} 个触发词，先用 {prefix}dme kw rm 删掉不用的"
-                )));
+                return Err(kit::fail(if kit::is_zh() {
+                    format!("一个对话最多 {MAX_CHAT_TRIGGERS} 个触发词，先用 {prefix}dme kw rm 删掉不用的")
+                } else {
+                    format!("At most {MAX_CHAT_TRIGGERS} triggers per chat; remove unused ones with {prefix}dme kw rm")
+                }));
             }
             cfg.triggers.push(t_clone);
             Ok(())
@@ -484,25 +500,41 @@ impl Service {
         }
         drop(_guard);
         let title = self.app.peers.title(&inv.message.peer);
-        respond(
-            inv,
-            &escape(&format!(
+        let msg = if kit::is_zh() {
+            format!(
                 "✅ 已在「{title}」添加触发词「{}」：别人发的消息包含它时，{}",
                 trigger.keyword,
                 describe_trigger(&trigger)
-            )),
-        )
-        .await
+            )
+        } else {
+            format!(
+                "✅ Added trigger \"{}\" in \"{title}\": when someone sends it, {}",
+                trigger.keyword,
+                describe_trigger(&trigger)
+            )
+        };
+        respond(inv, &escape(&msg)).await
     }
 
     fn list_chat(&self, msg: &Message) -> String {
-        let title = format!("🗑️ <b>{} 的触发词</b>\n", escape(&self.app.peers.title(&msg.peer)));
+        let escaped_title = escape(&self.app.peers.title(&msg.peer));
+        let title = if kit::is_zh() {
+            format!("🗑️ <b>{escaped_title} 的触发词</b>\n")
+        } else {
+            format!("🗑️ <b>Triggers in {escaped_title}</b>\n")
+        };
         let idx = self.current();
         let Some(list) = idx.by_chat.get(&msg.chat_id) else {
-            return format!("{title}这个对话还没有触发词");
+            return format!(
+                "{title}{}",
+                kit::tr("No triggers in this chat yet", "这个对话还没有触发词")
+            );
         };
         if list.is_empty() {
-            return format!("{title}这个对话还没有触发词");
+            return format!(
+                "{title}{}",
+                kit::tr("No triggers in this chat yet", "这个对话还没有触发词")
+            );
         }
         let rows: Vec<String> = list
             .iter()
@@ -514,7 +546,11 @@ impl Service {
     fn list_all(&self) -> Result<String, mibot_store::StoreError> {
         let cfg = self.store.read()?;
         if cfg.triggers.is_empty() {
-            return Ok("🗑️ <b>触发词</b>\n还没有触发词".into());
+            return Ok(kit::tr(
+                "🗑️ <b>Triggers</b>\nNo triggers yet",
+                "🗑️ <b>触发词</b>\n还没有触发词",
+            )
+            .into());
         }
         let mut order: Vec<String> = Vec::new();
         let mut by_chat: HashMap<String, Vec<DmeTrigger>> = HashMap::new();
@@ -524,7 +560,7 @@ impl Service {
             }
             by_chat.entry(t.chat_id.clone()).or_default().push(t);
         }
-        let mut sections = vec!["🗑️ <b>触发词</b>".to_owned()];
+        let mut sections = vec![kit::tr("🗑️ <b>Triggers</b>", "🗑️ <b>触发词</b>").to_owned()];
         for chat in order {
             let name = mibot_bot::peer_from_id(&chat)
                 .map(|p| self.app.peers.title(&p))
@@ -550,7 +586,10 @@ async fn respond(inv: &Invocation, html: &str) -> CmdResult {
 }
 
 fn parse_trigger(inv: &Invocation) -> Result<DmeTrigger, mibot_command::CmdError> {
-    let usage = kit::usage(inv.prefix(), "dme kw [-f] 条数 关键词");
+    let usage = kit::usage(
+        inv.prefix(),
+        kit::tr("dme kw [-f] count keyword", "dme kw [-f] 条数 关键词"),
+    );
     let anti = inv.arg(1).eq_ignore_ascii_case("-f");
     let idx = if anti { 2 } else { 1 };
     let token = inv.arg(idx);
@@ -568,7 +607,11 @@ fn parse_trigger(inv: &Invocation) -> Result<DmeTrigger, mibot_command::CmdError
         return Err(usage);
     }
     if keyword.chars().count() > MAX_KEYWORD_CHARS {
-        return Err(kit::fail(format!("触发词最多 {MAX_KEYWORD_CHARS} 个字")));
+        return Err(kit::fail(if kit::is_zh() {
+            format!("触发词最多 {MAX_KEYWORD_CHARS} 个字")
+        } else {
+            format!("Trigger keyword is limited to {MAX_KEYWORD_CHARS} characters")
+        }));
     }
     Ok(DmeTrigger {
         chat_id: inv.message.chat_id.clone(),
@@ -580,12 +623,18 @@ fn parse_trigger(inv: &Invocation) -> Result<DmeTrigger, mibot_command::CmdError
 
 fn describe_trigger(t: &DmeTrigger) -> String {
     let mut what = if t.count == ALL_MESSAGES {
-        "删掉自己在这里之前的全部消息".to_owned()
-    } else {
+        kit::tr(
+            "delete all your previous messages here",
+            "删掉自己在这里之前的全部消息",
+        )
+        .to_owned()
+    } else if kit::is_zh() {
         format!("删掉自己在这里之前的 {} 条消息", t.count)
+    } else {
+        format!("delete {} of your previous message(s) here", t.count)
     };
     if t.anti {
-        what.push_str("（先替换内容再删）");
+        what.push_str(kit::tr(" (replace content before deleting)", "（先替换内容再删）"));
     }
     what
 }
@@ -742,9 +791,10 @@ impl DmeRun {
         }
         let client = &self.app.client;
         if m.media.is_none() {
-            if m.message != "占位符"
+            let placeholder = kit::tr("placeholder", "占位符");
+            if m.message != placeholder
                 && client
-                    .edit_text(&self.peer, m.id, "占位符", true)
+                    .edit_text(&self.peer, m.id, placeholder, true)
                     .await
                     .is_err()
             {
@@ -1024,14 +1074,18 @@ impl DmeRun {
         );
         if self.failed > 0 || self.failed_edits > 0 {
             let title = self.app.peers.title(&self.message.peer);
-            let _ = kit::send_self(
-                &self.app.client,
-                &escape(&format!(
+            let msg = if kit::is_zh() {
+                format!(
                     "⚠️ 在「{title}」删除自己的消息：已删除 {} 条，删除失败 {} 条，防撤回编辑失败 {} 条",
                     self.deleted, self.failed, self.failed_edits
-                )),
-            )
-            .await;
+                )
+            } else {
+                format!(
+                    "⚠️ Deleting own messages in \"{title}\": deleted {}, failed {}, anti-recall edit failed {}",
+                    self.deleted, self.failed, self.failed_edits
+                )
+            };
+            let _ = kit::send_self(&self.app.client, &escape(&msg)).await;
         }
     }
 
@@ -1125,30 +1179,57 @@ fn file_reference_expired(err: &BotError) -> bool {
 pub fn help(prefix: &str) -> String {
     let p = escape(prefix);
     let c = |text: &str| format!("<code>{p}dme{text}</code>");
-    format!(
-        "🗑️ <b>智能防撤回删除</b>\n\n{} 快速删除自己的消息\n{} 替换文本和媒体后删除\n{} 删除全部可见的自己的消息\n\
-         普通数量单次最多 2000 条；仅处理命令之前的消息及当前话题。\n\
-         收藏夹直接删除；-f 模式下广播频道主直接按数量删除。\n\
-         防撤回编辑可能因消息类型、编辑时限或权限失败，不保证第三方副本被删除。\n\n\
-         <b>触发词</b>\n\
-         别人在对话里发的消息包含这个对话的触发词时，自动删掉自己在这里、那条消息之前的消息。\n\
-         • {} 在当前对话添加触发词，同一个词再加一次就改成新的条数\n\
-         • {} 触发时先替换内容再删\n\
-         • {} 当前对话的触发词（在收藏夹里发就列出全部）\n\
-         • {} 所有对话的触发词\n\
-         • {} 删除当前对话的触发词\n\
-         触发词只在添加它的对话里生效，不区分大小写；对话里任何人发出都会触发，自己发的不算。\
-         设置和查看触发词时，结果发到收藏夹，命令消息随即删掉，免得对话里的人看到触发词。\
-         每次触发删除之后，收藏夹里会收到一条说明。",
-        c(" 数量"),
-        c(" -f 数量"),
-        c(" 999999"),
-        c(" kw 条数 关键词"),
-        c(" kw -f 条数 关键词"),
-        c(" kw"),
-        c(" kw all"),
-        c(" kw rm 关键词"),
-    )
+    if kit::is_zh() {
+        format!(
+            "🗑️ <b>智能防撤回删除</b>\n\n{} 快速删除自己的消息\n{} 替换文本和媒体后删除\n{} 删除全部可见的自己的消息\n\
+             普通数量单次最多 2000 条；仅处理命令之前的消息及当前话题。\n\
+             收藏夹直接删除；-f 模式下广播频道主直接按数量删除。\n\
+             防撤回编辑可能因消息类型、编辑时限或权限失败，不保证第三方副本被删除。\n\n\
+             <b>触发词</b>\n\
+             别人在对话里发的消息包含这个对话的触发词时，自动删掉自己在这里、那条消息之前的消息。\n\
+             • {} 在当前对话添加触发词，同一个词再加一次就改成新的条数\n\
+             • {} 触发时先替换内容再删\n\
+             • {} 当前对话的触发词（在收藏夹里发就列出全部）\n\
+             • {} 所有对话的触发词\n\
+             • {} 删除当前对话的触发词\n\
+             触发词只在添加它的对话里生效，不区分大小写；对话里任何人发出都会触发，自己发的不算。\
+             设置和查看触发词时，结果发到收藏夹，命令消息随即删掉，免得对话里的人看到触发词。\
+             每次触发删除之后，收藏夹里会收到一条说明。",
+            c(" 数量"),
+            c(" -f 数量"),
+            c(" 999999"),
+            c(" kw 条数 关键词"),
+            c(" kw -f 条数 关键词"),
+            c(" kw"),
+            c(" kw all"),
+            c(" kw rm 关键词"),
+        )
+    } else {
+        format!(
+            "🗑️ <b>Smart Anti-Recall Delete</b>\n\n{} Quickly delete your messages\n{} Replace text and media before deleting\n{} Delete all your visible messages\n\
+             Normal count is capped at 2000 per run; only messages before the command in the current topic are processed.\n\
+             Deletes directly in Saved Messages; with -f, broadcast channel owners delete directly by count.\n\
+             Anti-recall edits may fail due to message type, edit timeout, or permissions; third-party copies are not guaranteed.\n\n\
+             <b>Triggers</b>\n\
+             Automatically deletes your earlier messages in the chat when someone else sends a configured trigger keyword.\n\
+             • {} Add a trigger in the current chat (re-adding updates the count)\n\
+             • {} Replace content before deleting when triggered\n\
+             • {} List triggers in current chat (lists all in Saved Messages)\n\
+             • {} List triggers across all chats\n\
+             • {} Remove a trigger in current chat\n\
+             Triggers are per-chat and case-insensitive; messages from yourself do not trigger them.\
+             Trigger management outputs go to Saved Messages and the command message is deleted.\
+             A summary is sent to Saved Messages after each triggered cleanup.",
+            c(" count"),
+            c(" -f count"),
+            c(" 999999"),
+            c(" kw count keyword"),
+            c(" kw -f count keyword"),
+            c(" kw"),
+            c(" kw all"),
+            c(" kw rm keyword"),
+        )
+    }
 }
 
 pub fn register(app: &Arc<App>) {
@@ -1158,20 +1239,23 @@ pub fn register(app: &Arc<App>) {
         s_offer.offer(msg, cancel)
     }));
     let s_cmd = Arc::clone(&s);
-    app.registry.register(Command {
-        name: "dme".into(),
-        group: group::MEDIA.into(),
-        description: "删除自己最近的消息".into(),
-        usage: "[-f] 条数|kw".into(),
-        help: help("."),
-        help_fn: Some(Arc::new(help)),
-        timeout: Some(Duration::ZERO),
-        handle: Arc::new(move |inv| {
-            let s = Arc::clone(&s_cmd);
-            Box::pin(async move { s.command(inv).await })
-        }),
-        ..Default::default()
-    });
+    app.registry.register(
+        Command {
+            name: "dme".into(),
+            group: group::MEDIA.into(),
+            description: "Delete your recent messages".into(),
+            usage: "[-f] count|kw".into(),
+            help: help("."),
+            help_fn: Some(Arc::new(help)),
+            timeout: Some(Duration::ZERO),
+            handle: Arc::new(move |inv| {
+                let s = Arc::clone(&s_cmd);
+                Box::pin(async move { s.command(inv).await })
+            }),
+            ..Default::default()
+        }
+        .zh("删除自己最近的消息", "[-f] 条数|kw"),
+    );
 }
 
 #[cfg(test)]

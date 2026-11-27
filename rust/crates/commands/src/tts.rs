@@ -227,14 +227,26 @@ fn api_error(resp: &Response) -> CmdError {
     }
     reason = mibot_command::truncate(&reason, 200);
     match resp.status {
-        401 | 403 => return kit::fail(format!("API Key 无效（{}）", resp.status)),
-        402 => return kit::fail("fish.audio 账户余额不足"),
+        401 | 403 => {
+            return kit::fail(if kit::is_zh() {
+                format!("API Key 无效（{}）", resp.status)
+            } else {
+                format!("Invalid API Key ({})", resp.status)
+            });
+        }
+        402 => return kit::fail(kit::tr("Insufficient fish.audio balance", "fish.audio 账户余额不足")),
         _ => {}
     }
     if reason.is_empty() {
-        kit::fail(format!("fish.audio 返回 HTTP {}", resp.status))
-    } else {
+        kit::fail(if kit::is_zh() {
+            format!("fish.audio 返回 HTTP {}", resp.status)
+        } else {
+            format!("fish.audio returned HTTP {}", resp.status)
+        })
+    } else if kit::is_zh() {
         kit::fail(format!("fish.audio 返回 HTTP {}：{reason}", resp.status))
+    } else {
+        kit::fail(format!("fish.audio returned HTTP {}: {reason}", resp.status))
     }
 }
 
@@ -259,7 +271,7 @@ async fn synthesize_with_endpoint(
         headers.insert("model".into(), config.model.clone());
     }
     let resp = tokio::select! {
-        _ = cancel.cancelled() => return Err(kit::fail("操作已取消")),
+        _ = cancel.cancelled() => return Err(kit::fail(kit::tr("Operation cancelled", "操作已取消"))),
         r = do_request(Request {
             method: Method::POST,
             url: target.to_owned(),
@@ -274,7 +286,10 @@ async fn synthesize_with_endpoint(
         return Err(api_error(&resp));
     }
     if resp.body.is_empty() {
-        return Err(kit::fail("fish.audio 返回了空的音频"));
+        return Err(kit::fail(kit::tr(
+            "fish.audio returned empty audio",
+            "fish.audio 返回了空的音频",
+        )));
     }
     Ok(resp.body)
 }
@@ -303,19 +318,35 @@ async fn download_cover(cancel: &CancellationToken, link: &str) -> Option<Vec<u8
 
 fn help(prefix: &str) -> String {
     let p = escape(prefix);
-    format!(
-        "🔊 <b>文字转语音</b>\n\n用 fish.audio 的角色声音念一段话，发成语音消息。\n\n\
-         • <code>{p}t 文本</code> 发语音；回复一条消息只发 <code>{p}t</code> 念那条消息\n\
-         • <code>{p}t song 歌名 歌手 文本</code> 做成带封面的 MP3，专辑名是当前角色\n\
-         • <code>{p}t fm 封面链接</code> 给当前角色设封面\n\
-         • <code>{p}ts [页码]</code> 看角色列表，<code>{p}ts 角色名</code> 切换，\
-         <code>{p}ts 角色名 模型 ID</code> 新增并切换\n\
-         • <code>{p}tk API密钥</code> 在收藏夹设置 API Key\n\
-         • <code>{p}t model [名称]</code> 看或设 fish.audio 的模型，如 s1、s2-pro、s2.1-pro；\
-         <code>{p}t model default</code> 交给接口决定\n\n\
-         API Key 在 https://fish.audio/ 申请，更多角色见 https://fish.audio/zh-CN/app/discovery/ 。\
-         一次最多 {MAX_TEXT} 字，表情和生僻符号会被去掉。只有你本人能用：按字数计费，不借给别人。"
-    )
+    if kit::is_zh() {
+        format!(
+            "🔊 <b>文字转语音</b>\n\n用 fish.audio 的角色声音念一段话，发成语音消息。\n\n\
+             • <code>{p}t 文本</code> 发语音；回复一条消息只发 <code>{p}t</code> 念那条消息\n\
+             • <code>{p}t song 歌名 歌手 文本</code> 做成带封面的 MP3，专辑名是当前角色\n\
+             • <code>{p}t fm 封面链接</code> 给当前角色设封面\n\
+             • <code>{p}ts [页码]</code> 看角色列表，<code>{p}ts 角色名</code> 切换，\
+             <code>{p}ts 角色名 模型 ID</code> 新增并切换\n\
+             • <code>{p}tk API密钥</code> 在收藏夹设置 API Key\n\
+             • <code>{p}t model [名称]</code> 看或设 fish.audio 的模型，如 s1、s2-pro、s2.1-pro；\
+             <code>{p}t model default</code> 交给接口决定\n\n\
+             API Key 在 https://fish.audio/ 申请，更多角色见 https://fish.audio/zh-CN/app/discovery/ 。\
+             一次最多 {MAX_TEXT} 字，表情和生僻符号会被去掉。只有你本人能用：按字数计费，不借给别人。"
+        )
+    } else {
+        format!(
+            "🔊 <b>Text to Speech</b>\n\nConvert text to a voice message using fish.audio voices.\n\n\
+             • <code>{p}t text</code> send voice; reply to a message with <code>{p}t</code> to read it\n\
+             • <code>{p}t song title artist text</code> create a tagged MP3 with cover art (album is current voice)\n\
+             • <code>{p}t fm cover_url</code> set cover image for current voice\n\
+             • <code>{p}ts [page]</code> list voices, <code>{p}ts name</code> switch, \
+             <code>{p}ts name model_id</code> add and switch\n\
+             • <code>{p}tk api_key</code> set API Key in Saved Messages\n\
+             • <code>{p}t model [name]</code> view or set fish.audio model (e.g. s1, s2-pro, s2.1-pro); \
+             <code>{p}t model default</code> let API choose\n\n\
+             Get an API Key at https://fish.audio/ and browse voices at https://fish.audio/zh-CN/app/discovery/ . \
+             Max {MAX_TEXT} chars per request; emojis and unsupported symbols are stripped. Owner-only (billed per character)."
+        )
+    }
 }
 
 struct Service {
@@ -344,14 +375,20 @@ impl Service {
             .map(|u| u.api_key.as_str())
             .unwrap_or("");
         if api_key.is_empty() {
-            return inv
-                .edit(&format!(
+            let prompt = if kit::is_zh() {
+                format!(
                     "❌ 还没设 API Key，先发 {}。\n\n{}",
                     code(&format!("{}tk 你的密钥", inv.prefix())),
                     help(inv.prefix()),
-                ))
-                .await
-                .map_err(Into::into);
+                )
+            } else {
+                format!(
+                    "❌ API Key is not set; send {} first.\n\n{}",
+                    code(&format!("{}tk your_key", inv.prefix())),
+                    help(inv.prefix()),
+                )
+            };
+            return inv.edit(&prompt).await.map_err(Into::into);
         }
         let song = inv.arg(0).eq_ignore_ascii_case("song");
         let (title, artist, mut text) = if song {
@@ -359,7 +396,10 @@ impl Service {
             let a = inv.arg(2).to_owned();
             let rest = inv.raw_after(3).trim().to_owned();
             if t.is_empty() || a.is_empty() {
-                return Err(kit::usage(inv.prefix(), "t song 歌名 歌手 文本"));
+                return Err(kit::usage(
+                    inv.prefix(),
+                    kit::tr("t song title artist text", "t song 歌名 歌手 文本"),
+                ));
             }
             (t, a, rest)
         } else {
@@ -376,24 +416,41 @@ impl Service {
         }
         text = clean_text(&text);
         if text.is_empty() {
-            return Err(kit::fail("去掉表情和符号之后没有能念的字了"));
+            return Err(kit::fail(kit::tr(
+                "No speakable text left after removing emojis and symbols",
+                "去掉表情和符号之后没有能念的字了",
+            )));
         }
         let count = text.chars().count();
         if count > MAX_TEXT {
             return inv
-                .edit_text(&format!("❌ 太长了：{count} 字，一次最多 {MAX_TEXT} 字"))
+                .edit_text(&if kit::is_zh() {
+                    format!("❌ 太长了：{count} 字，一次最多 {MAX_TEXT} 字")
+                } else {
+                    format!("❌ Too long: {count} characters (max {MAX_TEXT})")
+                })
                 .await
                 .map_err(Into::into);
         }
         let (role, voice_id) = config.voice(&self_id);
-        inv.edit_text(&format!("🔊 {role} 正在念…")).await?;
+        inv.edit_text(&if kit::is_zh() {
+            format!("🔊 {role} 正在念…")
+        } else {
+            format!("🔊 {role} is speaking…")
+        })
+        .await?;
         let target = std::env::var("MIBOT_FISH_ENDPOINT")
             .ok()
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| ENDPOINT.to_owned());
         let audio = synthesize_with_endpoint(&inv.cancel, &target, &config, api_key, &voice_id, &text)
             .await
-            .map_err(|e| kit::fail_with("合成失败", mibot_command::UserError::new(e.to_string())))?;
+            .map_err(|e| {
+                kit::fail_with(
+                    kit::tr("Synthesis failed", "合成失败"),
+                    mibot_command::UserError::new(e.to_string()),
+                )
+            })?;
         let peer = inv.client.input_peer(&inv.message.peer)?;
         let (data, options) = if song {
             let cover = download_cover(&inv.cancel, config.cover(&role)).await;
@@ -407,7 +464,7 @@ impl Service {
                 },
             )
             .await
-            .map_err(|e| kit::fail_with("音频处理失败", e))?;
+            .map_err(|e| kit::fail_with(kit::tr("Audio processing failed", "音频处理失败"), e))?;
             (
                 encoded.data,
                 MediaOptions {
@@ -430,7 +487,7 @@ impl Service {
         } else {
             let encoded = voice_ogg(&audio)
                 .await
-                .map_err(|e| kit::fail_with("音频处理失败", e))?;
+                .map_err(|e| kit::fail_with(kit::tr("Audio processing failed", "音频处理失败"), e))?;
             (
                 encoded.data,
                 MediaOptions {
@@ -464,23 +521,40 @@ impl Service {
             let names = config.role_names();
             let pages = names.len().div_ceil(SIZE).max(1);
             let page = page_parsed.unwrap_or(1).clamp(1, pages);
-            let mut lines = vec![
-                format!("🎭 <b>角色</b>（{} 个）· 第 {page}/{pages} 页", names.len()),
-                format!("当前：{}", escape(&current)),
-                String::new(),
-            ];
+            let mut lines = if kit::is_zh() {
+                vec![
+                    format!("🎭 <b>角色</b>（{} 个）· 第 {page}/{pages} 页", names.len()),
+                    format!("当前：{}", escape(&current)),
+                    String::new(),
+                ]
+            } else {
+                vec![
+                    format!("🎭 <b>Voices</b> ({}) · Page {page}/{pages}", names.len()),
+                    format!("Current: {}", escape(&current)),
+                    String::new(),
+                ]
+            };
             let start = (page - 1) * SIZE;
             let end = (page * SIZE).min(names.len());
             for (idx, n) in names[start..end].iter().enumerate() {
                 lines.push(format!("{}. {}", start + idx + 1, escape(n)));
             }
             lines.push(String::new());
-            lines.push(format!(
-                "{} 切换 · {} 新增 · {} 下一页",
-                code(&format!("{}ts 角色名", inv.prefix())),
-                code(&format!("{}ts 角色名 模型 ID", inv.prefix())),
-                code(&format!("{}ts 2", inv.prefix())),
-            ));
+            lines.push(if kit::is_zh() {
+                format!(
+                    "{} 切换 · {} 新增 · {} 下一页",
+                    code(&format!("{}ts 角色名", inv.prefix())),
+                    code(&format!("{}ts 角色名 模型 ID", inv.prefix())),
+                    code(&format!("{}ts 2", inv.prefix())),
+                )
+            } else {
+                format!(
+                    "{} switch · {} add · {} next page",
+                    code(&format!("{}ts name", inv.prefix())),
+                    code(&format!("{}ts name model_id", inv.prefix())),
+                    code(&format!("{}ts 2", inv.prefix())),
+                )
+            });
             return inv.edit(&lines.join("\n")).await.map_err(Into::into);
         }
         let name = inv.arg(0).to_owned();
@@ -488,14 +562,18 @@ impl Service {
         let added = !id.is_empty();
         if id.is_empty() {
             let Some(known) = config.merged_roles().get(&name).cloned() else {
-                return Err(kit::fail(format!(
-                    "没有这个角色：{name}。新增用 {}ts 角色名 模型 ID",
-                    inv.prefix()
-                )));
+                return Err(kit::fail(if kit::is_zh() {
+                    format!("没有这个角色：{name}。新增用 {}ts 角色名 模型 ID", inv.prefix())
+                } else {
+                    format!("Voice not found: {name}. Add with {}ts name model_id", inv.prefix())
+                }));
             };
             id = known;
         } else if !voice_id_re().is_match(&id) {
-            return Err(kit::fail("模型 ID 是 fish.audio 上 32 位的十六进制串"));
+            return Err(kit::fail(kit::tr(
+                "Model ID must be a 32-character hex string from fish.audio",
+                "模型 ID 是 fish.audio 上 32 位的十六进制串",
+            )));
         }
         self.store.update(|val| {
             if added {
@@ -507,17 +585,21 @@ impl Service {
             Ok::<(), mibot_store::StoreError>(())
         })?;
         if added {
-            inv.edit(&format!(
-                "✅ 已新增角色 {} 并切换过去（{}）",
-                escape(&name),
-                code(&id)
-            ))
+            inv.edit(&if kit::is_zh() {
+                format!("✅ 已新增角色 {} 并切换过去（{}）", escape(&name), code(&id))
+            } else {
+                format!("✅ Added and switched to voice {} ({})", escape(&name), code(&id))
+            })
             .await
             .map_err(Into::into)
         } else {
-            inv.edit(&format!("✅ 已切换到角色 {}", escape(&name)))
-                .await
-                .map_err(Into::into)
+            inv.edit(&if kit::is_zh() {
+                format!("✅ 已切换到角色 {}", escape(&name))
+            } else {
+                format!("✅ Switched to voice {}", escape(&name))
+            })
+            .await
+            .map_err(Into::into)
         }
     }
 
@@ -526,13 +608,19 @@ impl Service {
         if value.is_empty() {
             return Err(kit::usage(
                 inv.prefix(),
-                "tk API Key（在 https://fish.audio/ 申请）",
+                kit::tr(
+                    "tk API_KEY (get one at https://fish.audio/)",
+                    "tk API Key（在 https://fish.audio/ 申请）",
+                ),
             ));
         }
         if !inv.message.saved {
-            return Err(kit::fail("API Key 只能在收藏夹中配置"));
+            return Err(kit::fail(kit::tr(
+                "API Key can only be set in Saved Messages",
+                "API Key 只能在收藏夹中配置",
+            )));
         }
-        inv.edit_text(&kit::working("正在保存")).await?;
+        inv.edit_text(&kit::working(kit::tr("Saving", "正在保存"))).await?;
         let self_id = Self::self_id(inv);
         self.store.update(|cfg| {
             let u = cfg.users.entry(self_id.clone()).or_default();
@@ -543,12 +631,17 @@ impl Service {
             }
             Ok::<(), mibot_store::StoreError>(())
         })?;
-        inv.edit_text("✅ 已保存 API Key").await.map_err(Into::into)
+        inv.edit_text(kit::tr("✅ API Key saved", "✅ 已保存 API Key"))
+            .await
+            .map_err(Into::into)
     }
 
     async fn set_cover(&self, inv: &Invocation, link: &str) -> CmdResult {
         if !cover_link(link) {
-            return Err(kit::usage(inv.prefix(), "t fm https://图片链接"));
+            return Err(kit::usage(
+                inv.prefix(),
+                kit::tr("t fm https://image_url", "t fm https://图片链接"),
+            ));
         }
         let config = self.store.read()?;
         let (role, _) = config.voice(&Self::self_id(inv));
@@ -556,31 +649,45 @@ impl Service {
             val.covers.insert(role.clone(), link.to_owned());
             Ok::<(), mibot_store::StoreError>(())
         })?;
-        inv.edit_text(&format!("✅ 已给角色 {role} 设置封面"))
-            .await
-            .map_err(Into::into)
+        inv.edit_text(&if kit::is_zh() {
+            format!("✅ 已给角色 {role} 设置封面")
+        } else {
+            format!("✅ Cover image set for voice {role}")
+        })
+        .await
+        .map_err(Into::into)
     }
 
     async fn model(&self, inv: &Invocation, name: &str) -> CmdResult {
         if name.is_empty() {
             let config = self.store.read()?;
             let current = if config.model.is_empty() {
-                "未指定（接口默认）"
+                kit::tr("unset (API default)", "未指定（接口默认）")
             } else {
                 &config.model
             };
             return inv
-                .edit(&format!(
-                    "当前模型：{}\n可选如 s1、s2-pro、s2.1-pro、s2.1-pro-free，以 fish.audio 文档为准。",
-                    code(current)
-                ))
+                .edit(&if kit::is_zh() {
+                    format!(
+                        "当前模型：{}\n可选如 s1、s2-pro、s2.1-pro、s2.1-pro-free，以 fish.audio 文档为准。",
+                        code(current)
+                    )
+                } else {
+                    format!(
+                        "Current model: {}\nOptions include s1, s2-pro, s2.1-pro, s2.1-pro-free (see fish.audio docs).",
+                        code(current)
+                    )
+                })
                 .await
                 .map_err(Into::into);
         }
         let next = if name.eq_ignore_ascii_case("default") {
             String::new()
         } else if !model_re().is_match(name) {
-            return Err(kit::fail("模型名只能有字母、数字和 . _ -"));
+            return Err(kit::fail(kit::tr(
+                "Model name may only contain letters, digits, ., _, and -",
+                "模型名只能有字母、数字和 . _ -",
+            )));
         } else {
             name.to_owned()
         };
@@ -589,13 +696,20 @@ impl Service {
             Ok::<(), mibot_store::StoreError>(())
         })?;
         if next.is_empty() {
-            inv.edit_text("✅ 模型已改为由接口决定")
-                .await
-                .map_err(Into::into)
+            inv.edit_text(kit::tr(
+                "✅ Model reset to API default",
+                "✅ 模型已改为由接口决定",
+            ))
+            .await
+            .map_err(Into::into)
         } else {
-            inv.edit(&format!("✅ 模型已设为 {}", code(&next)))
-                .await
-                .map_err(Into::into)
+            inv.edit(&if kit::is_zh() {
+                format!("✅ 模型已设为 {}", code(&next))
+            } else {
+                format!("✅ Model set to {}", code(&next))
+            })
+            .await
+            .map_err(Into::into)
         }
     }
 }
@@ -611,41 +725,48 @@ pub fn register(app: &Arc<App>) {
         "t",
         &[],
         group::MEDIA,
-        "把文字转成语音",
-        "文本",
+        "Text to speech",
+        "text",
         help,
         move |inv| {
             let s = Arc::clone(&s1);
             Box::pin(async move { s.speak(&inv).await })
         },
-    );
+    )
+    .zh("把文字转成语音", "文本");
     cmd_t.timeout = Some(Duration::from_secs(180));
     cmd_t.free_text = true;
     app.registry.register(cmd_t);
-    app.registry.register(kit::make_cmd(
-        "ts",
-        &[],
-        group::MEDIA,
-        "管理语音合成的角色",
-        "[页码|角色名 [模型 ID]]",
-        help,
-        move |inv| {
-            let s = Arc::clone(&s2);
-            Box::pin(async move { s.roles(&inv).await })
-        },
-    ));
-    app.registry.register(kit::make_cmd(
-        "tk",
-        &[],
-        group::MEDIA,
-        "设置语音合成的 API Key",
-        "API Key",
-        help,
-        move |inv| {
-            let s = Arc::clone(&s3);
-            Box::pin(async move { s.key(&inv).await })
-        },
-    ));
+    app.registry.register(
+        kit::make_cmd(
+            "ts",
+            &[],
+            group::MEDIA,
+            "Manage TTS voices",
+            "[page|name [model_id]]",
+            help,
+            move |inv| {
+                let s = Arc::clone(&s2);
+                Box::pin(async move { s.roles(&inv).await })
+            },
+        )
+        .zh("管理语音合成的角色", "[页码|角色名 [模型 ID]]"),
+    );
+    app.registry.register(
+        kit::make_cmd(
+            "tk",
+            &[],
+            group::MEDIA,
+            "Set TTS API key",
+            "api_key",
+            help,
+            move |inv| {
+                let s = Arc::clone(&s3);
+                Box::pin(async move { s.key(&inv).await })
+            },
+        )
+        .zh("设置语音合成的 API Key", "API Key"),
+    );
 }
 
 #[cfg(test)]
@@ -712,9 +833,13 @@ mod tests {
         assert_eq!(doc.users["42"].api_key, "k");
 
         let help_txt = help(".");
-        for part in [".t 文本", ".t song", ".t fm", ".ts", ".tk", ".t model"] {
+        for part in [".t text", ".t song", ".t fm", ".ts", ".tk", ".t model"] {
             assert!(help_txt.contains(part));
         }
+        mibot_i18n::with_lang(mibot_i18n::Lang::Zh, || {
+            let help_zh = help(".");
+            assert!(help_zh.contains(".t 文本"));
+        });
     }
 
     #[tokio::test]
@@ -774,8 +899,8 @@ mod tests {
         assert!(req0.to_ascii_lowercase().contains("model: s1"));
 
         for (code_n, body, want) in [
-            (401, r#"{"message":"Unauthorized"}"#, "API Key 无效"),
-            (402, r#"{"message":"Insufficient balance"}"#, "余额不足"),
+            (401, r#"{"message":"Unauthorized"}"#, "Invalid API Key"),
+            (402, r#"{"message":"Insufficient balance"}"#, "Insufficient fish.audio balance"),
             (400, r#"{"message":"reference not found"}"#, "reference not found"),
             (500, "", "HTTP 500"),
         ] {
@@ -822,6 +947,6 @@ mod tests {
             foreign: false,
         };
         let err = svc.key(&inv).await.unwrap_err();
-        assert!(err.to_string().contains("收藏夹"));
+        assert!(err.to_string().contains("Saved Messages"));
     }
 }

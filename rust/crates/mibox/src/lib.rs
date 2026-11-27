@@ -3,29 +3,29 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum MiboxError {
-    #[error("不是 SQLite 数据库")]
+    #[error("not a SQLite database")]
     NotSqlite,
-    #[error("SQLite 页大小异常")]
+    #[error("invalid SQLite page size")]
     InvalidPageSize,
-    #[error("页号 {0} 超出文件")]
+    #[error("page {0} out of range")]
     PageOutOfRange(u32),
-    #[error("SQLite B 树有环")]
+    #[error("SQLite B-tree cycle detected")]
     BTreeCycle,
-    #[error("SQLite 单元数异常")]
+    #[error("invalid SQLite cell count")]
     InvalidCellCount,
-    #[error("SQLite 单元偏移异常")]
+    #[error("invalid SQLite cell offset")]
     InvalidCellOffset,
-    #[error("不是表 B 树页（类型 0x{0:02x}）")]
+    #[error("not a table B-tree page (kind 0x{0:02x})")]
     InvalidPageKind(u8),
-    #[error("SQLite 负载越界")]
+    #[error("SQLite payload out of bounds")]
     PayloadOutOfBounds,
-    #[error("SQLite 记录头越界")]
+    #[error("SQLite record header out of bounds")]
     RecordHeaderOutOfBounds,
-    #[error("SQLite 记录越界")]
+    #[error("SQLite record out of bounds")]
     RecordOutOfBounds,
-    #[error("表的根页号异常")]
+    #[error("invalid table root page")]
     InvalidTableRoot,
-    #[error("没有 {0} 表")]
+    #[error("table {0} not found")]
     TableNotFound(String),
 }
 

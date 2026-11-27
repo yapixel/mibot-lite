@@ -394,8 +394,9 @@ fn sum_detect_protocol(provider: &SumProvider) -> (String, bool) {
 
 fn sum_provider_endpoint(raw: &str, format: &str, endpoint: &str) -> Result<String, CmdError> {
     let target = provider_endpoint(raw, format, endpoint)?;
-    let base = Url::parse(raw).map_err(|_| fail("BaseURL 无效"))?;
-    let mut address = Url::parse(&target).map_err(|_| fail("BaseURL 无效"))?;
+    let base = Url::parse(raw).map_err(|_| fail(kit::tr("Invalid BaseURL", "BaseURL 无效")))?;
+    let mut address =
+        Url::parse(&target).map_err(|_| fail(kit::tr("Invalid BaseURL", "BaseURL 无效")))?;
     let configured_path = base.path().trim_end_matches('/');
     let mut prefix = address
         .path()
@@ -436,7 +437,10 @@ async fn sum_call_ai(
     timeout: Duration,
 ) -> Result<String, CmdError> {
     if assert_allowed_model(&provider.model).is_err() {
-        return Err(fail("配置模型被项目策略禁止，请更换模型"));
+        return Err(fail(kit::tr(
+            "Configured model is disallowed by project policy; please switch models",
+            "配置模型被项目策略禁止，请更换模型",
+        )));
     }
     let input = format!("{prompt}\n\n{messages}");
     let started = Instant::now();
@@ -561,10 +565,12 @@ async fn sum_call_ai(
 
     info.stage = "response".into();
     if !result.ok() {
-        let e = fail(format!(
-            "AI 调用失败：{}",
-            http_failure(result.status, &result.body, &secret)
-        ));
+        let detail = http_failure(result.status, &result.body, &secret);
+        let e = fail(if kit::is_zh() {
+            format!("AI 调用失败：{detail}")
+        } else {
+            format!("AI call failed: {detail}")
+        });
         return Err(info.failure(e, started, &secret));
     }
     info.stage = "decode".into();
@@ -611,17 +617,30 @@ fn resolve_backend(
                 models: Arc::clone(ai_svc),
             });
         }
-        return Err(fail(format!("未找到 AI 配置：{requested}")));
+        return Err(fail(if kit::is_zh() {
+            format!("未找到 AI 配置：{requested}")
+        } else {
+            format!("AI config not found: {requested}")
+        }));
     }
     if !name.is_empty() && db.ai_config.providers.contains_key(name) {
-        return Err(fail(format!("AI 配置 {name} 缺少 API Key")));
+        return Err(fail(if kit::is_zh() {
+            format!("AI 配置 {name} 缺少 API Key")
+        } else {
+            format!("AI config {name} is missing an API key")
+        }));
     }
     if !requested.is_empty() {
-        return Err(fail(format!("未找到 AI 配置：{requested}")));
+        return Err(fail(if kit::is_zh() {
+            format!("未找到 AI 配置：{requested}")
+        } else {
+            format!("AI config not found: {requested}")
+        }));
     }
-    Err(fail(
+    Err(fail(kit::tr(
+        "Add an AI config with sum config add, or configure a chat model with ai config add and ai model chat",
         "请先用 sum config add 添加 AI 配置，或用 ai config add 和 ai model chat 配置聊天模型",
-    ))
+    )))
 }
 
 impl SumBackend {
@@ -669,14 +688,16 @@ impl SumBackend {
 fn parse_sum_cron(spec: &str) -> Result<Cron, CmdError> {
     let fields: Vec<&str> = spec.split_whitespace().collect();
     if fields.len() != 5 && fields.len() != 6 {
-        return Err(fail("定时表达式无效"));
+        return Err(fail(kit::tr("Invalid cron expression", "定时表达式无效")));
     }
     let joined = fields.join(" ");
     let parser = CronParser::builder()
         .seconds(Seconds::Optional)
         .dom_and_dow(true)
         .build();
-    parser.parse(&joined).map_err(|_| fail("定时表达式无效"))
+    parser
+        .parse(&joined)
+        .map_err(|_| fail(kit::tr("Invalid cron expression", "定时表达式无效")))
 }
 
 fn sum_interval_cron(interval: &str) -> Result<String, CmdError> {
@@ -687,28 +708,40 @@ fn sum_interval_cron(interval: &str) -> Result<String, CmdError> {
         return Ok(spec);
     }
     let Some(caps) = INTERVAL_RE.captures(interval) else {
-        return Err(fail("间隔格式示例：30m、2h、1d，或五、六字段的 Cron"));
+        return Err(fail(kit::tr(
+            "Interval examples: 30m, 2h, 1d, or a 5/6-field cron expression",
+            "间隔格式示例：30m、2h、1d，或五、六字段的 Cron",
+        )));
     };
     let val: i32 = caps[1].parse().unwrap_or(0);
     if val <= 0 {
-        return Err(fail("间隔必须为正整数"));
+        return Err(fail(kit::tr("Interval must be a positive integer", "间隔必须为正整数")));
     }
     match caps[2].to_ascii_lowercase().as_str() {
         "m" => {
             if val > 59 || 60 % val != 0 {
-                return Err(fail("分钟间隔须为 1-59 且能整除 60"));
+                return Err(fail(kit::tr(
+                    "Minute interval must be 1–59 and divide 60 evenly",
+                    "分钟间隔须为 1-59 且能整除 60",
+                )));
             }
             Ok(format!("*/{val} * * * *"))
         }
         "h" => {
             if val > 23 || 24 % val != 0 {
-                return Err(fail("小时间隔须为 1-23 且能整除 24"));
+                return Err(fail(kit::tr(
+                    "Hour interval must be 1–23 and divide 24 evenly",
+                    "小时间隔须为 1-23 且能整除 24",
+                )));
             }
             Ok(format!("0 */{val} * * *"))
         }
         _ => {
             if val != 1 {
-                return Err(fail("当前按天间隔仅支持 1d"));
+                return Err(fail(kit::tr(
+                    "Day interval currently only supports 1d",
+                    "当前按天间隔仅支持 1d",
+                )));
             }
             Ok("0 0 * * *".to_owned())
         }
@@ -821,7 +854,11 @@ fn sum_parse_add_options(rest: &[String]) -> Result<SumAddOptions, CmdError> {
         let val = &rest[idx];
         if val == "--time" || val == "--provider" {
             if idx + 1 >= rest.len() || rest[idx + 1].is_empty() {
-                return Err(fail(format!("请提供 {val} 的值")));
+                return Err(fail(if kit::is_zh() {
+                    format!("请提供 {val} 的值")
+                } else {
+                    format!("Please provide a value for {val}")
+                }));
             }
             idx += 1;
             if val == "--provider" {
@@ -829,7 +866,10 @@ fn sum_parse_add_options(rest: &[String]) -> Result<SumAddOptions, CmdError> {
             } else {
                 let hours = rest[idx].parse::<i32>().unwrap_or(0);
                 if hours <= 0 || hours > 720 {
-                    return Err(fail("时间范围须为 1-720 小时"));
+                    return Err(fail(kit::tr(
+                        "Time range must be 1–720 hours",
+                        "时间范围须为 1-720 小时",
+                    )));
                 }
                 opts.time_range = hours;
             }
@@ -955,7 +995,8 @@ impl SumResult {
             body = format!("<blockquote expandable>{body}</blockquote>");
         }
         format!(
-            "🧾 <b>群组消息摘要</b>\n{}\n\n{body}",
+            "🧾 <b>{}</b>\n{}\n\n{body}",
+            kit::tr("Group Summary", "群组消息摘要"),
             escape(&self.heading())
         )
     }
@@ -967,7 +1008,7 @@ impl SumResult {
         let header = rich_concat(&[
             rich_plain("🧾 "),
             tl::types::TextBold {
-                text: rich_plain("群组消息摘要"),
+                text: rich_plain(kit::tr("Group Summary", "群组消息摘要")),
             }
             .into(),
             rich_plain(&format!("\n{}", self.heading())),
@@ -1090,78 +1131,135 @@ pub fn register(a: &Arc<App>, models: Option<Arc<AiService>>) {
     }
 
     let svc_cmd = Arc::clone(&svc);
-    a.registry.register(Command {
-        name: "sum".into(),
-        group: group::AI.into(),
-        description: "生成群组消息摘要".into(),
-        usage: "[消息数]".into(),
-        help_fn: Some(Arc::new(sum_help)),
-        timeout: Some(Duration::from_secs(600)),
-        handle: Arc::new(move |inv| {
-            let svc = Arc::clone(&svc_cmd);
-            Box::pin(async move {
-                svc.handle(&inv)
-                    .await
-                    .map_err(|e| kit::wrap_fail("摘要失败", e))
-            })
-        }),
-        ..Default::default()
-    });
+    a.registry.register(
+        Command {
+            name: "sum".into(),
+            group: group::AI.into(),
+            description: "Summarize group messages".into(),
+            usage: "[count]".into(),
+            help_fn: Some(Arc::new(sum_help)),
+            timeout: Some(Duration::from_secs(600)),
+            handle: Arc::new(move |inv| {
+                let svc = Arc::clone(&svc_cmd);
+                Box::pin(async move {
+                    svc.handle(&inv)
+                        .await
+                        .map_err(|e| kit::wrap_fail(kit::tr("Summary failed", "摘要失败"), e))
+                })
+            }),
+            ..Default::default()
+        }
+        .zh("生成群组消息摘要", "[消息数]"),
+    );
 }
 
 fn sum_help(prefix: &str) -> String {
     let code_cmd = |args: &str| code(&format!("{prefix}sum{args}"));
-    format!(
-        "🧾 <b>群组消息摘要</b>\n\n\
-         • {} 摘要当前群组最近 100 条消息\n\
-         • {} 指定消息数量，范围 10–500\n\
-         • {} 临时选择 AI 配置（sum 的配置名或 ai 的标签）\n\n\
-         <b>定时摘要</b>\n\
-         • {} 定时摘要当前群组，推送到默认目标（默认收藏夹）\n\
-         • {}\n\
-           群组可以是 here、数字 ID、@用户名、t.me 链接或邀请链接；间隔为 30m、2h、1d，或五、六字段 Cron（六字段第一位是秒）\n\
-         • {} / {} / {} / {} / {}\n\
-         • {} / {} / {}\n\
-         • {} 按当前顺序重新编号\n\
-         • {} 预览发给 AI 的文本\n\n\
-         <b>AI 配置</b>\n\
-         • {}\n\
-         • {}\n\
-         • {}\n\
-         • {}\n\
-         • {}\n\
-         • {}\n\
-         • {} / {}\n\
-         • {}\n\
-         • {}\n\
-         • {}\n\n没有 sum 自己的 AI 配置时，使用 ai 命令的聊天模型。",
-        code_cmd(""),
-        code_cmd(" 200"),
-        code_cmd(" 100 --provider 名称"),
-        code_cmd(" add here 2h 100"),
-        code_cmd(" add @群组 \"0 9,21 * * *\" --time 12 --provider 名称 --spoiler 备注"),
-        code_cmd(" list"),
-        code_cmd(" run ID"),
-        code_cmd(" del ID"),
-        code_cmd(" disable ID"),
-        code_cmd(" enable ID"),
-        code_cmd(" edit ID spoiler on|off"),
-        code_cmd(" edit ID provider [名称]"),
-        code_cmd(" edit ID prompt [内容]"),
-        code_cmd(" reorder"),
-        code_cmd(" debug [数量]"),
-        code_cmd(" config list"),
-        code_cmd(" config add 名称 BaseURL API_KEY 模型 [auto|chat|responses|gemini|anthropic]"),
-        code_cmd(" config set default 名称"),
-        code_cmd(" config set 名称 model|url|key|type 值"),
-        code_cmd(" config set preview|spoiler|reply on|off"),
-        code_cmd(" config set push 目标"),
-        code_cmd(" config set timeout 秒数"),
-        code_cmd(" config set maxoutput 字符数"),
-        code_cmd(" config set reasoning|service 值"),
-        code_cmd(" config set prompt 内容|reset|show"),
-        code_cmd(" config del 名称"),
-    )
+    if kit::is_zh() {
+        format!(
+            "🧾 <b>群组消息摘要</b>\n\n\
+             • {} 摘要当前群组最近 100 条消息\n\
+             • {} 指定消息数量，范围 10–500\n\
+             • {} 临时选择 AI 配置（sum 的配置名或 ai 的标签）\n\n\
+             <b>定时摘要</b>\n\
+             • {} 定时摘要当前群组，推送到默认目标（默认收藏夹）\n\
+             • {}\n\
+               群组可以是 here、数字 ID、@用户名、t.me 链接或邀请链接；间隔为 30m、2h、1d，或五、六字段 Cron（六字段第一位是秒）\n\
+             • {} / {} / {} / {} / {}\n\
+             • {} / {} / {}\n\
+             • {} 按当前顺序重新编号\n\
+             • {} 预览发给 AI 的文本\n\n\
+             <b>AI 配置</b>\n\
+             • {}\n\
+             • {}\n\
+             • {}\n\
+             • {}\n\
+             • {}\n\
+             • {}\n\
+             • {} / {}\n\
+             • {}\n\
+             • {}\n\
+             • {}\n\n没有 sum 自己的 AI 配置时，使用 ai 命令的聊天模型。",
+            code_cmd(""),
+            code_cmd(" 200"),
+            code_cmd(" 100 --provider 名称"),
+            code_cmd(" add here 2h 100"),
+            code_cmd(" add @群组 \"0 9,21 * * *\" --time 12 --provider 名称 --spoiler 备注"),
+            code_cmd(" list"),
+            code_cmd(" run ID"),
+            code_cmd(" del ID"),
+            code_cmd(" disable ID"),
+            code_cmd(" enable ID"),
+            code_cmd(" edit ID spoiler on|off"),
+            code_cmd(" edit ID provider [名称]"),
+            code_cmd(" edit ID prompt [内容]"),
+            code_cmd(" reorder"),
+            code_cmd(" debug [数量]"),
+            code_cmd(" config list"),
+            code_cmd(" config add 名称 BaseURL API_KEY 模型 [auto|chat|responses|gemini|anthropic]"),
+            code_cmd(" config set default 名称"),
+            code_cmd(" config set 名称 model|url|key|type 值"),
+            code_cmd(" config set preview|spoiler|reply on|off"),
+            code_cmd(" config set push 目标"),
+            code_cmd(" config set timeout 秒数"),
+            code_cmd(" config set maxoutput 字符数"),
+            code_cmd(" config set reasoning|service 值"),
+            code_cmd(" config set prompt 内容|reset|show"),
+            code_cmd(" config del 名称"),
+        )
+    } else {
+        format!(
+            "🧾 <b>Group Summary</b>\n\n\
+             • {} Summarize the last 100 messages in the current group\n\
+             • {} Specify message count (10–500)\n\
+             • {} Temporarily pick an AI config (sum config name or ai tag)\n\n\
+             <b>Scheduled Summaries</b>\n\
+             • {} Schedule summaries for this group to the default target (Saved Messages)\n\
+             • {}\n\
+               Group can be here, numeric ID, @username, t.me link, or invite link; interval is 30m, 2h, 1d, or a 5/6-field cron (first field is seconds)\n\
+             • {} / {} / {} / {} / {}\n\
+             • {} / {} / {}\n\
+             • {} Renumber tasks in current order\n\
+             • {} Preview the text sent to AI\n\n\
+             <b>AI Config</b>\n\
+             • {}\n\
+             • {}\n\
+             • {}\n\
+             • {}\n\
+             • {}\n\
+             • {}\n\
+             • {} / {}\n\
+             • {}\n\
+             • {}\n\
+             • {}\n\nFalls back to the ai command chat model when no sum AI config is set.",
+            code_cmd(""),
+            code_cmd(" 200"),
+            code_cmd(" 100 --provider name"),
+            code_cmd(" add here 2h 100"),
+            code_cmd(" add @group \"0 9,21 * * *\" --time 12 --provider name --spoiler note"),
+            code_cmd(" list"),
+            code_cmd(" run ID"),
+            code_cmd(" del ID"),
+            code_cmd(" disable ID"),
+            code_cmd(" enable ID"),
+            code_cmd(" edit ID spoiler on|off"),
+            code_cmd(" edit ID provider [name]"),
+            code_cmd(" edit ID prompt [text]"),
+            code_cmd(" reorder"),
+            code_cmd(" debug [count]"),
+            code_cmd(" config list"),
+            code_cmd(" config add name BaseURL API_KEY model [auto|chat|responses|gemini|anthropic]"),
+            code_cmd(" config set default name"),
+            code_cmd(" config set name model|url|key|type value"),
+            code_cmd(" config set preview|spoiler|reply on|off"),
+            code_cmd(" config set push target"),
+            code_cmd(" config set timeout seconds"),
+            code_cmd(" config set maxoutput chars"),
+            code_cmd(" config set reasoning|service value"),
+            code_cmd(" config set prompt text|reset|show"),
+            code_cmd(" config del name"),
+        )
+    }
 }
 
 impl SumService {
@@ -1217,7 +1315,10 @@ impl SumService {
             count = sub.parse::<i32>().unwrap_or(100);
         }
         if !(10..=500).contains(&count) {
-            return Err(fail("消息数量范围为 10-500"));
+            return Err(fail(kit::tr(
+                "Message count must be between 10 and 500",
+                "消息数量范围为 10-500",
+            )));
         }
         let mut provider = String::new();
         for i in 0..inv.args.len() {
@@ -1225,8 +1326,11 @@ impl SumService {
                 provider = inv.args[i + 1].clone();
             }
         }
-        inv.edit_text(&kit::working("正在生成群组消息摘要"))
-            .await?;
+        inv.edit_text(&kit::working(kit::tr(
+            "Generating group summary",
+            "正在生成群组消息摘要",
+        )))
+        .await?;
         let db = self.read()?;
         let result = self
             .summarize(
@@ -1285,21 +1389,27 @@ impl SumService {
         {
             count = v.clamp(1, 500);
         }
-        inv.edit_text(&kit::working("正在读取消息")).await?;
+        inv.edit_text(&kit::working(kit::tr("Reading messages", "正在读取消息")))
+            .await?;
         let (rows, _) = self
             .read_messages(&inv.client, &inv.message.chat_id, inv.message.id, count, 0)
             .await?;
         if rows.is_empty() {
-            return Err(fail("未找到消息"));
+            return Err(fail(kit::tr("No messages found", "未找到消息")));
         }
         let mut preview = sum_format_messages(&rows);
         let char_count = preview.chars().count();
         if char_count > 2000 {
             let tail: String = preview.chars().skip(char_count - 2000).collect();
-            preview = format!("…（前面省略）…\n\n{tail}");
+            let omitted = kit::tr("…(earlier messages omitted)…", "…（前面省略）…");
+            preview = format!("{omitted}\n\n{tail}");
         }
+        let header = kit::tr(
+            "📋 Text preview sent to AI (last 2000 chars):",
+            "📋 发送给 AI 的文本预览（最后2000字符）：",
+        );
         inv.respond_pages(&html_pages(
-            &format!("📋 发送给 AI 的文本预览（最后2000字符）：\n\n{}", code(&preview)),
+            &format!("{header}\n\n{}", code(&preview)),
             mibot_command::PAGE_LIMIT,
         ))
         .await
@@ -1323,21 +1433,24 @@ impl SumService {
             "list" | "ls" => self.config_list(inv, &db).await,
             "add" => {
                 self.config_add(inv, &name, &prop, rest)?;
-                inv.edit_text("✅ 摘要配置已更新").await.map_err(Into::into)
+                inv.edit_text(kit::tr("✅ Summary config updated", "✅ 摘要配置已更新"))
+                    .await
+                    .map_err(Into::into)
             }
             "del" | "rm" => self.config_delete(inv, &name).await,
             "set" => self.config_set(inv, &db, &name, &prop, rest).await,
-            _ => Err(fail("未知 config 子命令")),
+            _ => Err(fail(kit::tr("Unknown config subcommand", "未知 config 子命令"))),
         }
     }
 
     async fn config_list(&self, inv: &Invocation, db: &SumDb) -> CmdResult {
+        let zh = kit::is_zh();
         let mut names: Vec<&String> = db.ai_config.providers.keys().collect();
         names.sort();
         let mut rows = Vec::with_capacity(names.len());
         for key in names {
             let marker = if db.ai_config.default_provider == *key {
-                "（默认）"
+                kit::tr(" (default)", "（默认）")
             } else {
                 ""
             };
@@ -1356,7 +1469,7 @@ impl SumService {
             ));
         }
         let mut body = if rows.is_empty() {
-            "• 尚未配置 AI".to_owned()
+            kit::tr("• No AI configured", "• 尚未配置 AI").to_owned()
         } else {
             rows.join("\n")
         };
@@ -1365,7 +1478,8 @@ impl SumService {
         {
             let (tag, model) = svc.chat_selection();
             body.push_str(&format!(
-                "\n• ai 聊天模型：{}",
+                "\n• {}{}",
+                kit::tr("ai chat model: ", "ai 聊天模型："),
                 code(&format!("{} / {}", kit::or_dash(&tag), kit::or_dash(&model)))
             ));
         }
@@ -1373,27 +1487,41 @@ impl SumService {
         let prompt_state = if db.ai_config.default_prompt.is_empty()
             || db.ai_config.default_prompt == default_p
         {
-            "内置"
+            kit::tr("built-in", "内置")
         } else {
-            "自定义"
+            kit::tr("custom", "自定义")
         };
         let limit = if db.ai_config.max_output_length > 0 {
-            format!("{} 字符", db.ai_config.max_output_length)
+            if zh {
+                format!("{} 字符", db.ai_config.max_output_length)
+            } else {
+                format!("{} chars", db.ai_config.max_output_length)
+            }
         } else {
-            "不限".to_owned()
+            kit::tr("unlimited", "不限").to_owned()
         };
         let target = if db.default_push_target.is_empty() {
             "me"
         } else {
             &db.default_push_target
         };
-        let html = format!(
-            "🧾 <b>摘要 AI 配置</b>\n{body}\n\n提示词：{prompt_state}\n链接预览：{}\n默认推送：{}\n超时：{} 秒 · 输出上限：{limit} · 回复模式：{}",
-            kit::on_off_text(db.ai_config.link_preview),
-            code(target),
-            sum_timeout(db).as_secs(),
-            kit::on_off_text(db.ai_config.reply_mode)
-        );
+        let html = if zh {
+            format!(
+                "🧾 <b>摘要 AI 配置</b>\n{body}\n\n提示词：{prompt_state}\n链接预览：{}\n默认推送：{}\n超时：{} 秒 · 输出上限：{limit} · 回复模式：{}",
+                kit::on_off_text(db.ai_config.link_preview),
+                code(target),
+                sum_timeout(db).as_secs(),
+                kit::on_off_text(db.ai_config.reply_mode)
+            )
+        } else {
+            format!(
+                "🧾 <b>Summary AI Config</b>\n{body}\n\nPrompt: {prompt_state}\nLink preview: {}\nDefault push: {}\nTimeout: {} s · Max output: {limit} · Reply mode: {}",
+                kit::on_off_text(db.ai_config.link_preview),
+                code(target),
+                sum_timeout(db).as_secs(),
+                kit::on_off_text(db.ai_config.reply_mode)
+            )
+        };
         inv.edit(&html).await.map_err(Into::into)
     }
 
@@ -1405,7 +1533,10 @@ impl SumService {
         rest: &[String],
     ) -> Result<(), CmdError> {
         if !inv.message.saved {
-            return Err(fail("涉及 API Key 的配置命令只能在收藏夹使用"));
+            return Err(fail(kit::tr(
+                "Configs involving API keys can only be run in Saved Messages",
+                "涉及 API Key 的配置命令只能在收藏夹使用",
+            )));
         }
         let key = rest.first().map(String::as_str).unwrap_or("");
         let model = rest.get(1).map(String::as_str).unwrap_or("");
@@ -1416,15 +1547,18 @@ impl SumService {
         if name.is_empty() || base.is_empty() || key.is_empty() || model.is_empty() {
             return Err(kit::usage(
                 inv.prefix(),
-                "sum config add 名称 BaseURL API Key 模型 [类型]",
+                kit::tr(
+                    "sum config add name BaseURL API_KEY model [type]",
+                    "sum config add 名称 BaseURL API Key 模型 [类型]",
+                ),
             ));
         }
         if provider_endpoint(base, "openai", "models").is_err() {
-            return Err(fail("BaseURL 无效"));
+            return Err(fail(kit::tr("Invalid BaseURL", "BaseURL 无效")));
         }
         assert_allowed_model(model)?;
         if !SUM_TYPES.contains(&kind.as_str()) {
-            return Err(fail("无效接口类型"));
+            return Err(fail(kit::tr("Invalid API type", "无效接口类型")));
         }
         self.update(|db| {
             db.ai_config.providers.insert(
@@ -1448,7 +1582,7 @@ impl SumService {
         let mut reset = Vec::new();
         self.update(|db| {
             if db.ai_config.providers.remove(name).is_none() {
-                return Err(fail("AI 配置不存在"));
+                return Err(fail(kit::tr("AI config does not exist", "AI 配置不存在")));
             }
             if db.ai_config.default_provider == name {
                 db.ai_config.default_provider.clear();
@@ -1462,14 +1596,22 @@ impl SumService {
             Ok(())
         })?;
         if reset.is_empty() {
-            inv.edit_text("✅ 摘要配置已更新").await.map_err(Into::into)
+            inv.edit_text(kit::tr("✅ Summary config updated", "✅ 摘要配置已更新"))
+                .await
+                .map_err(Into::into)
         } else {
-            inv.edit_text(&format!(
-                "✅ 摘要配置已更新，任务 {} 改用全局默认配置",
-                reset.join("、")
-            ))
-            .await
-            .map_err(Into::into)
+            let msg = if kit::is_zh() {
+                format!(
+                    "✅ 摘要配置已更新，任务 {} 改用全局默认配置",
+                    reset.join("、")
+                )
+            } else {
+                format!(
+                    "✅ Summary config updated; task(s) {} now use the global default",
+                    reset.join(", ")
+                )
+            };
+            inv.edit_text(&msg).await.map_err(Into::into)
         }
     }
 
@@ -1485,7 +1627,7 @@ impl SumService {
             "default" => {
                 self.update(|d| {
                     if !d.ai_config.providers.contains_key(prop) {
-                        return Err(fail("AI 配置不存在"));
+                        return Err(fail(kit::tr("AI config does not exist", "AI 配置不存在")));
                     }
                     d.ai_config.default_provider = prop.to_owned();
                     Ok(())
@@ -1507,7 +1649,10 @@ impl SumService {
                 parts.extend_from_slice(rest);
                 let target = parts.join(" ").trim().to_owned();
                 if target.is_empty() {
-                    return Err(fail("推送目标不能为空"));
+                    return Err(fail(kit::tr(
+                        "Push target cannot be empty",
+                        "推送目标不能为空",
+                    )));
                 }
                 self.update(|d| {
                     d.default_push_target = target;
@@ -1517,7 +1662,10 @@ impl SumService {
             "timeout" => {
                 let secs = prop.parse::<i32>().unwrap_or(-1);
                 if !(10..=600).contains(&secs) {
-                    return Err(fail("超时时间须为 10-600 秒"));
+                    return Err(fail(kit::tr(
+                        "Timeout must be 10–600 seconds",
+                        "超时时间须为 10-600 秒",
+                    )));
                 }
                 self.update(|d| {
                     d.ai_config.default_timeout = secs * 1000;
@@ -1527,7 +1675,10 @@ impl SumService {
             "maxoutput" => {
                 let len = prop.parse::<i32>().unwrap_or(-1);
                 if len < 0 {
-                    return Err(fail("请输入有效的字符数（0 表示不限制）"));
+                    return Err(fail(kit::tr(
+                        "Enter a valid character count (0 for unlimited)",
+                        "请输入有效的字符数（0 表示不限制）",
+                    )));
                 }
                 self.update(|d| {
                     d.ai_config.max_output_length = len;
@@ -1541,7 +1692,7 @@ impl SumService {
                     valid_tier(prop)
                 };
                 if !ok {
-                    return Err(fail("无效选项"));
+                    return Err(fail(kit::tr("Invalid option", "无效选项")));
                 }
                 self.update(|d| {
                     if name == "reasoning" {
@@ -1560,7 +1711,11 @@ impl SumService {
                         db.ai_config.default_prompt.clone()
                     };
                     return inv
-                        .edit(&format!("🧾 <b>当前摘要提示词</b>\n\n{}", code(&p)))
+                        .edit(&format!(
+                            "🧾 <b>{}</b>\n\n{}",
+                            kit::tr("Current Summary Prompt", "当前摘要提示词"),
+                            code(&p)
+                        ))
                         .await
                         .map_err(Into::into);
                 }
@@ -1572,7 +1727,7 @@ impl SumService {
                     parts.join(" ").trim().to_owned()
                 };
                 if prompt.is_empty() {
-                    return Err(fail("提示词不能为空"));
+                    return Err(fail(kit::tr("Prompt cannot be empty", "提示词不能为空")));
                 }
                 self.update(|d| {
                     d.ai_config.default_prompt = prompt;
@@ -1584,15 +1739,21 @@ impl SumService {
                 if !matches!(prop, "model" | "url" | "key" | "type") || val.is_empty() {
                     return Err(kit::usage(
                         inv.prefix(),
-                        "sum config set 名称 model|url|key|type 值",
+                        kit::tr(
+                            "sum config set name model|url|key|type value",
+                            "sum config set 名称 model|url|key|type 值",
+                        ),
                     ));
                 }
                 if matches!(prop, "key" | "url") && !inv.message.saved {
-                    return Err(fail("API 地址和 Key 只能在收藏夹中修改"));
+                    return Err(fail(kit::tr(
+                        "API URL and key can only be changed in Saved Messages",
+                        "API 地址和 Key 只能在收藏夹中修改",
+                    )));
                 }
                 self.update(|d| {
                     let Some(prov) = d.ai_config.providers.get_mut(name) else {
-                        return Err(fail("AI 配置不存在"));
+                        return Err(fail(kit::tr("AI config does not exist", "AI 配置不存在")));
                     };
                     match prop {
                         "model" => {
@@ -1601,14 +1762,14 @@ impl SumService {
                         }
                         "url" => {
                             if provider_endpoint(&val, "openai", "models").is_err() {
-                                return Err(fail("BaseURL 无效"));
+                                return Err(fail(kit::tr("Invalid BaseURL", "BaseURL 无效")));
                             }
                             prov.base_url = val;
                         }
                         "key" => prov.api_key = val,
                         _ => {
                             if !SUM_TYPES.contains(&val.as_str()) {
-                                return Err(fail("无效接口类型"));
+                                return Err(fail(kit::tr("Invalid API type", "无效接口类型")));
                             }
                             prov.r#type = val;
                         }
@@ -1617,7 +1778,9 @@ impl SumService {
                 })?;
             }
         }
-        inv.edit_text("✅ 摘要配置已更新").await.map_err(Into::into)
+        inv.edit_text(kit::tr("✅ Summary config updated", "✅ 摘要配置已更新"))
+            .await
+            .map_err(Into::into)
     }
 
     async fn read_messages(
@@ -1631,7 +1794,12 @@ impl SumService {
         let input = client
             .resolve_target(chat_id)
             .await
-            .map_err(|_| fail("无法定位群组，请先在该群发过消息或用 here"))?;
+            .map_err(|_| {
+                fail(kit::tr(
+                    "Cannot locate group; send a message there first or use here",
+                    "无法定位群组，请先在该群发过消息或用 here",
+                ))
+            })?;
         let peer = peer_of_input(&input, client.self_id());
         let (mut title, username) = chat_title(client, peer.as_ref());
         if title.is_empty() {
@@ -1693,7 +1861,7 @@ impl SumService {
                 } else if msg.post {
                     title.clone()
                 } else {
-                    "未知发送者".to_owned()
+                    kit::tr("Unknown sender", "未知发送者").to_owned()
                 };
                 rows.push(SumMessage {
                     text: sum_message_text(msg.date, &sender, &content, &file_name),
@@ -1721,7 +1889,7 @@ impl SumService {
             .read_messages(client, &job.chat_id, job.before_id, job.count, job.time_range)
             .await?;
         if rows.is_empty() {
-            return Err(fail("没有可以摘要的消息"));
+            return Err(fail(kit::tr("No messages to summarize", "没有可以摘要的消息")));
         }
         let prompt = if !job.prompt.is_empty() {
             job.prompt
@@ -1736,7 +1904,13 @@ impl SumService {
         if limit > 0 {
             let truncated = kit::truncate_runes(&output, limit as usize);
             if truncated != output {
-                output = format!("{truncated}\n\n内容已按配置长度截断。");
+                output = format!(
+                    "{truncated}\n\n{}",
+                    kit::tr(
+                        "Content truncated to configured length.",
+                        "内容已按配置长度截断。"
+                    )
+                );
             }
         }
         Ok(SumResult {
@@ -1767,7 +1941,13 @@ impl SumService {
         let peer = client
             .resolve_target(target)
             .await
-            .map_err(|_| fail(format!("无法定位推送目标：{target}")))?;
+            .map_err(|_| {
+                fail(if kit::is_zh() {
+                    format!("无法定位推送目标：{target}")
+                } else {
+                    format!("Cannot locate push target: {target}")
+                })
+            })?;
         send_summary(
             &self.a,
             client,
@@ -1794,7 +1974,13 @@ impl SumService {
                     hash: normalized.clone(),
                 })
                 .await
-                .map_err(|e| fail(format!("无法处理邀请链接：{}", brief(&e))))?;
+                .map_err(|e| {
+                    fail(if kit::is_zh() {
+                        format!("无法处理邀请链接：{}", brief(&e))
+                    } else {
+                        format!("Cannot process invite link: {}", brief(&e))
+                    })
+                })?;
             let chat = match invite_res {
                 tl::enums::ChatInvite::Already(a) => {
                     inv.client.peers().remember_chats(std::slice::from_ref(&a.chat));
@@ -1809,9 +1995,16 @@ impl SumService {
                         .await
                         .map_err(|e| {
                             if e.is_rpc("INVITE_REQUEST_SENT") {
-                                fail("已提交入群申请，通过后再添加任务")
+                                fail(kit::tr(
+                                    "Join request submitted; add the task after approval",
+                                    "已提交入群申请，通过后再添加任务",
+                                ))
                             } else {
-                                fail(format!("加入群组失败：{}", brief(&e)))
+                                fail(if kit::is_zh() {
+                                    format!("加入群组失败：{}", brief(&e))
+                                } else {
+                                    format!("Failed to join group: {}", brief(&e))
+                                })
                             }
                         })?;
                     let chats = match join_res {
@@ -1823,7 +2016,10 @@ impl SumService {
                         _ => Vec::new(),
                     };
                     if chats.is_empty() {
-                        return Err(fail("加入群组后未拿到群组信息"));
+                        return Err(fail(kit::tr(
+                            "Joined group, but no group info was returned",
+                            "加入群组后未拿到群组信息",
+                        )));
                     }
                     inv.client.peers().remember_chats(&chats);
                     chats.into_iter().next().expect("non-empty")
@@ -1831,7 +2027,10 @@ impl SumService {
             };
             let (mut chat_id, title, username) = chat_id_of(&chat);
             if chat_id.is_empty() {
-                return Err(fail("邀请链接指向的不是群组"));
+                return Err(fail(kit::tr(
+                    "Invite link does not point to a group",
+                    "邀请链接指向的不是群组",
+                )));
             }
             if !username.is_empty() {
                 chat_id = format!("@{username}");
@@ -1848,7 +2047,13 @@ impl SumService {
             .client
             .resolve_target(&chat_id)
             .await
-            .map_err(|e| fail(format!("无法获取群组信息：{}", brief(&e))))?;
+            .map_err(|e| {
+                fail(if kit::is_zh() {
+                    format!("无法获取群组信息：{}", brief(&e))
+                } else {
+                    format!("Failed to get group info: {}", brief(&e))
+                })
+            })?;
         let peer = peer_of_input(&input, inv.client.self_id());
         let (title, username) = chat_title(&inv.client, peer.as_ref());
         Ok((chat_id, sum_display(&title, &username)))
@@ -1859,12 +2064,19 @@ impl SumService {
         let (target, interval, rest) = sum_add_syntax(&args);
         let opts = sum_parse_add_options(&rest)?;
         if target.is_empty() || interval.is_empty() || !(10..=500).contains(&opts.count) {
-            return Err(kit::usage(inv.prefix(), "sum add here|群组 2h 100"));
+            return Err(kit::usage(
+                inv.prefix(),
+                kit::tr("sum add here|group 2h 100", "sum add here|群组 2h 100"),
+            ));
         }
         let spec = sum_interval_cron(&interval)?;
         let db = self.read()?;
         if !opts.provider.is_empty() && !self.provider_known(&db, &opts.provider) {
-            return Err(fail(format!("未找到 AI 配置：{}", opts.provider)));
+            return Err(fail(if kit::is_zh() {
+                format!("未找到 AI 配置：{}", opts.provider)
+            } else {
+                format!("AI config not found: {}", opts.provider)
+            }));
         }
         let (chat_id, display) = self.resolve_chat(inv, &target).await?;
         let spoiler = opts.spoiler.unwrap_or(db.ai_config.default_spoiler);
@@ -1905,35 +2117,69 @@ impl SumService {
             return Err(e);
         }
 
-        let mut lines = vec![
-            format!("✅ 已创建摘要任务 {}", code(&created_task.id)),
-            format!(
-                "群组：{}",
-                escape(if display.is_empty() { &chat_id } else { &display })
-            ),
-            format!("间隔：{}", code(&interval)),
-        ];
-        if created_task.time_range > 0 {
-            lines.push(format!(
-                "时间范围：过去 {} 小时（最多 {} 条）",
-                created_task.time_range, created_task.message_count
-            ));
+        let zh = kit::is_zh();
+        let group_display = escape(if display.is_empty() { &chat_id } else { &display });
+        let mut lines = if zh {
+            vec![
+                format!("✅ 已创建摘要任务 {}", code(&created_task.id)),
+                format!("群组：{group_display}"),
+                format!("间隔：{}", code(&interval)),
+            ]
         } else {
-            lines.push(format!("消息数：{}", created_task.message_count));
+            vec![
+                format!("✅ Created summary task {}", code(&created_task.id)),
+                format!("Group: {group_display}"),
+                format!("Interval: {}", code(&interval)),
+            ]
+        };
+        if created_task.time_range > 0 {
+            lines.push(if zh {
+                format!(
+                    "时间范围：过去 {} 小时（最多 {} 条）",
+                    created_task.time_range, created_task.message_count
+                )
+            } else {
+                format!(
+                    "Time range: past {} hours (max {} messages)",
+                    created_task.time_range, created_task.message_count
+                )
+            });
+        } else {
+            lines.push(if zh {
+                format!("消息数：{}", created_task.message_count)
+            } else {
+                format!("Messages: {}", created_task.message_count)
+            });
         }
         if !created_task.ai_provider.is_empty() {
-            lines.push(format!("AI 配置：{}", code(&created_task.ai_provider)));
+            lines.push(format!(
+                "{}{}",
+                kit::tr("AI config: ", "AI 配置："),
+                code(&created_task.ai_provider)
+            ));
         }
         if created_task.use_spoiler {
-            lines.push("折叠：是".to_owned());
+            lines.push(kit::tr("Spoiler: yes", "折叠：是").to_owned());
         }
         let db2 = self.read()?;
-        lines.push(format!("推送：{}", code(push_target(&db2, &created_task))));
+        lines.push(format!(
+            "{}{}",
+            kit::tr("Push target: ", "推送："),
+            code(push_target(&db2, &created_task))
+        ));
         if !created_task.remark.is_empty() {
-            lines.push(format!("备注：{}", escape(&created_task.remark)));
+            lines.push(format!(
+                "{}{}",
+                kit::tr("Note: ", "备注："),
+                escape(&created_task.remark)
+            ));
         }
         if let Some(next) = sum_next_run(&spec, Local::now()) {
-            lines.push(format!("下次执行：{}", sum_format_time(next)));
+            lines.push(format!(
+                "{}{}",
+                kit::tr("Next run: ", "下次执行："),
+                sum_format_time(next)
+            ));
         }
         inv.edit(&lines.join("\n")).await.map_err(Into::into)
     }
@@ -2030,7 +2276,10 @@ impl SumService {
         let run_err = match res {
             Ok(Ok(())) => None,
             Ok(Err(e)) => Some(e),
-            Err(_) => Some(fail("定时摘要执行超时")),
+            Err(_) => Some(fail(kit::tr(
+                "Scheduled summary timed out",
+                "定时摘要执行超时",
+            ))),
         };
         let err_msg = run_err.as_ref().map(|e| brief(e.as_ref()));
         if let Err(e) = self.update(|d| {
@@ -2040,7 +2289,11 @@ impl SumService {
                     if let Some(m) = &err_msg {
                         t.last_error = m.clone();
                     } else {
-                        t.last_result = format!("摘要完成，已推送到 {target}");
+                        t.last_result = if kit::is_zh() {
+                            format!("摘要完成，已推送到 {target}")
+                        } else {
+                            format!("Summary sent to {target}")
+                        };
                         t.last_error.clear();
                     }
                 }
@@ -2059,17 +2312,22 @@ impl SumService {
     }
 
     async fn list(&self, inv: &Invocation) -> CmdResult {
+        let zh = kit::is_zh();
+        let title = kit::tr("Summary Tasks", "摘要任务");
         let db = self.read()?;
         if db.tasks.is_empty() {
             return inv
-                .edit("🧾 <b>摘要任务</b>\n还没有定时任务")
+                .edit(&format!(
+                    "🧾 <b>{title}</b>\n{}",
+                    kit::tr("No scheduled tasks", "还没有定时任务")
+                ))
                 .await
                 .map_err(Into::into);
         }
         let mut tasks = db.tasks.clone();
         tasks.sort_by_key(|t| t.id.parse::<i64>().unwrap_or(i64::MAX));
         let now = Local::now();
-        let mut blocks = vec!["🧾 <b>摘要任务</b>".to_owned()];
+        let mut blocks = vec![format!("🧾 <b>{title}</b>")];
         for task in &tasks {
             let heading = if !task.remark.is_empty() {
                 &task.remark
@@ -2085,51 +2343,93 @@ impl SumService {
             };
             let mut lines = vec![
                 format!("{} • {}", code(&task.id), escape(heading)),
-                format!("群组：{}", escape(chat_name)),
-                format!("间隔：{}", code(&task.interval)),
+                format!("{}{}", kit::tr("Group: ", "群组："), escape(chat_name)),
+                format!("{}{}", kit::tr("Interval: ", "间隔："), code(&task.interval)),
             ];
             if task.time_range > 0 {
-                lines.push(format!("时间范围：过去 {} 小时", task.time_range));
+                lines.push(if zh {
+                    format!("时间范围：过去 {} 小时", task.time_range)
+                } else {
+                    format!("Time range: past {} hours", task.time_range)
+                });
             } else {
-                lines.push(format!("消息数：{}", task.message_count));
+                lines.push(format!(
+                    "{}{}",
+                    kit::tr("Messages: ", "消息数："),
+                    task.message_count
+                ));
             }
             if !task.ai_provider.is_empty() {
-                lines.push(format!("AI 配置：{}", code(&task.ai_provider)));
-            } else if !db.ai_config.default_provider.is_empty() {
                 lines.push(format!(
-                    "AI 配置：默认（{}）",
-                    escape(&db.ai_config.default_provider)
+                    "{}{}",
+                    kit::tr("AI config: ", "AI 配置："),
+                    code(&task.ai_provider)
                 ));
+            } else if !db.ai_config.default_provider.is_empty() {
+                lines.push(if zh {
+                    format!("AI 配置：默认（{}）", escape(&db.ai_config.default_provider))
+                } else {
+                    format!("AI config: default ({})", escape(&db.ai_config.default_provider))
+                });
             } else {
-                lines.push("AI 配置：默认（ai 聊天模型）".to_owned());
+                lines.push(
+                    kit::tr(
+                        "AI config: default (ai chat model)",
+                        "AI 配置：默认（ai 聊天模型）",
+                    )
+                    .to_owned(),
+                );
             }
             if !task.ai_prompt.is_empty() {
                 lines.push(format!(
-                    "提示词：{}",
+                    "{}{}",
+                    kit::tr("Prompt: ", "提示词："),
                     escape(&kit::truncate_runes(&task.ai_prompt, 30))
                 ));
             }
             if task.use_spoiler {
-                lines.push("折叠：是".to_owned());
+                lines.push(kit::tr("Spoiler: yes", "折叠：是").to_owned());
             }
-            lines.push(format!("推送：{}", code(push_target(&db, task))));
+            lines.push(format!(
+                "{}{}",
+                kit::tr("Push target: ", "推送："),
+                code(push_target(&db, task))
+            ));
             if task.disabled {
-                lines.push("状态：⏹ 已停用".to_owned());
+                lines.push(kit::tr("Status: ⏹ disabled", "状态：⏹ 已停用").to_owned());
             } else if let Some(next) = sum_next_run(&task.cron, now) {
-                lines.push(format!("下次：{}", sum_format_time(next)));
+                lines.push(format!(
+                    "{}{}",
+                    kit::tr("Next: ", "下次："),
+                    sum_format_time(next)
+                ));
             } else {
-                lines.push("状态：定时表达式无效".to_owned());
+                lines.push(
+                    kit::tr("Status: invalid cron expression", "状态：定时表达式无效").to_owned(),
+                );
             }
             if !task.last_run_at.is_empty()
                 && let Some(last) = sum_parse_time(&task.last_run_at)
             {
-                lines.push(format!("上次：{}", sum_format_time(last)));
+                lines.push(format!(
+                    "{}{}",
+                    kit::tr("Last: ", "上次："),
+                    sum_format_time(last)
+                ));
             }
             if !task.last_result.is_empty() {
-                lines.push(format!("结果：{}", escape(&task.last_result)));
+                lines.push(format!(
+                    "{}{}",
+                    kit::tr("Result: ", "结果："),
+                    escape(&task.last_result)
+                ));
             }
             if !task.last_error.is_empty() {
-                lines.push(format!("错误：{}", escape(&task.last_error)));
+                lines.push(format!(
+                    "{}{}",
+                    kit::tr("Error: ", "错误："),
+                    escape(&task.last_error)
+                ));
             }
             blocks.push(lines.join("\n"));
         }
@@ -2144,12 +2444,15 @@ impl SumService {
     async fn run_now(&self, inv: &Invocation) -> CmdResult {
         let db = self.read()?;
         let Some(task) = db.tasks.iter().find(|t| t.id == inv.arg(1)).cloned() else {
-            return Err(fail("摘要任务不存在"));
+            return Err(fail(kit::tr("Summary task does not exist", "摘要任务不存在")));
         };
         {
             let mut g = self.mu.lock().unwrap_or_else(|e| e.into_inner());
             if g.running.contains(&task.id) {
-                return Err(fail("该任务正在执行，稍后再试"));
+                return Err(fail(kit::tr(
+                    "Task is already running; try again later",
+                    "该任务正在执行，稍后再试",
+                )));
             }
             g.running.insert(task.id.clone());
         }
@@ -2161,11 +2464,16 @@ impl SumService {
             }
         }
         let _guard = Clear(self, &task.id);
-        inv.edit_text(&kit::working("正在生成摘要")).await?;
+        inv.edit_text(&kit::working(kit::tr("Generating summary", "正在生成摘要")))
+            .await?;
         self.push(&inv.client, &task).await?;
-        inv.edit_text(&format!("✅ 摘要已推送到 {}", push_target(&db, &task)))
-            .await
-            .map_err(Into::into)
+        let target = push_target(&db, &task);
+        let done_msg = if kit::is_zh() {
+            format!("✅ 摘要已推送到 {target}")
+        } else {
+            format!("✅ Summary pushed to {target}")
+        };
+        inv.edit_text(&done_msg).await.map_err(Into::into)
     }
 
     async fn toggle(self: &Arc<Self>, inv: &Invocation, sub: &str) -> CmdResult {
@@ -2173,7 +2481,7 @@ impl SumService {
         let mut updated_task = None;
         self.update(|d| {
             let Some(pos) = d.tasks.iter().position(|t| t.id == id) else {
-                return Err(fail("摘要任务不存在"));
+                return Err(fail(kit::tr("Summary task does not exist", "摘要任务不存在")));
             };
             if sub == "del" || sub == "rm" {
                 d.tasks.remove(pos);
@@ -2194,7 +2502,9 @@ impl SumService {
         } else {
             self.unschedule_task(&id);
         }
-        inv.edit_text("✅ 摘要任务已更新").await.map_err(Into::into)
+        inv.edit_text(kit::tr("✅ Summary task updated", "✅ 摘要任务已更新"))
+            .await
+            .map_err(Into::into)
     }
 
     async fn edit_task(&self, inv: &Invocation) -> CmdResult {
@@ -2204,75 +2514,102 @@ impl SumService {
         if id.is_empty() || prop.is_empty() {
             return Err(kit::usage(
                 inv.prefix(),
-                "sum edit 任务 ID spoiler on|off、provider [名称] 或 prompt [内容]",
+                kit::tr(
+                    "sum edit task_id spoiler on|off | provider [name] | prompt [text]",
+                    "sum edit 任务 ID spoiler on|off、provider [名称] 或 prompt [内容]",
+                ),
             ));
         }
         let db = self.read()?;
+        let missing = || fail(kit::tr("Summary task does not exist", "摘要任务不存在"));
         if !db.tasks.iter().any(|t| t.id == id) {
-            return Err(fail("摘要任务不存在"));
+            return Err(missing());
         }
+        let zh = kit::is_zh();
         let message = match prop.as_str() {
             "spoiler" => {
                 let enabled = match value.to_ascii_lowercase().as_str() {
-                    "" => return Err(fail("请提供值：on 或 off")),
+                    "" => {
+                        return Err(fail(kit::tr(
+                            "Please provide a value: on or off",
+                            "请提供值：on 或 off",
+                        )));
+                    }
                     "on" | "true" | "1" => true,
                     "off" | "false" | "0" => false,
-                    _ => return Err(fail("无效的值，请使用 on 或 off")),
+                    _ => {
+                        return Err(fail(kit::tr(
+                            "Invalid value; use on or off",
+                            "无效的值，请使用 on 或 off",
+                        )));
+                    }
                 };
                 self.update(|d| {
-                    let t = d
-                        .tasks
-                        .iter_mut()
-                        .find(|t| t.id == id)
-                        .ok_or_else(|| fail("摘要任务不存在"))?;
+                    let t = d.tasks.iter_mut().find(|t| t.id == id).ok_or_else(missing)?;
                     t.use_spoiler = enabled;
                     Ok(())
                 })?;
-                if enabled {
-                    format!("已启用任务 {id} 的折叠显示")
+                if zh {
+                    if enabled {
+                        format!("已启用任务 {id} 的折叠显示")
+                    } else {
+                        format!("已关闭任务 {id} 的折叠显示")
+                    }
+                } else if enabled {
+                    format!("Enabled spoiler for task {id}")
                 } else {
-                    format!("已关闭任务 {id} 的折叠显示")
+                    format!("Disabled spoiler for task {id}")
                 }
             }
             "provider" => {
                 if !value.is_empty() && !self.provider_known(&db, value) {
-                    return Err(fail(format!("未找到 AI 配置：{value}")));
+                    return Err(fail(if zh {
+                        format!("未找到 AI 配置：{value}")
+                    } else {
+                        format!("AI config not found: {value}")
+                    }));
                 }
                 self.update(|d| {
-                    let t = d
-                        .tasks
-                        .iter_mut()
-                        .find(|t| t.id == id)
-                        .ok_or_else(|| fail("摘要任务不存在"))?;
+                    let t = d.tasks.iter_mut().find(|t| t.id == id).ok_or_else(missing)?;
                     t.ai_provider = value.to_owned();
                     Ok(())
                 })?;
                 if value.is_empty() {
-                    format!("已清空任务 {id} 的 AI 配置，将使用全局默认配置")
-                } else {
+                    if zh {
+                        format!("已清空任务 {id} 的 AI 配置，将使用全局默认配置")
+                    } else {
+                        format!("Cleared AI config for task {id}; will use global default")
+                    }
+                } else if zh {
                     format!("已设置任务 {id} 的 AI 配置为 {value}")
+                } else {
+                    format!("Set AI config for task {id} to {value}")
                 }
             }
             "prompt" => {
                 self.update(|d| {
-                    let t = d
-                        .tasks
-                        .iter_mut()
-                        .find(|t| t.id == id)
-                        .ok_or_else(|| fail("摘要任务不存在"))?;
+                    let t = d.tasks.iter_mut().find(|t| t.id == id).ok_or_else(missing)?;
                     t.ai_prompt = value.to_owned();
                     Ok(())
                 })?;
                 if value.is_empty() {
-                    format!("已清空任务 {id} 的提示词，将使用全局默认提示词")
-                } else {
+                    if zh {
+                        format!("已清空任务 {id} 的提示词，将使用全局默认提示词")
+                    } else {
+                        format!("Cleared prompt for task {id}; will use global default")
+                    }
+                } else if zh {
                     format!("已设置任务 {id} 的提示词")
+                } else {
+                    format!("Updated prompt for task {id}")
                 }
             }
             _ => {
-                return Err(fail(format!(
-                    "未知属性：{prop}，支持 spoiler、provider、prompt"
-                )));
+                return Err(fail(if zh {
+                    format!("未知属性：{prop}，支持 spoiler、provider、prompt")
+                } else {
+                    format!("Unknown property: {prop}; supported: spoiler, provider, prompt")
+                }));
             }
         };
         inv.edit_text(&format!("✅ {message}"))
@@ -2286,7 +2623,7 @@ impl SumService {
         let mut tasks = Vec::new();
         self.update(|d| {
             if d.tasks.is_empty() {
-                return Err(fail("暂无任务需要重排序"));
+                return Err(fail(kit::tr("No tasks to reorder", "暂无任务需要重排序")));
             }
             for (idx, t) in d.tasks.iter_mut().enumerate() {
                 let next = (idx + 1).to_string();
@@ -2310,13 +2647,14 @@ impl SumService {
                 );
             }
         }
-        inv.edit(&format!(
-            "✅ 已重新排序 {} 个任务\n\n{}",
-            tasks.len(),
-            mapping.join(", ")
-        ))
-        .await
-        .map_err(Into::into)
+        let header = if kit::is_zh() {
+            format!("✅ 已重新排序 {} 个任务", tasks.len())
+        } else {
+            format!("✅ Reordered {} task(s)", tasks.len())
+        };
+        inv.edit(&format!("{header}\n\n{}", mapping.join(", ")))
+            .await
+            .map_err(Into::into)
     }
 }
 

@@ -8,17 +8,29 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-const RE_USAGE: &str = "re [消息数] [复读次数]";
+fn re_usage() -> &'static str {
+    kit::tr("re [count] [times]", "re [消息数] [复读次数]")
+}
 
 fn help(prefix: &str) -> String {
     let p = mibot_command::escape(prefix);
-    format!(
-        "🔁 <b>消息复读</b>\n\n回复一条消息，把从它开始往后的若干条消息转发到当前对话。\n\n\
-         • 回复消息发送 <code>{p}re</code> 转发一条，一次\n\
-         • <code>{p}re 3</code> 转发被回复的消息和它之后的 2 条，已删除的消息不算数\n\
-         • <code>{p}re 3 2</code> 将这 3 条消息重复转发 2 次\n\n\
-         消息数最多 20，复读次数最多 10。对话禁止转发时，改为把内容重新发一遍。"
-    )
+    if kit::is_zh() {
+        format!(
+            "🔁 <b>消息复读</b>\n\n回复一条消息，把从它开始往后的若干条消息转发到当前对话。\n\n\
+             • 回复消息发送 <code>{p}re</code> 转发一条，一次\n\
+             • <code>{p}re 3</code> 转发被回复的消息和它之后的 2 条，已删除的消息不算数\n\
+             • <code>{p}re 3 2</code> 将这 3 条消息重复转发 2 次\n\n\
+             消息数最多 20，复读次数最多 10。对话禁止转发时，改为把内容重新发一遍。"
+        )
+    } else {
+        format!(
+            "🔁 <b>Repeat Messages</b>\n\nReply to a message to forward it and the following messages into the current chat.\n\n\
+             • Reply with <code>{p}re</code> to forward 1 message once\n\
+             • <code>{p}re 3</code> forward the replied message and 2 following ones (deleted messages are skipped)\n\
+             • <code>{p}re 3 2</code> repeat forwarding those 3 messages 2 times\n\n\
+             Max 20 messages and 10 repeats. If forwarding is restricted, contents are re-sent instead."
+        )
+    }
 }
 
 fn forum_topic(message: &Message) -> i32 {
@@ -86,13 +98,20 @@ async fn repeat(root: &Path, inv: &Invocation) -> CmdResult {
     let count = kit::clamp(raw_count, 1, 20) as i32;
     let times = kit::clamp(raw_times, 1, 10) as i32;
     let Some(reply) = reply else {
-        return Err(kit::fail(format!("请回复一条消息再用：{}{RE_USAGE}", inv.prefix())));
+        return Err(kit::fail(if kit::is_zh() {
+            format!("请回复一条消息再用：{}{}", inv.prefix(), re_usage())
+        } else {
+            format!("Reply to a message first: {}{}", inv.prefix(), re_usage())
+        }));
     };
     let source = inv.client.input_peer(&reply.peer)?;
     let target = inv.peer_result()?;
     let messages = fetch_from(inv, &source, reply.id, count).await?;
     if messages.is_empty() {
-        return Err(kit::fail("被回复的消息已经不在了"));
+        return Err(kit::fail(kit::tr(
+            "Replied message is no longer available",
+            "被回复的消息已经不在了",
+        )));
     }
     let ids: Vec<i32> = messages.iter().map(|m| m.id).collect();
     let topic = forum_topic(&inv.message);
@@ -108,7 +127,7 @@ async fn repeat(root: &Path, inv: &Invocation) -> CmdResult {
             Ok(_) => forwarded += 1,
             Err(e) if inv.cancel.is_cancelled() => return Err(e.into()),
             Err(e) if e.is_rpc("CHAT_FORWARDS_RESTRICTED") => break,
-            Err(e) => return Err(kit::wrap_fail("复读失败", Box::new(e))),
+            Err(e) => return Err(kit::wrap_fail(kit::tr("Repeat failed", "复读失败"), Box::new(e))),
         }
     }
 
@@ -118,7 +137,7 @@ async fn repeat(root: &Path, inv: &Invocation) -> CmdResult {
                 Ok(()) => {}
                 Err(e) if save::is_nothing_to_copy(e.as_ref()) => {}
                 Err(e) if inv.cancel.is_cancelled() => return Err(e),
-                Err(e) => return Err(kit::wrap_fail("复读失败", e)),
+                Err(e) => return Err(kit::wrap_fail(kit::tr("Repeat failed", "复读失败"), e)),
             }
         }
         forwarded += 1;
@@ -138,14 +157,15 @@ pub fn register(a: &Arc<App>) {
         "re",
         &[],
         group::MEDIA,
-        "重复转发回复的消息",
-        "[消息数] [次数]",
+        "Repeat replied messages",
+        "[count] [times]",
         help,
         move |inv: Invocation| {
             let root = root.clone();
             Box::pin(async move { handle(&root, &inv).await })
         },
-    );
+    )
+    .zh("重复转发回复的消息", "[消息数] [次数]");
     cmd.timeout = Some(Duration::from_secs(30 * 60));
     a.registry.register(cmd);
 }

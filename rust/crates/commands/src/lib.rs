@@ -24,6 +24,7 @@ pub mod ids;
 pub mod ip;
 pub mod keyword;
 pub mod kit;
+pub mod lang;
 pub mod log;
 pub mod prefix;
 pub mod privacy;
@@ -98,6 +99,7 @@ pub fn register_all(a: &Arc<App>) {
     tts::register(a);
     privacy::register(a);
     prefix::register(a);
+    lang::register(a);
     alias::register(a);
     sudo::register(a);
 }
@@ -461,61 +463,65 @@ mod tests {
         let emoji_in_bold =
             Regex::new(r"<b>[\x{2190}-\x{2BFF}\x{1F000}-\x{1FAFF}]").expect("emoji_bold");
         let status_emojis = ["✅", "❌", "⏳", "⚠️", "⚠"];
-        let mut owner: HashMap<String, String> = HashMap::new();
 
-        for cmd in a.registry.list() {
-            let name = format!(".{}", cmd.name);
-            let desc_len = cmd.description.chars().count();
-            assert!(
-                (4..=16).contains(&desc_len),
-                "{name} description {:?} has {desc_len} chars (expected 4..=16)",
-                cmd.description
-            );
-            assert!(
-                !cmd.description.contains(['，', ',', '。']) && !cmd.description.ends_with('.'),
-                "{name} description {:?} contains punctuation",
-                cmd.description
-            );
-            assert!(
-                !cmd.usage.contains(" | ") && !cmd.usage.contains("..."),
-                "{name} usage {:?} violates format",
-                cmd.usage
-            );
-            let help_str = match &cmd.help_fn {
-                Some(f) => f("."),
-                None if !cmd.help.is_empty() => cmd.help.clone(),
-                None => panic!("{name} has no help"),
-            };
-            let emoji = leading_emoji(&help_str);
-            assert!(
-                !emoji.is_empty() && help_str[emoji.len()..].starts_with(" <b>"),
-                "{name} help does not start with 'emoji <b>...</b>': {:?}",
-                help_str.lines().next()
-            );
-            assert!(
-                !status_emojis.contains(&emoji),
-                "{name} uses status emoji {emoji}"
-            );
-            if let Some(prev) = owner.get(emoji) {
-                assert_eq!(prev, &help_str, "{name} duplicates title emoji {emoji}");
-            } else {
-                owner.insert(emoji.to_owned(), help_str.clone());
-            }
-            for text in [&help_str, &cmd.description] {
-                assert!(!text.contains("..."), "{name} contains ... instead of …");
-                assert!(
-                    !han_ascii.is_match(text),
-                    "{name} contains ASCII :/(: right after Han char"
-                );
-                assert!(
-                    !emoji_in_bold.is_match(text),
-                    "{name} places emoji inside <b>"
-                );
-                assert!(
-                    !text.contains("</code> - "),
-                    "{name} contains '</code> - '"
-                );
-            }
+        for lang in [mibot_i18n::Lang::En, mibot_i18n::Lang::Zh] {
+            mibot_i18n::with_lang(lang, || {
+                let mut owner: HashMap<String, String> = HashMap::new();
+                let max_desc = if lang == mibot_i18n::Lang::Zh { 16 } else { 32 };
+                for cmd in a.registry.list() {
+                    let name = format!(".{}", cmd.name);
+                    let desc = cmd.desc_text();
+                    let usage = cmd.usage_text();
+                    let desc_len = desc.chars().count();
+                    assert!(
+                        (4..=max_desc).contains(&desc_len),
+                        "[{lang:?}] {name} description {desc:?} has {desc_len} chars (expected 4..={max_desc})"
+                    );
+                    assert!(
+                        !desc.contains(['，', ',', '。']) && !desc.ends_with('.'),
+                        "[{lang:?}] {name} description {desc:?} contains punctuation"
+                    );
+                    assert!(
+                        !usage.contains(" | ") && !usage.contains("..."),
+                        "[{lang:?}] {name} usage {usage:?} violates format"
+                    );
+                    let help_str = match &cmd.help_fn {
+                        Some(f) => f("."),
+                        None if !cmd.help.is_empty() => cmd.help.clone(),
+                        None => panic!("{name} has no help"),
+                    };
+                    let emoji = leading_emoji(&help_str);
+                    assert!(
+                        !emoji.is_empty() && help_str[emoji.len()..].starts_with(" <b>"),
+                        "[{lang:?}] {name} help does not start with 'emoji <b>...</b>': {:?}",
+                        help_str.lines().next()
+                    );
+                    assert!(
+                        !status_emojis.contains(&emoji),
+                        "[{lang:?}] {name} uses status emoji {emoji}"
+                    );
+                    if let Some(prev) = owner.get(emoji) {
+                        assert_eq!(prev, &help_str, "[{lang:?}] {name} duplicates title emoji {emoji}");
+                    } else {
+                        owner.insert(emoji.to_owned(), help_str.clone());
+                    }
+                    for text in [help_str.as_str(), desc] {
+                        assert!(!text.contains("..."), "[{lang:?}] {name} contains ... instead of …");
+                        assert!(
+                            !han_ascii.is_match(text),
+                            "[{lang:?}] {name} contains ASCII :/(: right after Han char"
+                        );
+                        assert!(
+                            !emoji_in_bold.is_match(text),
+                            "[{lang:?}] {name} places emoji inside <b>"
+                        );
+                        assert!(
+                            !text.contains("</code> - "),
+                            "[{lang:?}] {name} contains '</code> - '"
+                        );
+                    }
+                }
+            });
         }
     }
 
@@ -630,6 +636,7 @@ mod tests {
             "acn",
             "autochangename",
             "prefix",
+            "lang",
             "alias",
             "bf",
             "log",
@@ -711,10 +718,10 @@ mod tests {
 
         let long_tr = format!("h {}", "字".repeat(5000));
         let cases = [
-            ("ai", "AI 助手", "help me", "AI 思考中", "选择模型"),
-            ("gt", "AI 翻译", "help me", "正在翻译", "选择模型"),
-            ("tr", "翻译", long_tr.as_str(), "", "文本过长"),
-            ("t", "文字转语音", "help me", "还没设 API Key", ""),
+            ("ai", "AI Assistant", "help me", "AI thinking", "select a model"),
+            ("gt", "AI Translate", "help me", "Translating", "select a model"),
+            ("tr", "Translate", long_tr.as_str(), "", "Text is too long"),
+            ("t", "Text to Speech", "help me", "API Key is not set", ""),
         ];
 
         for (command, help_text, args_text, status, err_substr) in cases {

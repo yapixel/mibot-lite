@@ -6,4 +6,5 @@ license.workspace = true
 
 [dependencies]
 libc.workspace = true
+mibot-i18n.workspace = true
 tokio.workspace = true

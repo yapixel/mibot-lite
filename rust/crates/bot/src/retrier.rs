@@ -165,7 +165,11 @@ impl Retrier {
             {
                 return Err(InvocationError::Rpc(RpcError {
                     code: 400,
-                    name: "临时限制剩余不足 30 秒，已停止发送，请重新设置时长".into(),
+                    name: mibot_i18n::tr(
+                        "Remaining mute/ban duration is under 30s; aborted, please set a longer duration",
+                        "临时限制剩余不足 30 秒，已停止发送，请重新设置时长",
+                    )
+                    .into(),
                     value: None,
                     caused_by: Some(constructor_id),
                 }));

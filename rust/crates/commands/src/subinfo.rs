@@ -51,39 +51,40 @@ const PROTOCOLS: &[&str] = &[
 ];
 
 struct RegionRule {
-    name: &'static str,
+    en: &'static str,
+    zh: &'static str,
     words: &'static [&'static str],
 }
 
 const REGIONS: &[RegionRule] = &[
-    RegionRule { name: "香港", words: &["香港", "hong kong", "hongkong", "hkg", "hk"] },
-    RegionRule { name: "台湾", words: &["台湾", "taiwan", "taipei", "tpe", "tw"] },
-    RegionRule { name: "日本", words: &["日本", "japan", "osaka", "jap", "jp", "tokyo"] },
-    RegionRule { name: "新加坡", words: &["新加坡", "singapore", "sgp", "sg"] },
-    RegionRule { name: "韩国", words: &["韩国", "korea", "seoul", "kor", "kr"] },
-    RegionRule { name: "印度", words: &["印度", "india"] },
-    RegionRule { name: "马来西亚", words: &["马来西亚", "malaysia"] },
-    RegionRule { name: "泰国", words: &["泰国", "thailand"] },
-    RegionRule { name: "越南", words: &["越南", "vietnam"] },
-    RegionRule { name: "印度尼西亚", words: &["印度尼西亚", "indonesia"] },
-    RegionRule { name: "菲律宾", words: &["菲律宾", "philippines"] },
-    RegionRule { name: "土耳其", words: &["土耳其", "turkey"] },
-    RegionRule { name: "美国", words: &["美国", "united states", "usa", "us"] },
-    RegionRule { name: "加拿大", words: &["加拿大", "canada", "ca"] },
-    RegionRule { name: "英国", words: &["英国", "united kingdom", "uk", "london"] },
-    RegionRule { name: "德国", words: &["德国", "germany", "de"] },
-    RegionRule { name: "法国", words: &["法国", "france"] },
-    RegionRule { name: "荷兰", words: &["荷兰", "netherlands"] },
-    RegionRule { name: "瑞士", words: &["瑞士", "switzerland"] },
-    RegionRule { name: "意大利", words: &["意大利", "italy"] },
-    RegionRule { name: "西班牙", words: &["西班牙", "spain"] },
-    RegionRule { name: "澳大利亚", words: &["澳大利亚", "australia", "au"] },
-    RegionRule { name: "新西兰", words: &["新西兰", "new zealand"] },
-    RegionRule { name: "巴西", words: &["巴西", "brazil"] },
-    RegionRule { name: "阿联酋", words: &["阿联酋", "uae"] },
-    RegionRule { name: "以色列", words: &["以色列", "israel"] },
-    RegionRule { name: "南非", words: &["南非", "south africa"] },
-    RegionRule { name: "俄罗斯", words: &["俄罗斯", "russia"] },
+    RegionRule { en: "Hong Kong", zh: "香港", words: &["香港", "hong kong", "hongkong", "hkg", "hk"] },
+    RegionRule { en: "Taiwan", zh: "台湾", words: &["台湾", "taiwan", "taipei", "tpe", "tw"] },
+    RegionRule { en: "Japan", zh: "日本", words: &["日本", "japan", "osaka", "jap", "jp", "tokyo"] },
+    RegionRule { en: "Singapore", zh: "新加坡", words: &["新加坡", "singapore", "sgp", "sg"] },
+    RegionRule { en: "South Korea", zh: "韩国", words: &["韩国", "korea", "seoul", "kor", "kr"] },
+    RegionRule { en: "India", zh: "印度", words: &["印度", "india"] },
+    RegionRule { en: "Malaysia", zh: "马来西亚", words: &["马来西亚", "malaysia"] },
+    RegionRule { en: "Thailand", zh: "泰国", words: &["泰国", "thailand"] },
+    RegionRule { en: "Vietnam", zh: "越南", words: &["越南", "vietnam"] },
+    RegionRule { en: "Indonesia", zh: "印度尼西亚", words: &["印度尼西亚", "indonesia"] },
+    RegionRule { en: "Philippines", zh: "菲律宾", words: &["菲律宾", "philippines"] },
+    RegionRule { en: "Turkey", zh: "土耳其", words: &["土耳其", "turkey"] },
+    RegionRule { en: "United States", zh: "美国", words: &["美国", "united states", "usa", "us"] },
+    RegionRule { en: "Canada", zh: "加拿大", words: &["加拿大", "canada", "ca"] },
+    RegionRule { en: "United Kingdom", zh: "英国", words: &["英国", "united kingdom", "uk", "london"] },
+    RegionRule { en: "Germany", zh: "德国", words: &["德国", "germany", "de"] },
+    RegionRule { en: "France", zh: "法国", words: &["法国", "france"] },
+    RegionRule { en: "Netherlands", zh: "荷兰", words: &["荷兰", "netherlands"] },
+    RegionRule { en: "Switzerland", zh: "瑞士", words: &["瑞士", "switzerland"] },
+    RegionRule { en: "Italy", zh: "意大利", words: &["意大利", "italy"] },
+    RegionRule { en: "Spain", zh: "西班牙", words: &["西班牙", "spain"] },
+    RegionRule { en: "Australia", zh: "澳大利亚", words: &["澳大利亚", "australia", "au"] },
+    RegionRule { en: "New Zealand", zh: "新西兰", words: &["新西兰", "new zealand"] },
+    RegionRule { en: "Brazil", zh: "巴西", words: &["巴西", "brazil"] },
+    RegionRule { en: "UAE", zh: "阿联酋", words: &["阿联酋", "uae"] },
+    RegionRule { en: "Israel", zh: "以色列", words: &["以色列", "israel"] },
+    RegionRule { en: "South Africa", zh: "南非", words: &["南非", "south africa"] },
+    RegionRule { en: "Russia", zh: "俄罗斯", words: &["俄罗斯", "russia"] },
 ];
 
 fn word_patterns() -> &'static HashMap<&'static str, Regex> {
@@ -202,12 +203,13 @@ fn region_of(name: &str) -> &'static str {
     let patterns = word_patterns();
     for rule in REGIONS {
         for &word in rule.words {
-            if let Some(pat) = patterns.get(word) {
-                if pat.is_match(&lower) {
-                    return rule.name;
-                }
-            } else if lower.contains(word) {
-                return rule.name;
+            let matched = if let Some(pat) = patterns.get(word) {
+                pat.is_match(&lower)
+            } else {
+                lower.contains(word)
+            };
+            if matched {
+                return if kit::is_zh() { rule.zh } else { rule.en };
             }
         }
     }
@@ -234,9 +236,10 @@ impl Tally {
     }
 
     fn lines(&self) -> Vec<String> {
+        let sep = kit::tr(": ", "：");
         self.names
             .iter()
-            .map(|name| format!("{name}：{}", self.counts[name]))
+            .map(|name| format!("{name}{sep}{}", self.counts[name]))
             .collect()
     }
 }
@@ -285,7 +288,9 @@ impl std::error::Error for ParseError {}
 fn parse_subscription(raw: &str) -> Result<Summary, ParseError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err(ParseError("订阅内容为空".into()));
+        return Err(ParseError(
+            kit::tr("Subscription content is empty", "订阅内容为空").into(),
+        ));
     }
     let text = match decode_base64(trimmed) {
         Some(decoded) if decoded.contains("://") => decoded,
@@ -324,33 +329,38 @@ fn parse_subscription(raw: &str) -> Result<Summary, ParseError> {
         }
     }
     if other > 0 {
-        result.regions.add_n("其他", other);
+        result.regions.add_n(kit::tr("Other", "其他"), other);
     }
     Ok(result)
 }
 
 fn parse_clash(text: &str, add: &mut dyn FnMut(&str, String)) -> Result<(), ParseError> {
-    let document: Value = serde_saphyr::from_str(text)
-        .map_err(|_| ParseError("订阅不是有效的 Clash 配置".into()))?;
+    let document: Value = serde_saphyr::from_str(text).map_err(|_| {
+        ParseError(kit::tr("Not a valid Clash configuration", "订阅不是有效的 Clash 配置").into())
+    })?;
     let proxies = document
         .as_object()
         .and_then(|obj| obj.get("proxies"))
         .and_then(|v| v.as_array())
-        .ok_or_else(|| ParseError("无效的 Clash 节点列表".into()))?;
+        .ok_or_else(|| ParseError(kit::tr("Invalid Clash proxy list", "无效的 Clash 节点列表").into()))?;
     for (index, item) in proxies.iter().enumerate() {
         let obj = item
             .as_object()
-            .ok_or_else(|| ParseError("无效的 Clash 节点".into()))?;
+            .ok_or_else(|| ParseError(kit::tr("Invalid Clash proxy entry", "无效的 Clash 节点").into()))?;
         let raw_kind = obj
             .get("type")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| ParseError("无效的 Clash 节点".into()))?;
+            .ok_or_else(|| ParseError(kit::tr("Invalid Clash proxy entry", "无效的 Clash 节点").into()))?;
         if raw_kind.trim().is_empty() {
-            return Err(ParseError("无效的 Clash 节点".into()));
+            return Err(ParseError(
+                kit::tr("Invalid Clash proxy entry", "无效的 Clash 节点").into(),
+            ));
         }
         let kind = raw_kind.to_lowercase();
         if !clash_type_re().is_match(&kind) {
-            return Err(ParseError("无效的 Clash 协议".into()));
+            return Err(ParseError(
+                kit::tr("Invalid Clash proxy type", "无效的 Clash 协议").into(),
+            ));
         }
         let name = match obj.get("name").and_then(|v| v.as_str()) {
             Some(n) if !n.trim().is_empty() => n.to_owned(),
@@ -424,7 +434,7 @@ fn node_name(line: &str, kind: &str, index: usize) -> String {
 
 fn traffic_summary(header: &str, present: bool, now: DateTime<Utc>) -> String {
     if !present || header.is_empty() {
-        return "流量统计：未提供".into();
+        return kit::tr("Traffic stats: not provided", "流量统计：未提供").into();
     }
     let mut fields: HashMap<String, u64> = HashMap::new();
     for part in header.split(';') {
@@ -435,48 +445,58 @@ fn traffic_summary(header: &str, present: bool, now: DateTime<Utc>) -> String {
             fields.insert(k.as_str().to_ascii_lowercase(), val);
         }
     }
+    let zh = kit::is_zh();
     let upload = fields.get("upload").copied();
     let download = fields.get("download").copied();
     let total = fields.get("total").copied();
+    let unknown = kit::tr("unknown", "未知");
     let fmt_opt = |opt: Option<u64>| match opt {
         Some(v) => format_bytes(v),
-        None => "未知".into(),
+        None => unknown.into(),
     };
     let mut lines = vec![
-        format!("上传：{}", fmt_opt(upload)),
-        format!("下载：{}", fmt_opt(download)),
+        format!("{}{}", kit::tr("Upload: ", "上传："), fmt_opt(upload)),
+        format!("{}{}", kit::tr("Download: ", "下载："), fmt_opt(download)),
     ];
     let used = upload.zip(download).map(|(u, d)| u.saturating_add(d));
     if let Some(u) = used {
-        lines.push(format!("已用：{}", format_bytes(u)));
+        lines.push(format!("{}{}", kit::tr("Used: ", "已用："), format_bytes(u)));
     }
     match total {
-        None => lines.push("总量：未知".into()),
-        Some(0) => lines.push("总量：未设限".into()),
-        Some(t) => lines.push(format!("总量：{}", format_bytes(t))),
+        None => lines.push(kit::tr("Total: unknown", "总量：未知").into()),
+        Some(0) => lines.push(kit::tr("Total: unlimited", "总量：未设限").into()),
+        Some(t) => lines.push(format!("{}{}", kit::tr("Total: ", "总量："), format_bytes(t))),
     }
     if let (Some(t), Some(u)) = (total.filter(|&t| t > 0), used) {
         let remaining = t.saturating_sub(u);
-        lines.push(format!("剩余：{}", format_bytes(remaining)));
+        lines.push(format!(
+            "{}{}",
+            kit::tr("Remaining: ", "剩余："),
+            format_bytes(remaining)
+        ));
         if u >= t {
-            lines.push("流量状态：已耗尽".into());
+            lines.push(kit::tr("Traffic status: exhausted", "流量状态：已耗尽").into());
         }
     }
     match fields.get("expire").copied() {
-        None => lines.push("到期：未提供".into()),
-        Some(0) => lines.push("到期：未设期限".into()),
+        None => lines.push(kit::tr("Expires: not provided", "到期：未提供").into()),
+        Some(0) => lines.push(kit::tr("Expires: never", "到期：未设期限").into()),
         Some(exp) if exp <= MAX_EXPIRE => {
             if let Some(at) = DateTime::<Utc>::from_timestamp(exp as i64, 0) {
-                let mut line = format!("到期：{} UTC", at.format("%Y-%m-%d %H:%M"));
+                let mut line = if zh {
+                    format!("到期：{} UTC", at.format("%Y-%m-%d %H:%M"))
+                } else {
+                    format!("Expires: {} UTC", at.format("%Y-%m-%d %H:%M"))
+                };
                 if at <= now {
-                    line.push_str("（已过期）");
+                    line.push_str(kit::tr(" (expired)", "（已过期）"));
                 }
                 lines.push(line);
             } else {
-                lines.push("到期：无效时间".into());
+                lines.push(kit::tr("Expires: invalid time", "到期：无效时间").into());
             }
         }
-        _ => lines.push("到期：无效时间".into()),
+        _ => lines.push(kit::tr("Expires: invalid time", "到期：无效时间").into()),
     }
     lines.join("\n")
 }
@@ -599,7 +619,9 @@ impl Fetcher {
         allowed_host: Option<&str>,
     ) -> Result<mibot_httpx::GuardedResponse, HttpxError> {
         tokio::select! {
-            _ = cancel.cancelled() => Err(HttpxError::UserFacing("操作已取消".into())),
+            _ = cancel.cancelled() => Err(HttpxError::UserFacing(
+                kit::tr("Operation cancelled", "操作已取消").into(),
+            )),
             r = do_guarded_get(target, headers, timeout, limit, self.guard_ssrf, allowed_host, 5) => r,
         }
     }
@@ -640,7 +662,12 @@ impl Fetcher {
                 Some(p) => format!("{h}:{p}"),
                 None => h.to_owned(),
             },
-            _ => return Site { website: String::new(), name: "连接失败".into() },
+            _ => {
+                return Site {
+                    website: String::new(),
+                    name: kit::tr("Connection failed", "连接失败").into(),
+                }
+            }
         };
         let origin = format!("{}://{host}", link.scheme());
         let allowed = link
@@ -668,9 +695,9 @@ impl Fetcher {
             let body = String::from_utf8_lossy(&resp.body);
             let mut title = title_of(&body);
             if title.contains("Cloudflare") || title.contains("Just a moment") {
-                title = "Cloudflare 防护".into();
+                title = kit::tr("Cloudflare protected", "Cloudflare 防护").into();
             } else if title.contains("Access denied") || title.contains("404 Not Found") {
-                title = "不是机场面板域名".into();
+                title = kit::tr("Not a panel domain", "不是机场面板域名").into();
             }
             return Site {
                 website: origin,
@@ -679,7 +706,7 @@ impl Fetcher {
         }
         Site {
             website: origin,
-            name: "连接失败".into(),
+            name: kit::tr("Connection failed", "连接失败").into(),
         }
     }
 
@@ -773,8 +800,12 @@ fn entity_links(msg: &mibot_bot::Message) -> String {
 
 fn failure_text(err: &HttpxError) -> String {
     match err {
-        HttpxError::BlockedAddress(_) => "只能读取公网地址的订阅".into(),
-        HttpxError::CrossHostRedirect => "订阅跳转到了别的域名".into(),
+        HttpxError::BlockedAddress(_) => {
+            kit::tr("Only public subscription URLs are allowed", "只能读取公网地址的订阅").into()
+        }
+        HttpxError::CrossHostRedirect => {
+            kit::tr("Subscription redirected to another domain", "订阅跳转到了别的域名").into()
+        }
         other => httpx_reason(other),
     }
 }
@@ -787,9 +818,21 @@ enum SubError {
 
 fn failure_sentence(err: &SubError) -> String {
     match err {
-        SubError::Parse(msg) => format!("订阅解析失败：{msg}"),
+        SubError::Parse(msg) => {
+            if kit::is_zh() {
+                format!("订阅解析失败：{msg}")
+            } else {
+                format!("Failed to parse subscription: {msg}")
+            }
+        }
         SubError::User(msg) => msg.clone(),
-        SubError::Fetch(e) => format!("订阅读取失败：{}", failure_text(e)),
+        SubError::Fetch(e) => {
+            if kit::is_zh() {
+                format!("订阅读取失败：{}", failure_text(e))
+            } else {
+                format!("Failed to fetch subscription: {}", failure_text(e))
+            }
+        }
     }
 }
 
@@ -807,31 +850,55 @@ enum Outcome {
 }
 
 fn render_report(r: &SubReport, concise: bool, batch: bool, full: bool) -> String {
+    let zh = kit::is_zh();
     let mut out = String::new();
-    out.push_str("📈 <b>订阅信息</b>\n");
-    out.push_str(&format!("<b>机场名称</b>：{}\n", code(&r.name)));
-    out.push_str(&format!("<b>官网链接</b>：{}\n", escape(&r.website)));
-    if concise || batch {
-        out.push_str(&format!("<b>订阅链接</b>：{}\n", code(&r.link)));
+    if zh {
+        out.push_str("📈 <b>订阅信息</b>\n");
+        out.push_str(&format!("<b>机场名称</b>：{}\n", code(&r.name)));
+        out.push_str(&format!("<b>官网链接</b>：{}\n", escape(&r.website)));
+        if concise || batch {
+            out.push_str(&format!("<b>订阅链接</b>：{}\n", code(&r.link)));
+        }
+        out.push_str(&format!("<b>节点总数</b>：{}\n\n", r.summary.names.len()));
+        out.push_str(&format!("<b>流量与到期</b>\n{}", escape(&r.traffic)));
+    } else {
+        out.push_str("📈 <b>Subscription Info</b>\n");
+        out.push_str(&format!("<b>Name</b>: {}\n", code(&r.name)));
+        out.push_str(&format!("<b>Website</b>: {}\n", escape(&r.website)));
+        if concise || batch {
+            out.push_str(&format!("<b>Link</b>: {}\n", code(&r.link)));
+        }
+        out.push_str(&format!("<b>Nodes</b>: {}\n\n", r.summary.names.len()));
+        out.push_str(&format!("<b>Traffic &amp; Expiry</b>\n{}", escape(&r.traffic)));
     }
-    out.push_str(&format!("<b>节点总数</b>：{}\n\n", r.summary.names.len()));
-    out.push_str(&format!("<b>流量与到期</b>\n{}", escape(&r.traffic)));
     if !concise {
         let mut lines = r.summary.protocols.lines();
         if !full && lines.len() > LISTED_PROTOCOLS {
             let extra = lines.len() - LISTED_PROTOCOLS;
             lines.truncate(LISTED_PROTOCOLS);
-            lines.push(format!("…还有 {extra} 种"));
+            if zh {
+                lines.push(format!("…还有 {extra} 种"));
+            } else {
+                lines.push(format!("…and {extra} more"));
+            }
         }
         let protocols = if lines.is_empty() {
-            "未识别常见节点协议".to_owned()
+            kit::tr("No common proxy protocols recognized", "未识别常见节点协议").to_owned()
         } else {
             lines.join("\n")
         };
-        out.push_str(&format!("\n\n<b>协议分布</b>\n<pre>{}</pre>", escape(&protocols)));
+        out.push_str(&format!(
+            "\n\n<b>{}</b>\n<pre>{}</pre>",
+            kit::tr("Protocols", "协议分布"),
+            escape(&protocols)
+        ));
         let regions = r.summary.regions.lines();
         if !regions.is_empty() {
-            out.push_str(&format!("\n<b>地区分布</b>\n{}", escape(&regions.join(" · "))));
+            out.push_str(&format!(
+                "\n<b>{}</b>\n{}",
+                kit::tr("Regions", "地区分布"),
+                escape(&regions.join(" · "))
+            ));
         }
     }
     let total = r.summary.names.len();
@@ -842,10 +909,15 @@ fn render_report(r: &SubReport, concise: bool, batch: bool, full: bool) -> Strin
             lines.push(format!("{}. {}", i + 1, truncate(name, NAME_LIMIT)));
         }
         if shown < total {
-            lines.push(format!("…共 {total} 个，完整列表用 txt 参数查看"));
+            if zh {
+                lines.push(format!("…共 {total} 个，完整列表用 txt 参数查看"));
+            } else {
+                lines.push(format!("…{total} total; use txt for full list"));
+            }
         }
         out.push_str(&format!(
-            "\n\n<b>节点列表</b>\n<pre>{}</pre>",
+            "\n\n<b>{}</b>\n<pre>{}</pre>",
+            kit::tr("Node List", "节点列表"),
             escape(&lines.join("\n"))
         ));
     }
@@ -853,11 +925,19 @@ fn render_report(r: &SubReport, concise: bool, batch: bool, full: bool) -> Strin
 }
 
 fn failed_document(link: &str, err: &SubError) -> String {
-    format!(
-        "📈 <b>订阅信息</b>\n<b>订阅链接</b>：{}\n❌ {}",
-        code(&mask_link(link)),
-        escape(&failure_sentence(err))
-    )
+    if kit::is_zh() {
+        format!(
+            "📈 <b>订阅信息</b>\n<b>订阅链接</b>：{}\n❌ {}",
+            code(&mask_link(link)),
+            escape(&failure_sentence(err))
+        )
+    } else {
+        format!(
+            "📈 <b>Subscription Info</b>\n<b>Link</b>: {}\n❌ {}",
+            code(&mask_link(link)),
+            escape(&failure_sentence(err))
+        )
+    }
 }
 
 fn render_outcomes(results: &[Outcome], concise: bool, full: bool) -> Vec<String> {
@@ -890,10 +970,14 @@ impl Service {
         names: &[Mapping],
     ) -> Result<SubReport, SubError> {
         let Ok(link) = Url::parse(raw) else {
-            return Err(SubError::User("订阅链接无效".into()));
+            return Err(SubError::User(
+                kit::tr("Invalid subscription URL", "订阅链接无效").into(),
+            ));
         };
         if link.host_str().is_none_or(str::is_empty) {
-            return Err(SubError::User("订阅链接无效".into()));
+            return Err(SubError::User(
+                kit::tr("Invalid subscription URL", "订阅链接无效").into(),
+            ));
         }
         let fetched = self
             .fetch
@@ -908,7 +992,7 @@ impl Service {
             name = header_name(&fetched.content_disposition);
         }
         if name.is_empty() {
-            name = kit::or_default(&site.name, "未知").to_owned();
+            name = kit::or_default(&site.name, kit::tr("Unknown", "未知")).to_owned();
         }
         name = truncate(&name, NAME_LIMIT);
         let mut website = site.website;
@@ -940,10 +1024,19 @@ impl Service {
     ) -> CmdResult {
         let peer = inv.client.input_peer(&inv.message.peer)?;
         let name = format!("subinfo-{}.txt", (self.now)().format("%Y%m%d-%H%M"));
-        let caption = if too_long {
-            format!("✅ 结果太长，已生成订阅报告（共 {count} 个链接）")
+        let caption = if kit::is_zh() {
+            if too_long {
+                format!("✅ 结果太长，已生成订阅报告（共 {count} 个链接）")
+            } else {
+                format!("✅ 已生成订阅报告（共 {count} 个链接）")
+            }
         } else {
-            format!("✅ 已生成订阅报告（共 {count} 个链接）")
+            let link_word = if count == 1 { "link" } else { "links" };
+            if too_long {
+                format!("✅ Output too long; generated subscription report ({count} {link_word})")
+            } else {
+                format!("✅ Generated subscription report ({count} {link_word})")
+            }
         };
         let doc_bytes = plain_text(documents).into_bytes();
         inv.client
@@ -960,7 +1053,7 @@ impl Service {
                 },
             )
             .await
-            .map_err(|e| kit::fail_with("发送报告失败", e))?;
+            .map_err(|e| kit::fail_with(kit::tr("Failed to send report", "发送报告失败"), e))?;
         if let Err(err) = inv.client.delete_message(&inv.message).await {
             kit::opt_log(
                 logs,
@@ -1012,24 +1105,36 @@ impl Service {
             return inv.respond_pages(&pages).await.map_err(Into::into);
         }
         if list.len() > MAX_LINKS {
-            return Err(kit::fail(format!(
-                "一次最多查询 {MAX_LINKS} 个订阅，这次有 {} 个",
-                list.len()
-            )));
+            let msg = if kit::is_zh() {
+                format!(
+                    "一次最多查询 {MAX_LINKS} 个订阅，这次有 {} 个",
+                    list.len()
+                )
+            } else {
+                format!(
+                    "Up to {MAX_LINKS} subscriptions at once; got {}",
+                    list.len()
+                )
+            };
+            return Err(kit::fail(msg));
         }
-        inv.edit_text(&kit::working(&format!("正在读取 {} 个订阅", list.len())))
-            .await?;
+        let working_msg = if kit::is_zh() {
+            format!("正在读取 {} 个订阅", list.len())
+        } else {
+            format!("Fetching {} subscriptions", list.len())
+        };
+        inv.edit_text(&kit::working(&working_msg)).await?;
         let names = self.fetch.mappings(&inv.cancel).await;
         let mut results = Vec::with_capacity(list.len());
         for link in &list {
             if inv.cancel.is_cancelled() {
-                return Err(kit::fail("操作已取消"));
+                return Err(kit::fail(kit::tr("Operation cancelled", "操作已取消")));
             }
             match self.inspect(&inv.cancel, link, &names).await {
                 Ok(r) => results.push(Outcome::Ok(r)),
                 Err(err) => {
                     if inv.cancel.is_cancelled() {
-                        return Err(kit::fail("操作已取消"));
+                        return Err(kit::fail(kit::tr("Operation cancelled", "操作已取消")));
                     }
                     let msg = failure_sentence(&err);
                     kit::opt_log(
@@ -1069,20 +1174,37 @@ fn help(prefix: &str) -> String {
     let item = |cmd: &str, args: &str, text: &str| {
         format!("• <code>{p}{cmd} {args}</code> {text}\n")
     };
+    if kit::is_zh() {
+        return format!(
+            "📈 <b>订阅信息查询</b>\n\n查询订阅的节点数量、协议、地区分布、流量与到期时间。\n\n{}{}{}{}\
+             • 回复一条带订阅链接的消息，发送 <code>{p}subinfo</code> 或 <code>{p}cha</code>\n\n\
+             <b>支持的内容</b>\n\
+             • Clash YAML/JSON 的 proxies 列表\n\
+             • 明文或 Base64 编码的节点链接\n\
+             • VMess、VLESS、Trojan、SS、SSR、Hysteria、TUIC、WireGuard 等协议\n\
+             • 流量和到期时间取自服务端返回的 subscription-userinfo 响应头\n\
+             • 地区按节点名称识别，认不出的归入「其他」\n\n\
+             一次最多 {MAX_LINKS} 个链接，只访问公网地址。聊天里最多列出 {LISTED_NODES} 个节点，结果超过 {MAX_PAGES} 页时改发 TXT 文件。订阅链接里带着 Token，结果里只显示打过码的链接。",
+            item("subinfo", "订阅链接…", "查询一个或多个订阅"),
+            item("subinfo", "txt 订阅链接…", "结果写成 TXT 文件发送"),
+            item("cha", "订阅链接…", "简要查询"),
+            item("cha", "txt 订阅链接…", "简要结果写成 TXT 文件发送"),
+        );
+    }
     format!(
-        "📈 <b>订阅信息查询</b>\n\n查询订阅的节点数量、协议、地区分布、流量与到期时间。\n\n{}{}{}{}\
-         • 回复一条带订阅链接的消息，发送 <code>{p}subinfo</code> 或 <code>{p}cha</code>\n\n\
-         <b>支持的内容</b>\n\
-         • Clash YAML/JSON 的 proxies 列表\n\
-         • 明文或 Base64 编码的节点链接\n\
-         • VMess、VLESS、Trojan、SS、SSR、Hysteria、TUIC、WireGuard 等协议\n\
-         • 流量和到期时间取自服务端返回的 subscription-userinfo 响应头\n\
-         • 地区按节点名称识别，认不出的归入「其他」\n\n\
-         一次最多 {MAX_LINKS} 个链接，只访问公网地址。聊天里最多列出 {LISTED_NODES} 个节点，结果超过 {MAX_PAGES} 页时改发 TXT 文件。订阅链接里带着 Token，结果里只显示打过码的链接。",
-        item("subinfo", "订阅链接…", "查询一个或多个订阅"),
-        item("subinfo", "txt 订阅链接…", "结果写成 TXT 文件发送"),
-        item("cha", "订阅链接…", "简要查询"),
-        item("cha", "txt 订阅链接…", "简要结果写成 TXT 文件发送"),
+        "📈 <b>Subscription Info</b>\n\nInspect node counts, protocols, region breakdown, traffic, and expiration for proxy subscriptions.\n\n{}{}{}{}\
+         • Reply to a message with subscription links and send <code>{p}subinfo</code> or <code>{p}cha</code>\n\n\
+         <b>Supported formats</b>\n\
+         • Clash YAML/JSON proxies list\n\
+         • Plaintext or Base64-encoded node URIs\n\
+         • VMess, VLESS, Trojan, SS, SSR, Hysteria, TUIC, WireGuard, etc.\n\
+         • Traffic and expiry parsed from the subscription-userinfo response header\n\
+         • Regions inferred from node names; unrecognized nodes grouped under “Other”\n\n\
+         Up to {MAX_LINKS} links per call (public addresses only). Shows up to {LISTED_NODES} nodes in chat, or sends a TXT file if output exceeds {MAX_PAGES} pages. Subscription links contain tokens, so displayed links are masked.",
+        item("subinfo", "URL…", "Inspect one or more subscriptions"),
+        item("subinfo", "txt URL…", "Send report as a TXT file"),
+        item("cha", "URL…", "Brief summary"),
+        item("cha", "txt URL…", "Send brief report as a TXT file"),
     )
 }
 
@@ -1091,9 +1213,9 @@ pub fn register(app: &Arc<App>) {
         fetch: Fetcher::new(true, MAPPINGS_URL.to_owned()),
         now: Utc::now,
     });
-    for (name, desc, concise) in [
-        ("subinfo", "查看订阅的节点与流量", false),
-        ("cha", "简要查看订阅信息", true),
+    for (name, desc, desc_zh, concise) in [
+        ("subinfo", "Inspect subscription details", "查看订阅的节点与流量", false),
+        ("cha", "Brief subscription summary", "简要查看订阅信息", true),
     ] {
         let s = Arc::clone(&svc);
         let logs = Arc::clone(&app.logs);
@@ -1102,14 +1224,15 @@ pub fn register(app: &Arc<App>) {
             &[],
             group::TOOLS,
             desc,
-            "[txt] [订阅链接…]",
+            "[txt] [URL…]",
             help,
             move |inv| {
                 let s = Arc::clone(&s);
                 let logs = Arc::clone(&logs);
                 Box::pin(async move { s.handle(&inv, Some(&logs), concise).await })
             },
-        );
+        )
+        .zh(desc_zh, "[txt] [订阅链接…]");
         cmd.timeout = Some(Duration::from_secs(15 * 60));
         app.registry.register(cmd);
     }
@@ -1269,22 +1392,22 @@ proxy-groups: []
 "#;
         let res = parse_subscription(raw).unwrap();
         assert_eq!(res.names, vec!["🇭🇰 香港 01", "US-West", "TROJAN 3"]);
-        assert_eq!(res.protocols.lines(), vec!["ss：1", "vmess：1", "trojan：1"]);
-        assert_eq!(res.regions.lines(), vec!["香港：1", "美国：1", "其他：1"]);
+        assert_eq!(res.protocols.lines(), vec!["ss: 1", "vmess: 1", "trojan: 1"]);
+        assert_eq!(res.regions.lines(), vec!["Hong Kong: 1", "United States: 1", "Other: 1"]);
 
         let j = parse_subscription(
             r#"{"proxies":[{"name":"日本 Tokyo","type":"hysteria2","server":"a","port":1},{"name":"x","type":"tuic"}]}"#,
         )
         .unwrap();
         assert_eq!(j.names.len(), 2);
-        assert_eq!(j.protocols.lines(), vec!["hysteria2：1", "tuic：1"]);
+        assert_eq!(j.protocols.lines(), vec!["hysteria2: 1", "tuic: 1"]);
 
         for (bad, want) in [
-            ("proxies: 3\n", "无效的 Clash 节点列表"),
-            ("proxies:\n  - {name: a}\n", "无效的 Clash 节点"),
-            ("proxies:\n  - {name: a, type: 'x y'}\n", "无效的 Clash 协议"),
-            ("{ not json", "订阅不是有效的 Clash 配置"),
-            ("   ", "订阅内容为空"),
+            ("proxies: 3\n", "Invalid Clash proxy list"),
+            ("proxies:\n  - {name: a}\n", "Invalid Clash proxy entry"),
+            ("proxies:\n  - {name: a, type: 'x y'}\n", "Invalid Clash proxy type"),
+            ("{ not json", "Not a valid Clash configuration"),
+            ("   ", "Subscription content is empty"),
         ] {
             let err = parse_subscription(bad).unwrap_err();
             assert_eq!(err.0, want, "raw={bad:?}");
@@ -1294,7 +1417,7 @@ proxy-groups: []
             let r = parse_subscription(&format!("port: 7890\n{key}:\n  - {{name: US-West, type: vmess}}\n"))
                 .unwrap();
             assert_eq!(r.names, vec!["US-West"]);
-            assert_eq!(r.protocols.lines(), vec!["vmess：1"]);
+            assert_eq!(r.protocols.lines(), vec!["vmess: 1"]);
         }
 
         let vmess = format!(
@@ -1341,7 +1464,7 @@ proxy-groups: []
             );
             assert_eq!(
                 res.regions.lines(),
-                vec!["新加坡：1", "台湾：1", "英国：1", "韩国：1", "德国：1", "其他：3"]
+                vec!["Singapore: 1", "Taiwan: 1", "United Kingdom: 1", "South Korea: 1", "Germany: 1", "Other: 3"]
             );
         }
     }
@@ -1350,17 +1473,17 @@ proxy-groups: []
     fn test_traffic_helpers_and_public_addr() {
         let now = Utc.with_ymd_and_hms(2026, 9, 30, 0, 0, 0).unwrap();
         let header = "upload=1073741824; download=2147483648; total=10737418240; expire=1798761600";
-        let want = "上传：1.00 GB\n下载：2.00 GB\n已用：3.00 GB\n总量：10.00 GB\n剩余：7.00 GB\n到期：2027-01-01 00:00 UTC";
+        let want = "Upload: 1.00 GB\nDownload: 2.00 GB\nUsed: 3.00 GB\nTotal: 10.00 GB\nRemaining: 7.00 GB\nExpires: 2027-01-01 00:00 UTC";
         assert_eq!(traffic_summary(header, true, now), want);
-        assert_eq!(traffic_summary("", false, now), "流量统计：未提供");
+        assert_eq!(traffic_summary("", false, now), "Traffic stats: not provided");
         let depleted = traffic_summary("upload=5; download=10; total=10; expire=1000", true, now);
-        assert!(depleted.contains("剩余：0 B\n流量状态：已耗尽"));
-        assert!(depleted.contains("到期：1970-01-01 00:16 UTC（已过期）"));
+        assert!(depleted.contains("Remaining: 0 B\nTraffic status: exhausted"));
+        assert!(depleted.contains("Expires: 1970-01-01 00:16 UTC (expired)"));
         let partial = traffic_summary("UPLOAD = 1;total=0;expire=0;junk=5", true, now);
-        assert_eq!(partial, "上传：1 B\n下载：未知\n总量：未设限\n到期：未设期限");
-        assert!(traffic_summary("expire=99999999999999", true, now).ends_with("到期：无效时间"));
+        assert_eq!(partial, "Upload: 1 B\nDownload: unknown\nTotal: unlimited\nExpires: never");
+        assert!(traffic_summary("expire=99999999999999", true, now).ends_with("Expires: invalid time"));
         let ov = traffic_summary("upload=18446744073709551615; download=10; total=100", true, now);
-        assert!(ov.contains("已用：17179869184.00 GB") && ov.contains("流量状态：已耗尽"));
+        assert!(ov.contains("Used: 17179869184.00 GB") && ov.contains("Traffic status: exhausted"));
 
         assert_eq!(header_name("attachment; filename*=UTF-8''%E6%9C%BA%E5%9C%BA"), "机场");
         assert_eq!(header_name(r#"attachment; filename="My Airport""#), "My Airport");
@@ -1500,7 +1623,7 @@ proxy-groups: []
         let link_s = Url::parse(&format!("http://{addr}/s")).unwrap();
         let err = guarded.fetch_subscription(&cancel, &link_s).await.unwrap_err();
         assert!(matches!(err, HttpxError::BlockedAddress(_)));
-        assert_eq!(failure_text(&err), "只能读取公网地址的订阅");
+        assert_eq!(failure_text(&err), "Only public subscription URLs are allowed");
 
         let open = Fetcher::new(false, format!("http://{addr}/ymys.txt"));
         let jump_u = Url::parse(&format!("http://{addr}/jump")).unwrap();
@@ -1517,18 +1640,18 @@ proxy-groups: []
         res.unwrap();
         let out = tg.all();
         for want in [
-            "订阅信息",
-            "机场名称：喵云",
-            "节点总数：2",
-            "下载：1.0 MB",
-            "总量：未设限",
-            "trojan：1\nss：1",
-            "香港：1 · 日本：1",
+            "Subscription Info",
+            "Name: 喵云",
+            "Nodes: 2",
+            "Download: 1.0 MB",
+            "Total: unlimited",
+            "trojan: 1\nss: 1",
+            "Hong Kong: 1 · Japan: 1",
             "1. 香港 01\n2. Japan 02",
         ] {
             assert!(out.contains(want), "missing {want}:\n{out}");
         }
-        assert!(!out.contains(token) && !out.contains("订阅链接"));
+        assert!(!out.contains(token) && !out.contains("Link:"));
 
         let missing = format!("http://{addr}/missing?token=zzzz");
         let (tg, res) = run_cmd(&s, &[&sub_link, &missing]).await;
@@ -1536,20 +1659,20 @@ proxy-groups: []
         let out = tg.all();
         assert!(!out.contains(token));
         assert!(out.contains("/…9f8e"));
-        assert!(out.contains("❌ 订阅读取失败：服务返回 HTTP 404"));
+        assert!(out.contains("❌ Failed to fetch subscription: Server returned HTTP 404"));
 
         let empty_u = format!("http://{addr}/empty");
         let (_, res) = run_cmd(&s, &[&empty_u]).await;
         let err = res.unwrap_err();
         assert!(kit::is_user_error(err.as_ref()));
-        assert_eq!(err.to_string(), "订阅解析失败：订阅内容为空");
+        assert_eq!(err.to_string(), "Failed to parse subscription: Subscription content is empty");
 
         let (tg, res) = run_cmd(&s, &["txt", &sub_link]).await;
         res.unwrap();
         let report = String::from_utf8_lossy(&tg.uploaded.lock().unwrap()).into_owned();
-        assert_eq!(tg.captions.lock().unwrap().as_slice(), &["✅ 已生成订阅报告（共 1 个链接）"]);
+        assert_eq!(tg.captions.lock().unwrap().as_slice(), &["✅ Generated subscription report (1 link)"]);
         assert_eq!(tg.deleted.lock().unwrap().as_slice(), &[7]);
-        assert!(!report.contains(token) && !report.contains("<b>") && report.contains("机场名称：喵云"));
+        assert!(!report.contains(token) && !report.contains("<b>") && report.contains("Name: 喵云"));
 
         // Long result turns into TXT
         let big1 = format!("http://{addr}/big?t=1");
@@ -1557,9 +1680,9 @@ proxy-groups: []
         let (tg, res) = run_cmd(&s, &[&big1, &big2]).await;
         res.unwrap();
         let big_rep = String::from_utf8_lossy(&tg.uploaded.lock().unwrap()).into_owned();
-        assert!(tg.captions.lock().unwrap()[0].contains("结果太长"));
+        assert!(tg.captions.lock().unwrap()[0].contains("Output too long"));
         assert!(big_rep.contains("300. "));
-        assert!(big_rep.contains(&format!("机场名称：{}…", "A".repeat(64))));
+        assert!(big_rep.contains(&format!("Name: {}…", "A".repeat(64))));
         assert!(!big_rep.contains(&"A".repeat(65)));
 
         // Too many links
@@ -1569,7 +1692,7 @@ proxy-groups: []
         let refs: Vec<&str> = many.iter().map(String::as_str).collect();
         let (_, res) = run_cmd(&s, &refs).await;
         let err = res.unwrap_err();
-        assert!(err.to_string().contains("一次最多查询 20 个订阅"));
+        assert!(err.to_string().contains("Up to 20 subscriptions at once"));
 
         stop.store(true, Ordering::Relaxed);
         let _ = AtomicUsize::new(0);

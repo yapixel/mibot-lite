@@ -236,13 +236,25 @@ fn render_list(prefix: &str, items: &[Entry], page: usize) -> String {
     let rows: Vec<String> = (start..end)
         .map(|i| format!("{}. {}", i + 1, escape(&preview(&items[i]))))
         .collect();
-    let mut text = format!(
-        "✈️ <b>Aff 列表</b> · {page}/{total}\n\n{}\n\n{} 发送指定的一条",
-        rows.join("\n"),
-        code(&format!("{prefix}aff 序号")),
-    );
+    let idx_cmd = code(&format!("{prefix}aff {}", kit::tr("index", "序号")));
+    let mut text = if kit::is_zh() {
+        format!(
+            "✈️ <b>Aff 列表</b> · {page}/{total}\n\n{}\n\n{idx_cmd} 发送指定的一条",
+            rows.join("\n"),
+        )
+    } else {
+        format!(
+            "✈️ <b>Aff List</b> · {page}/{total}\n\n{}\n\n{idx_cmd} to send an entry",
+            rows.join("\n"),
+        )
+    };
     if page < total {
-        text.push_str(&format!("，{} 看下一页", code(&format!("{prefix}aff list {}", page + 1))));
+        let next_cmd = code(&format!("{prefix}aff list {}", page + 1));
+        if kit::is_zh() {
+            text.push_str(&format!("，{next_cmd} 看下一页"));
+        } else {
+            text.push_str(&format!(", {next_cmd} for next page"));
+        }
     }
     text
 }
@@ -256,16 +268,23 @@ async fn send_entry(inv: &Invocation, item: &Entry) -> CmdResult {
 
 async fn list_cmd(inv: &Invocation, items: &[Entry], raw: &str) -> CmdResult {
     if items.is_empty() {
+        let save_cmd = code(&format!("{}aff save", inv.prefix()));
         return inv
-            .edit(&format!(
-                "✈️ <b>Aff 列表</b>\n\n还没有保存任何一条，回复一条消息发 {} 保存",
-                code(&format!("{}aff save", inv.prefix()))
-            ))
+            .edit(&if kit::is_zh() {
+                format!("✈️ <b>Aff 列表</b>\n\n还没有保存任何一条，回复一条消息发 {save_cmd} 保存")
+            } else {
+                format!("✈️ <b>Aff List</b>\n\nNo entries saved yet. Reply to a message and send {save_cmd} to save one.")
+            })
             .await
             .map_err(Into::into);
     }
     let Some(page) = parse_page(raw, items.len()) else {
-        return Err(kit::fail(format!("页码无效，共 {} 页", pages(items.len()))));
+        let total = pages(items.len());
+        return Err(kit::fail(if kit::is_zh() {
+            format!("页码无效，共 {total} 页")
+        } else {
+            format!("Invalid page; {total} page(s) total")
+        }));
     };
     inv.edit(&render_list(inv.prefix(), items, page))
         .await
@@ -276,9 +295,12 @@ fn append_entry(data: &Store<Document>, item: Entry) -> CmdResult<usize> {
     let mut index = 0usize;
     data.update(|doc| {
         if doc.affs.len() >= MAX_ENTRIES {
-            return Err(mibot_store::StoreError::Io(std::io::Error::other(format!(
-                "__USER__已经存了 {MAX_ENTRIES} 条，先删掉不需要的再保存"
-            ))));
+            let msg = if kit::is_zh() {
+                format!("__USER__已经存了 {MAX_ENTRIES} 条，先删掉不需要的再保存")
+            } else {
+                format!("__USER__Already saved {MAX_ENTRIES} entries; remove unused ones first")
+            };
+            return Err(mibot_store::StoreError::Io(std::io::Error::other(msg)));
         }
         doc.affs.push(item.clone());
         index = doc.affs.len();
@@ -298,9 +320,12 @@ fn append_entry(data: &Store<Document>, item: Entry) -> CmdResult<usize> {
 fn remove_entry(data: &Store<Document>, index: usize) -> CmdResult {
     data.update(|doc| {
         if index < 1 || index > doc.affs.len() {
-            return Err(mibot_store::StoreError::Io(std::io::Error::other(format!(
-                "__USER__没有第 {index} 条"
-            ))));
+            let msg = if kit::is_zh() {
+                format!("__USER__没有第 {index} 条")
+            } else {
+                format!("__USER__No entry #{index}")
+            };
+            return Err(mibot_store::StoreError::Io(std::io::Error::other(msg)));
         }
         doc.affs.remove(index - 1);
         Ok::<(), mibot_store::StoreError>(())
@@ -318,41 +343,64 @@ fn remove_entry(data: &Store<Document>, index: usize) -> CmdResult {
 
 async fn save_cmd(inv: &Invocation, data: &Store<Document>) -> CmdResult {
     let Some(reply) = kit::reply_msg(inv).await? else {
-        return Err(kit::fail(format!(
-            "请回复要保存的消息再发 {}aff save",
-            inv.prefix()
-        )));
+        return Err(kit::fail(if kit::is_zh() {
+            format!("请回复要保存的消息再发 {}aff save", inv.prefix())
+        } else {
+            format!("Reply to a message and send {}aff save", inv.prefix())
+        }));
     };
     let text = reply.content();
     if text.trim().is_empty() {
-        return Err(kit::fail("被回复的消息没有文字"));
-    }
-    if mibot_bot::utf16_len(&text) > MAX_LENGTH {
-        return Err(kit::fail(format!(
-            "文字超过 {MAX_LENGTH} 字，没有保存，缩短后再试"
+        return Err(kit::fail(kit::tr(
+            "Replied message has no text",
+            "被回复的消息没有文字",
         )));
     }
+    if mibot_bot::utf16_len(&text) > MAX_LENGTH {
+        return Err(kit::fail(if kit::is_zh() {
+            format!("文字超过 {MAX_LENGTH} 字，没有保存，缩短后再试")
+        } else {
+            format!("Text exceeds {MAX_LENGTH} chars; shorten it and try again")
+        }));
+    }
     let idx = append_entry(data, new_entry(Some(&reply.raw), &text, Utc::now().timestamp_millis()))?;
-    inv.edit_text(&format!("✅ 已保存为第 {idx} 条"))
-        .await
-        .map_err(Into::into)
+    inv.edit_text(&if kit::is_zh() {
+        format!("✅ 已保存为第 {idx} 条")
+    } else {
+        format!("✅ Saved as entry #{idx}")
+    })
+    .await
+    .map_err(Into::into)
 }
 
 async fn remove_cmd(inv: &Invocation, data: &Store<Document>) -> CmdResult {
     let raw = inv.arg(1);
     if raw.is_empty() {
-        return Err(kit::usage(inv.prefix(), "aff remove 序号"));
+        return Err(kit::usage(
+            inv.prefix(),
+            kit::tr("aff remove <index>", "aff remove 序号"),
+        ));
     }
     if !kit::is_digits(raw) {
-        return Err(kit::fail("序号要写正整数"));
+        return Err(kit::fail(kit::tr(
+            "Index must be a positive integer",
+            "序号要写正整数",
+        )));
     }
     let Ok(idx) = raw.parse::<usize>().ok().filter(|&n| n >= 1).ok_or(()) else {
-        return Err(kit::fail("序号要写正整数"));
+        return Err(kit::fail(kit::tr(
+            "Index must be a positive integer",
+            "序号要写正整数",
+        )));
     };
     remove_entry(data, idx)?;
-    inv.edit_text(&format!("✅ 已删除第 {idx} 条"))
-        .await
-        .map_err(Into::into)
+    inv.edit_text(&if kit::is_zh() {
+        format!("✅ 已删除第 {idx} 条")
+    } else {
+        format!("✅ Deleted entry #{idx}")
+    })
+    .await
+    .map_err(Into::into)
 }
 
 async fn handle(inv: &Invocation, data: &Store<Document>) -> CmdResult {
@@ -360,10 +408,11 @@ async fn handle(inv: &Invocation, data: &Store<Document>) -> CmdResult {
     let sub = inv.arg(0).to_ascii_lowercase();
     match sub.as_str() {
         "" => match doc.affs.len() {
-            0 => Err(kit::fail(format!(
-                "还没有保存 Aff，回复一条消息发 {}aff save 保存",
-                inv.prefix()
-            ))),
+            0 => Err(kit::fail(if kit::is_zh() {
+                format!("还没有保存 Aff，回复一条消息发 {}aff save 保存", inv.prefix())
+            } else {
+                format!("No aff entries saved yet; reply to a message with {}aff save", inv.prefix())
+            })),
             1 => send_entry(inv, &doc.affs[0]).await,
             _ => list_cmd(inv, &doc.affs, "1").await,
         },
@@ -377,38 +426,56 @@ async fn handle(inv: &Invocation, data: &Store<Document>) -> CmdResult {
                 .filter(|&n| n >= 1 && n <= doc.affs.len())
                 .ok_or(())
             else {
-                return Err(kit::fail(format!(
-                    "没有第 {sub} 条，{}aff list 查看全部",
-                    inv.prefix()
-                )));
+                return Err(kit::fail(if kit::is_zh() {
+                    format!("没有第 {sub} 条，{}aff list 查看全部", inv.prefix())
+                } else {
+                    format!("No entry #{sub}; send {}aff list to view all", inv.prefix())
+                }));
             };
             send_entry(inv, &doc.affs[idx - 1]).await
         }
-        _ => Err(kit::fail(format!(
-            "没有这个子命令：{}，{}help aff 查看用法",
-            inv.arg(0),
-            inv.prefix()
-        ))),
+        _ => Err(kit::fail(if kit::is_zh() {
+            format!("没有这个子命令：{}，{}help aff 查看用法", inv.arg(0), inv.prefix())
+        } else {
+            format!("Unknown subcommand: {}; see {}help aff", inv.arg(0), inv.prefix())
+        })),
     }
 }
 
 fn help(prefix: &str) -> String {
     let p = escape(prefix);
     let c = |txt: &str| format!("<code>{p}aff{txt}</code>");
-    format!(
-        "✈️ <b>机场 Aff 信息</b>\n\n在别人打算买机场的时候光速发出自己的 Aff 信息，可以存多条。\n\n\
-         • {} 发送默认的一条；存了多条时显示列表\n\
-         • {} 发送指定的一条\n\
-         • {} 回复一条消息，把它存为新的一条，格式和链接都保留\n\
-         • {} 查看列表，每页 {PAGE_SIZE} 条\n\
-         • {} 删除指定的一条\n\n\
-         最多存 {MAX_ENTRIES} 条，每条最多 {MAX_LENGTH} 字，序号从 1 开始。",
-        c(""),
-        c(" 序号"),
-        c(" save"),
-        c(" list [页码]"),
-        c(" remove 序号"),
-    )
+    if kit::is_zh() {
+        format!(
+            "✈️ <b>机场 Aff 信息</b>\n\n在别人打算买机场的时候光速发出自己的 Aff 信息，可以存多条。\n\n\
+             • {} 发送默认的一条；存了多条时显示列表\n\
+             • {} 发送指定的一条\n\
+             • {} 回复一条消息，把它存为新的一条，格式和链接都保留\n\
+             • {} 查看列表，每页 {PAGE_SIZE} 条\n\
+             • {} 删除指定的一条\n\n\
+             最多存 {MAX_ENTRIES} 条，每条最多 {MAX_LENGTH} 字，序号从 1 开始。",
+            c(""),
+            c(" 序号"),
+            c(" save"),
+            c(" list [页码]"),
+            c(" remove 序号"),
+        )
+    } else {
+        format!(
+            "✈️ <b>Aff Messages</b>\n\nSave and quickly send your affiliate/referral messages.\n\n\
+             • {} Send default entry; or show list if multiple saved\n\
+             • {} Send a specific entry\n\
+             • {} Reply to a message to save it (keeps formatting and links)\n\
+             • {} View list ({PAGE_SIZE} per page)\n\
+             • {} Delete a specific entry\n\n\
+             Up to {MAX_ENTRIES} entries, max {MAX_LENGTH} chars each, indexed from 1.",
+            c(""),
+            c(" index"),
+            c(" save"),
+            c(" list [page]"),
+            c(" remove index"),
+        )
+    }
 }
 
 pub fn register(app: &Arc<App>) {
@@ -417,14 +484,15 @@ pub fn register(app: &Arc<App>) {
         "aff",
         &[],
         group::MEDIA,
-        "管理并发送 Aff 信息",
-        "[序号|save|list [页码]|remove 序号]",
+        "Manage and send aff links",
+        "[index|save|list [page]|remove index]",
         help,
         move |inv| {
             let d = Arc::clone(&data);
             Box::pin(async move { handle(&inv, &d).await })
         },
-    );
+    )
+    .zh("管理并发送 Aff 信息", "[序号|save|list [页码]|remove 序号]");
     cmd.timeout = Some(std::time::Duration::from_secs(30));
     app.registry.register(cmd);
 }

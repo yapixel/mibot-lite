@@ -364,7 +364,7 @@ impl RateService {
             format!("https://api.coinbase.com/v2/exchange-rates?currency={upper_escaped}"),
             format!("https://cdn.jsdelivr.net/gh/fawazahmed0/currency-api@1/latest/currencies/{escaped}.json"),
         ];
-        let mut last = "法币汇率服务不可用".to_owned();
+        let mut last = kit::tr("Fiat rate service unavailable", "法币汇率服务不可用").to_owned();
         for endpoint in endpoints {
             let data = match getter.get(cancel, &endpoint, Duration::from_secs(8)).await {
                 Ok(v) => v,
@@ -382,11 +382,11 @@ impl RateService {
             let success_false = data.get("success").and_then(|v| v.as_bool()) == Some(false);
             let bad_result = data.get("result").is_some_and(|v| v.as_str() != Some("success"));
             let Some(obj) = source.filter(|_| !success_false && !bad_result) else {
-                last = "法币汇率数据格式无效".into();
+                last = kit::tr("Invalid fiat rate response format", "法币汇率数据格式无效").into();
                 continue;
             };
             if obj.is_empty() || obj.len() > 1024 {
-                last = "法币汇率数据大小无效".into();
+                last = kit::tr("Invalid fiat rate payload size", "法币汇率数据大小无效").into();
                 continue;
             }
             let mut rates = HashMap::new();
@@ -408,7 +408,7 @@ impl RateService {
                 }
             }
             if rates.is_empty() {
-                last = "法币汇率数据无有效价格".into();
+                last = kit::tr("No valid prices in fiat rate data", "法币汇率数据无有效价格").into();
                 continue;
             }
             let mut g = self.mu.lock().await;
@@ -426,7 +426,11 @@ impl RateService {
             );
             return Ok(rates);
         }
-        Err(RateFailure(format!("法币汇率服务不可用：{last}")))
+        Err(RateFailure(if kit::is_zh() {
+            format!("法币汇率服务不可用：{last}")
+        } else {
+            format!("Fiat rate service unavailable: {last}")
+        }))
     }
 }
 
@@ -459,11 +463,17 @@ impl RateGetter<'_> {
         timeout: Duration,
     ) -> Result<serde_json::Value, RateFailure> {
         if cancel.is_cancelled() {
-            return Err(RateFailure("操作已取消".into()));
+            return Err(RateFailure(kit::tr("Cancelled", "操作已取消").into()));
         }
         self.requests += 1;
         if self.requests > 64 {
-            return Err(RateFailure("本次查询已达到请求上限，稍后再试".into()));
+            return Err(RateFailure(
+                kit::tr(
+                    "Request limit reached for this query; try again later",
+                    "本次查询已达到请求上限，稍后再试",
+                )
+                .into(),
+            ));
         }
         let req = Request {
             url: target.to_owned(),
@@ -472,17 +482,34 @@ impl RateGetter<'_> {
             ..Default::default()
         };
         let resp = tokio::select! {
-            _ = cancel.cancelled() => return Err(RateFailure("操作已取消".into())),
+            _ = cancel.cancelled() => return Err(RateFailure(kit::tr("Cancelled", "操作已取消").into())),
             r = (self.fetch)(req) => r.map_err(|e| RateFailure(httpx_reason(&e)))?,
         };
         if !resp.ok() {
             if resp.status == 429 {
-                return Err(RateFailure("请求太频繁，被汇率服务限流了，过几分钟再试".into()));
+                return Err(RateFailure(
+                    kit::tr(
+                        "Rate-limited by exchange rate service; try again in a few minutes",
+                        "请求太频繁，被汇率服务限流了，过几分钟再试",
+                    )
+                    .into(),
+                ));
             }
-            return Err(RateFailure(format!("汇率服务 HTTP {}", resp.status)));
+            return Err(RateFailure(if kit::is_zh() {
+                format!("汇率服务 HTTP {}", resp.status)
+            } else {
+                format!("Exchange rate service HTTP {}", resp.status)
+            }));
         }
-        serde_json::from_slice(&resp.body)
-            .map_err(|_| RateFailure("汇率服务返回的数据格式或大小无效".into()))
+        serde_json::from_slice(&resp.body).map_err(|_| {
+            RateFailure(
+                kit::tr(
+                    "Invalid exchange rate response format or size",
+                    "汇率服务返回的数据格式或大小无效",
+                )
+                .into(),
+            )
+        })
     }
 }
 
@@ -509,13 +536,26 @@ fn normalize_currency(token: &str) -> String {
 
 fn parse_rate_args(args: &[String]) -> Result<(String, String, f64), RateFailure> {
     if args.len() > 32 {
-        return Err(RateFailure("参数过多，请使用货币代码和有限数量".into()));
+        return Err(RateFailure(
+            kit::tr(
+                "Too many arguments; use currency codes and a finite amount",
+                "参数过多，请使用货币代码和有限数量",
+            )
+            .into(),
+        ));
     }
+    let bad = || {
+        kit::tr(
+            "Please provide valid currency codes and a finite amount",
+            "请提供有效的货币代码和有限数量",
+        )
+        .into()
+    };
     let mut amount = 1.0f64;
     let mut currencies = Vec::new();
     for arg in args {
         if arg.len() > 64 || !arg_re().is_match(arg) {
-            return Err(RateFailure("请提供有效的货币代码和有限数量".into()));
+            return Err(RateFailure(bad()));
         }
         let token = normalize_currency(arg);
         if let Ok(num) = token.parse::<f64>()
@@ -529,7 +569,7 @@ fn parse_rate_args(args: &[String]) -> Result<(String, String, f64), RateFailure
             currencies.push(token);
             continue;
         }
-        return Err(RateFailure("请提供有效的货币代码和有限数量".into()));
+        return Err(RateFailure(bad()));
     }
     let base = currencies.first().cloned().unwrap_or_else(|| "btc".into());
     let quote = currencies.get(1).cloned().unwrap_or_else(|| "usd".into());
@@ -538,7 +578,13 @@ fn parse_rate_args(args: &[String]) -> Result<(String, String, f64), RateFailure
 
 fn positive_rate(v: f64) -> Result<f64, RateFailure> {
     if !v.is_finite() || v <= 0.0 {
-        return Err(RateFailure("汇率服务返回了无效价格".into()));
+        return Err(RateFailure(
+            kit::tr(
+                "Exchange rate service returned an invalid price",
+                "汇率服务返回了无效价格",
+            )
+            .into(),
+        ));
     }
     Ok(v)
 }
@@ -616,7 +662,9 @@ impl RatePricer<'_> {
         {
             n
         } else {
-            return Err(RateFailure("币安交易对价格无效".into()));
+            return Err(RateFailure(
+                kit::tr("Invalid Binance pair price", "币安交易对价格无效").into(),
+            ));
         };
         let p = positive_rate(parsed)?;
         self.tickers.insert(pair.to_owned(), p);
@@ -631,7 +679,7 @@ impl RatePricer<'_> {
     }
 
     async fn crypto_fiat(&mut self, crypto: &str, fiat: &str) -> Result<f64, RateFailure> {
-        let mut last = "交易对不可用".to_owned();
+        let mut last = kit::tr("Trading pair unavailable", "交易对不可用").to_owned();
         for bridge in RATE_BRIDGES {
             let price = match self.in_bridge(crypto, bridge).await {
                 Ok(p) => p,
@@ -658,7 +706,11 @@ impl RatePricer<'_> {
             };
             return positive_rate(price * rate);
         }
-        Err(RateFailure(format!("无法获取 {crypto} 对 {fiat} 的价格。最后错误：{last}")))
+        Err(RateFailure(if kit::is_zh() {
+            format!("无法获取 {crypto} 对 {fiat} 的价格。最后错误：{last}")
+        } else {
+            format!("Unable to get {crypto}/{fiat} price. Last error: {last}")
+        }))
     }
 
     async fn crypto_crypto(&mut self, first: &str, second: &str) -> Result<f64, RateFailure> {
@@ -685,7 +737,11 @@ impl RatePricer<'_> {
             };
             return positive_rate(a / b);
         }
-        Err(RateFailure(format!("无法找到 {first} 和 {second} 之间的交易对")))
+        Err(RateFailure(if kit::is_zh() {
+            format!("无法找到 {first} 和 {second} 之间的交易对")
+        } else {
+            format!("No trading pair found between {first} and {second}")
+        }))
     }
 
     async fn price(&mut self, source: &RateCurrency, target: &RateCurrency) -> Result<f64, RateFailure> {
@@ -695,10 +751,17 @@ impl RatePricer<'_> {
             (true, false) => match self.crypto_fiat(&target.symbol, &source.symbol).await {
                 Ok(rev) => positive_rate(1.0 / rev),
                 Err(e) if self.cancel.is_cancelled() => Err(e),
-                Err(_) => Err(RateFailure(format!(
-                    "无法获取 {} 对 {} 的价格来计算反向汇率",
-                    target.symbol, source.symbol
-                ))),
+                Err(_) => Err(RateFailure(if kit::is_zh() {
+                    format!(
+                        "无法获取 {} 对 {} 的价格来计算反向汇率",
+                        target.symbol, source.symbol
+                    )
+                } else {
+                    format!(
+                        "Unable to get {}/{} price for inverse rate",
+                        target.symbol, source.symbol
+                    )
+                })),
             },
             (true, true) => {
                 let rates = self
@@ -707,10 +770,14 @@ impl RatePricer<'_> {
                     .await?;
                 let val = *rates.get(&target.symbol.to_ascii_lowercase()).unwrap_or(&0.0);
                 if val == 0.0 {
-                    return Err(RateFailure(format!(
-                        "无法获取 {} 到 {} 的汇率",
-                        source.symbol, target.symbol
-                    )));
+                    return Err(RateFailure(if kit::is_zh() {
+                        format!("无法获取 {} 到 {} 的汇率", source.symbol, target.symbol)
+                    } else {
+                        format!(
+                            "Unable to get {} to {} exchange rate",
+                            source.symbol, target.symbol
+                        )
+                    }));
                 }
                 positive_rate(val)
             }
@@ -720,26 +787,57 @@ impl RatePricer<'_> {
 
 fn rate_help(prefix: &str) -> String {
     let line = |args: &str, detail: &str| format!("• {} {detail}\n", code(&format!("{prefix}rate {args}")));
-    format!(
-        "💱 <b>汇率查询</b>\n\n<b>使用示例</b>\n{}{}{}{}{}",
-        line("BTC", "比特币的美元价"),
-        line("ETH CNY", "以太坊的人民币价"),
-        line("CNY TRY", "人民币兑土耳其里拉"),
-        line("BTC CNY 0.5", "0.5 个 BTC 换成人民币"),
-        line("CNY USDT 7000", "7000 元换 USDT"),
-    )
+    if kit::is_zh() {
+        format!(
+            "💱 <b>汇率查询</b>\n\n<b>使用示例</b>\n{}{}{}{}{}",
+            line("BTC", "比特币的美元价"),
+            line("ETH CNY", "以太坊的人民币价"),
+            line("CNY TRY", "人民币兑土耳其里拉"),
+            line("BTC CNY 0.5", "0.5 个 BTC 换成人民币"),
+            line("CNY USDT 7000", "7000 元换 USDT"),
+        )
+    } else {
+        format!(
+            "💱 <b>Exchange Rate</b>\n\n<b>Examples</b>\n{}{}{}{}{}",
+            line("BTC", "Bitcoin price in USD"),
+            line("ETH CNY", "Ethereum price in CNY"),
+            line("CNY TRY", "CNY to TRY"),
+            line("BTC CNY 0.5", "Convert 0.5 BTC to CNY"),
+            line("CNY USDT 7000", "Convert 7000 CNY to USDT"),
+        )
+    }
 }
 
 fn render_price_failure(err: &RateFailure, source: &RateCurrency, target: &RateCurrency, fallback: &str) -> String {
-    let kind = |c: &RateCurrency| if c.fiat { "法币" } else { "加密货币" };
-    format!(
-        "{}\n\n<b>识别结果</b>\n• {}（{}）\n• {}（{}）{fallback}",
-        kit::feedback("error", "获取价格失败", &err.0),
-        code(&source.symbol),
-        kind(source),
-        code(&target.symbol),
-        kind(target),
-    )
+    let kind = |c: &RateCurrency| {
+        if c.fiat {
+            kit::tr("Fiat", "法币")
+        } else {
+            kit::tr("Crypto", "加密货币")
+        }
+    };
+    let head = kit::feedback(
+        "error",
+        kit::tr("Failed to fetch price", "获取价格失败"),
+        &err.0,
+    );
+    if kit::is_zh() {
+        format!(
+            "{head}\n\n<b>识别结果</b>\n• {}（{}）\n• {}（{}）{fallback}",
+            code(&source.symbol),
+            kind(source),
+            code(&target.symbol),
+            kind(target),
+        )
+    } else {
+        format!(
+            "{head}\n\n<b>Parsed Currencies</b>\n• {} ({})\n• {} ({}){fallback}",
+            code(&source.symbol),
+            kind(source),
+            code(&target.symbol),
+            kind(target),
+        )
+    }
 }
 
 async fn render_rate(
@@ -750,9 +848,10 @@ async fn render_rate(
     price: f64,
     converted: f64,
 ) -> String {
+    let zh = kit::is_zh();
     let shanghai = FixedOffset::east_opt(8 * 3600).expect("valid +08:00");
     let updated = Utc::now().with_timezone(&shanghai).format("%Y-%m-%d %H:%M:%S");
-    let mut out = String::from("💱 <b>汇率</b>\n\n");
+    let mut out = String::from(kit::tr("💱 <b>Exchange Rate</b>\n\n", "💱 <b>汇率</b>\n\n"));
     if !source.fiat && target.fiat && amount == 1.0 {
         out.push_str(&format!(
             "{}\n\n",
@@ -766,54 +865,89 @@ async fn render_rate(
         ));
         if source.fiat && target.fiat {
             out.push_str(&format!(
-                "📊 汇率：{}\n",
+                "{}{}\n",
+                kit::tr("📊 Rate: ", "📊 汇率："),
                 code(&format!("1 {} = {} {}", source.symbol, format_amount(price), target.symbol))
             ));
         } else if !source.fiat && !target.fiat {
             let first = pricer.crypto_fiat(&source.symbol, "USD").await;
             let second = pricer.crypto_fiat(&target.symbol, "USD").await;
             out.push_str(&format!(
-                "💎 兑换比率：{}\n",
+                "{}{}\n",
+                kit::tr("💎 Ratio: ", "💎 兑换比率："),
                 code(&format!("1 {} = {} {}", source.symbol, format_amount(price), target.symbol))
             ));
             if let (Ok(f), Ok(s)) = (first, second) {
                 out.push_str(&format!(
-                    "📊 基准价格：{}\n",
+                    "{}{}\n",
+                    kit::tr("📊 Reference: ", "📊 基准价格："),
                     code(&format!("{} ${} • {} ${}", source.symbol, format_price(f), target.symbol, format_price(s)))
                 ));
             }
         } else if source.fiat {
             out.push_str(&format!(
-                "💎 当前汇率：{}\n",
+                "{}{}\n",
+                kit::tr("💎 Rate: ", "💎 当前汇率："),
                 code(&format!("1 {} = {} {}", target.symbol, format_price(1.0 / price), source.symbol))
             ));
         } else {
             out.push_str(&format!(
-                "💎 当前汇率：{}\n",
+                "{}{}\n",
+                kit::tr("💎 Rate: ", "💎 当前汇率："),
                 code(&format!("1 {} = {} {}", source.symbol, format_price(price), target.symbol))
             ));
         }
     }
-    let label = if source.fiat && target.fiat { "更新时间" } else { "数据更新" };
-    out.push_str(&format!("⏰ {label}：{updated}"));
+    if zh {
+        let label = if source.fiat && target.fiat { "更新时间" } else { "数据更新" };
+        out.push_str(&format!("⏰ {label}：{updated}"));
+    } else {
+        let label = if source.fiat && target.fiat { "Updated" } else { "Data updated" };
+        out.push_str(&format!("⏰ {label}: {updated}"));
+    }
     out
 }
 
 async fn handle(inv: &Invocation, service: &RateService) -> CmdResult {
     let Some(_guard) = service.enter().await else {
-        return inv.edit(&kit::feedback("error", "汇率查询繁忙", "稍后再试")).await.map_err(Into::into);
+        return inv
+            .edit(&kit::feedback(
+                "error",
+                kit::tr("Rate lookup busy", "汇率查询繁忙"),
+                kit::tr("Try again later", "稍后再试"),
+            ))
+            .await
+            .map_err(Into::into);
     };
     if inv.arg(0).is_empty() {
         return inv.edit(&rate_help(inv.prefix())).await.map_err(Into::into);
     }
     let (base, quote, amount) = match parse_rate_args(&inv.args) {
         Ok(v) => v,
-        Err(e) => return inv.edit(&kit::feedback("error", "操作失败", &e.0)).await.map_err(Into::into),
+        Err(e) => {
+            return inv
+                .edit(&kit::feedback(
+                    "error",
+                    kit::tr("Operation failed", "操作失败"),
+                    &e.0,
+                ))
+                .await
+                .map_err(Into::into)
+        }
     };
     let raw_query = format!("{amount} {} to {}", base.to_ascii_uppercase(), quote.to_ascii_uppercase());
     let encoded_q: String = url::form_urlencoded::byte_serialize(raw_query.as_bytes()).collect();
-    let fallback = format!("\n\n🔎 谷歌兜底：<a href=\"https://www.google.com/search?q={encoded_q}\">点击查看</a>");
-    inv.edit(&kit::feedback("working", "正在查询汇率", "")).await?;
+    let fallback = if kit::is_zh() {
+        format!("\n\n🔎 谷歌兜底：<a href=\"https://www.google.com/search?q={encoded_q}\">点击查看</a>")
+    } else {
+        format!("\n\n🔎 Google fallback: <a href=\"https://www.google.com/search?q={encoded_q}\">View search</a>")
+    };
+    inv.edit(&kit::feedback(
+        "working",
+        kit::tr("Fetching exchange rate", "正在查询汇率"),
+        "",
+    ))
+    .await?;
 
     let mut getter = RateGetter {
         fetch: &service.fetch,
@@ -839,7 +973,17 @@ async fn handle(inv: &Invocation, service: &RateService) -> CmdResult {
     let converted = amount * price;
     if !converted.is_finite() {
         return inv
-            .edit(&format!("{}{fallback}", kit::feedback("error", "操作失败", "换算结果超出有限数值范围")))
+            .edit(&format!(
+                "{}{fallback}",
+                kit::feedback(
+                    "error",
+                    kit::tr("Operation failed", "操作失败"),
+                    kit::tr(
+                        "Converted result out of finite range",
+                        "换算结果超出有限数值范围",
+                    ),
+                )
+            ))
             .await
             .map_err(Into::into);
     }
@@ -850,19 +994,22 @@ async fn handle(inv: &Invocation, service: &RateService) -> CmdResult {
 
 pub fn register(app: &Arc<App>) {
     let svc = Arc::new(RateService::new(Arc::new(|req| Box::pin(do_request(req)))));
-    app.registry.register(Command {
-        name: "rate".into(),
-        group: group::TOOLS.into(),
-        description: "查询汇率并换算金额".into(),
-        usage: "货币 [目标货币] [数量]".into(),
-        help_fn: Some(Arc::new(rate_help)),
-        timeout: Some(Duration::from_secs(120)),
-        handle: Arc::new(move |inv| {
-            let s = Arc::clone(&svc);
-            Box::pin(async move { handle(&inv, &s).await })
-        }),
-        ..Default::default()
-    });
+    app.registry.register(
+        Command {
+            name: "rate".into(),
+            group: group::TOOLS.into(),
+            description: "Query exchange rates".into(),
+            usage: "currency [target] [amount]".into(),
+            help_fn: Some(Arc::new(rate_help)),
+            timeout: Some(Duration::from_secs(120)),
+            handle: Arc::new(move |inv| {
+                let s = Arc::clone(&svc);
+                Box::pin(async move { handle(&inv, &s).await })
+            }),
+            ..Default::default()
+        }
+        .zh("查询汇率并换算金额", "货币 [目标货币] [数量]"),
+    );
 }
 
 #[cfg(test)]

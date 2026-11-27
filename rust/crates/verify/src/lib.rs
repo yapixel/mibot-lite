@@ -31,41 +31,41 @@ impl Case {
 }
 
 pub const CASES: &[Case] = &[
-    Case::new("ping", "消息编辑"),
+    Case::new("ping", "Message edit"),
     Case::new("version", "MiBot Lite"),
     Case::new("memory", "RSS"),
     Case {
         command: "status",
-        expect: "运行时间",
+        expect: "Uptime",
         network: false,
         wait: Duration::ZERO,
         reply: true,
     },
-    Case::new("sysinfo", "系统信息"),
-    Case::new("help", "命令列表"),
-    Case::new("help calc", "计算器"),
+    Case::new("sysinfo", "System Info"),
+    Case::new("help", "Command List"),
+    Case::new("help calc", "Calculator"),
     Case::new("calc 2+2*5", "12"),
     Case::new("calc (10-3)*4", "28"),
-    Case::new("update", "程序更新"),
-    Case::new("acn status", "自动更新"),
-    Case::new("yvlu config", "贴纸包"),
+    Case::new("update", "Self-Update"),
+    Case::new("acn status", "Auto-update"),
+    Case::new("yvlu config", "Sticker pack"),
     Case::new("ai config list", "AI"),
-    Case::new("sum config list", "配置"),
-    Case::new("aban", "群组管理"),
-    Case::new("log debug", "当前日志级别"),
-    Case::new("help log", "运行日志"),
-    Case::new("help bf", "配置备份"),
-    Case::new("alias", "别名"),
-    Case::new("prefix", "当前前缀"),
-    Case::new("sudo ls", "用户"),
-    Case::new("sure msg ls", "消息规则"),
-    Case::new("sticker", "收藏贴纸"),
-    Case::new("privacy", "IP 显示"),
-    Case::new("ts", "角色"),
-    Case::new("help save", "保存消息"),
-    Case::new("help bin", "卡头"),
-    Case::new("ids", "注册时间"),
-    Case::new("dc", "数据中心"),
+    Case::new("sum config list", "Summary AI Config"),
+    Case::new("aban", "Group Moderation"),
+    Case::new("log debug", "Current log level"),
+    Case::new("help log", "Runtime Logs"),
+    Case::new("help bf", "Config Backup"),
+    Case::new("alias", "Alias"),
+    Case::new("prefix", "Current prefixes"),
+    Case::new("sudo ls", "user"),
+    Case::new("sure msg ls", "rule"),
+    Case::new("sticker", "Save Stickers"),
+    Case::new("privacy", "IP Privacy"),
+    Case::new("ts", "Voices"),
+    Case::new("help save", "Save Messages"),
+    Case::new("help bin", "BIN Lookup"),
+    Case::new("ids", "Registered"),
+    Case::new("dc", "Datacenter"),
     Case {
         command: "ip 8.8.8.8",
         expect: "Google",
@@ -82,14 +82,14 @@ pub const CASES: &[Case] = &[
     },
     Case {
         command: "eatgif list",
-        expect: "头像动画贴纸",
+        expect: "Avatar Animated Stickers",
         network: true,
         wait: Duration::from_secs(60),
         reply: false,
     },
     Case {
         command: "eat",
-        expect: "头像表情贴纸",
+        expect: "Avatar Meme Stickers",
         network: true,
         wait: Duration::from_secs(60),
         reply: false,
@@ -103,7 +103,7 @@ pub const CASES: &[Case] = &[
     },
     Case {
         command: "rate BTC",
-        expect: "数据更新",
+        expect: "updated",
         network: true,
         wait: Duration::from_secs(90),
         reply: false,
@@ -364,7 +364,10 @@ where
             continue;
         }
         answer = current.clone();
-        if current.contains(item.expect) {
+        if current
+            .to_ascii_lowercase()
+            .contains(&item.expect.to_ascii_lowercase())
+        {
             matched = true;
             break;
         }
@@ -619,7 +622,7 @@ mod tests {
             help: "".into(),
             handle: Arc::new(|inv| {
                 Box::pin(async move {
-                    inv.respond("消息编辑: 1ms").await?;
+                    inv.respond("Message edit: 1ms").await?;
                     Ok(())
                 })
             }),
@@ -634,7 +637,7 @@ mod tests {
             help: "".into(),
             handle: Arc::new(|inv| {
                 Box::pin(async move {
-                    inv.reply("运行时间 10m").await?;
+                    inv.reply("Uptime 10m").await?;
                     Ok(())
                 })
             }),
@@ -674,10 +677,10 @@ mod tests {
         });
 
         let cases = [
-            Case::new("ping", "消息编辑"),
+            Case::new("ping", "Message edit"),
             Case {
                 command: "status",
-                expect: "运行时间",
+                expect: "Uptime",
                 network: false,
                 wait: Duration::from_secs(3),
                 reply: true,

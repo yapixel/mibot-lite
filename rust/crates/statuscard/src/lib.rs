@@ -12,15 +12,33 @@ static FONT_DATA: &[u8] = include_bytes!("NotoSansSC-status-subset.ttf");
 const WIDTH: u32 = 1600;
 const HEIGHT: u32 = 900;
 
-const TITLE_SUFFIX: &str = " · 运行状态";
-const LABEL_ONLINE: &str = "在线";
-const HEALTH_ALERT: &str = "资源告警";
-const HEALTH_WARNING: &str = "需要关注";
-const HEALTH_NORMAL: &str = "运行正常";
-const GAUGE_CPU: &str = "CPU";
-const GAUGE_MEMORY: &str = "内存";
-const GAUGE_DISK: &str = "磁盘";
-const GAUGE_SWAP: &str = "Swap";
+fn title_suffix() -> &'static str {
+    mibot_i18n::tr(" · Status", " · 运行状态")
+}
+fn label_online() -> &'static str {
+    mibot_i18n::tr("Online", "在线")
+}
+fn health_alert() -> &'static str {
+    mibot_i18n::tr("Alert", "资源告警")
+}
+fn health_warning() -> &'static str {
+    mibot_i18n::tr("Attention", "需要关注")
+}
+fn health_normal() -> &'static str {
+    mibot_i18n::tr("Healthy", "运行正常")
+}
+fn gauge_cpu() -> &'static str {
+    "CPU"
+}
+fn gauge_memory() -> &'static str {
+    mibot_i18n::tr("Memory", "内存")
+}
+fn gauge_disk() -> &'static str {
+    mibot_i18n::tr("Disk", "磁盘")
+}
+fn gauge_swap() -> &'static str {
+    "Swap"
+}
 
 #[derive(Debug, Error)]
 pub enum CardError {
@@ -79,11 +97,11 @@ pub fn health(card: &Card) -> (&'static str, u32) {
         }
     }
     if highest >= 90.0 {
-        (HEALTH_ALERT, 0xfb7185)
+        (health_alert(), 0xfb7185)
     } else if highest >= 75.0 {
-        (HEALTH_WARNING, 0xfbbf24)
+        (health_warning(), 0xfbbf24)
     } else {
-        (HEALTH_NORMAL, 0x34f59a)
+        (health_normal(), 0x34f59a)
     }
 }
 
@@ -464,8 +482,8 @@ impl<'a> Canvas<'a> {
             2.0,
             Color::from_rgba8(63, 132, 170, (255.0 * 0.55) as u8),
         );
-        let maximum = if label == GAUGE_SWAP { 43.0 } else { 42.0 };
-        let (name, size) = self.fitted(label, 88.0, maximum, 24.0);
+        let maximum = if label == gauge_swap() { 43.0 } else { 42.0 };
+        let (name, size) = self.fitted(label, 88.0, maximum, 20.0);
         self.draw_text(&name, size, x + 232.0, cy + 2.0, hex_rgb(0xf1f5f9), Align::Left);
     }
 }
@@ -489,7 +507,7 @@ pub fn render(card: &Card) -> Result<Vec<u8>, CardError> {
     );
     c.radio_mark(120.0, 140.0);
 
-    let (title, title_size) = c.fitted(&format!("{}{}", card.name, TITLE_SUFFIX), 595.0, 68.0, 42.0);
+    let (title, title_size) = c.fitted(&format!("{}{}", card.name, title_suffix()), 595.0, 68.0, 42.0);
     c.draw_text(&title, title_size, 180.0, 150.0, hex_rgb(0xf1f5f9), Align::Left);
     c.line(82.0, 235.0, 755.0, 235.0, 3.0, hex_color(0x215a78, 1.0));
 
@@ -499,19 +517,20 @@ pub fn render(card: &Card) -> Result<Vec<u8>, CardError> {
         c.fill_circle(128.0, 370.0, radius, hex_color(tone, 0.08));
     }
     c.fill_circle(128.0, 370.0, 42.0, hex_color(tone, 1.0));
-    c.draw_text(label, 68.0, 205.0, 374.0, hex_rgb(tone), Align::Left);
+    let (health_txt, health_size) = c.fitted(label, 520.0, 68.0, 44.0);
+    c.draw_text(&health_txt, health_size, 205.0, 374.0, hex_rgb(tone), Align::Left);
 
-    let (online, online_size) = c.fitted(LABEL_ONLINE, 100.0, 42.0, 30.0);
+    let (online, online_size) = c.fitted(label_online(), 100.0, 42.0, 24.0);
     c.draw_text(&online, online_size, 88.0, 555.0, hex_rgb(0x9fb2c5), Align::Left);
 
     let (uptime, uptime_size) =
         c.fitted(&mibot_sysinfo::format_uptime(card.uptime), 500.0, 68.0, 48.0);
     c.draw_text(&uptime, uptime_size, 205.0, 555.0, hex_rgb(0xf1f5f9), Align::Left);
 
-    c.gauge(810.0, 115.0, GAUGE_CPU, card.cpu, gauge_color(card.cpu, 0x34f59a));
-    c.gauge(1174.0, 115.0, GAUGE_MEMORY, card.memory, gauge_color(card.memory, 0x34f59a));
-    c.gauge(810.0, 395.0, GAUGE_DISK, card.disk, gauge_color(card.disk, 0xfbbf24));
-    c.gauge(1174.0, 395.0, GAUGE_SWAP, card.swap, gauge_color(card.swap, 0x22d3ee));
+    c.gauge(810.0, 115.0, gauge_cpu(), card.cpu, gauge_color(card.cpu, 0x34f59a));
+    c.gauge(1174.0, 115.0, gauge_memory(), card.memory, gauge_color(card.memory, 0x34f59a));
+    c.gauge(810.0, 395.0, gauge_disk(), card.disk, gauge_color(card.disk, 0xfbbf24));
+    c.gauge(1174.0, 395.0, gauge_swap(), card.swap, gauge_color(card.swap, 0x22d3ee));
 
     c.line(82.0, 732.0, 1518.0, 732.0, 3.0, hex_color(0x215a78, 1.0));
     let (footer, footer_size) = c.fitted(&card.footer, 1370.0, 34.0, 24.0);
@@ -536,28 +555,32 @@ mod tests {
     #[test]
     fn font_covers_card_text() {
         let font = load_font().expect("load embedded subset font");
-        let samples = [
-            "MiBot Lite v0.3.11  ·  Rust 1.99.1  ·  grammers 0.12.0",
-            TITLE_SUFFIX,
-            LABEL_ONLINE,
-            HEALTH_ALERT,
-            HEALTH_WARNING,
-            HEALTH_NORMAL,
-            GAUGE_CPU,
-            GAUGE_MEMORY,
-            GAUGE_DISK,
-            GAUGE_SWAP,
-            "0123456789天 :%-…",
-        ];
-        for text in samples {
-            for ch in text.chars() {
-                assert_ne!(
-                    font.glyph_id(ch),
-                    GlyphId(0),
-                    "missing glyph '{ch}' (U+{:04X}) in subset font",
-                    ch as u32
-                );
-            }
+        for lang in [mibot_i18n::Lang::En, mibot_i18n::Lang::Zh] {
+            mibot_i18n::with_lang(lang, || {
+                let samples = [
+                    "MiBot Lite v0.3.11  ·  Rust 1.99.1  ·  grammers 0.12.0",
+                    title_suffix(),
+                    label_online(),
+                    health_alert(),
+                    health_warning(),
+                    health_normal(),
+                    gauge_cpu(),
+                    gauge_memory(),
+                    gauge_disk(),
+                    gauge_swap(),
+                    "0123456789d天 :%-…",
+                ];
+                for text in samples {
+                    for ch in text.chars() {
+                        assert_ne!(
+                            font.glyph_id(ch),
+                            GlyphId(0),
+                            "missing glyph '{ch}' (U+{:04X}) in subset font",
+                            ch as u32
+                        );
+                    }
+                }
+            });
         }
     }
 
@@ -584,7 +607,7 @@ mod tests {
         let png = render(&card).expect("render card");
         let pixmap = Pixmap::decode_png(&png).expect("decode PNG");
         assert_eq!((pixmap.width(), pixmap.height()), (1600, 900));
-        assert_eq!(health(&card).0, HEALTH_ALERT);
+        assert_eq!(health(&card).0, "Alert");
         let idx = ((370 * pixmap.width() + 128) * 4) as usize;
         let px = &pixmap.data()[idx..idx + 4];
         assert_eq!((px[0], px[1], px[2]), (0xfb, 0x71, 0x85));
@@ -601,7 +624,7 @@ mod tests {
                 ..Default::default()
             })
             .0,
-            HEALTH_NORMAL
+            "Healthy"
         );
         assert_eq!(
             health(&Card {
@@ -612,7 +635,7 @@ mod tests {
                 ..Default::default()
             })
             .0,
-            HEALTH_WARNING
+            "Attention"
         );
         assert_eq!(
             health(&Card {
@@ -623,8 +646,8 @@ mod tests {
                 ..Default::default()
             })
             .0,
-            HEALTH_ALERT
+            "Alert"
         );
-        assert_eq!(health(&Card::default()).0, HEALTH_NORMAL);
+        assert_eq!(health(&Card::default()).0, "Healthy");
     }
 }

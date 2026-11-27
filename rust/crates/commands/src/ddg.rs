@@ -224,29 +224,56 @@ fn source_note(items: &[SearchResult]) -> String {
     let Some(first) = items.iter().position(|i| i.source == Source::Firecrawl) else {
         return String::new();
     };
+    if kit::is_zh() {
+        if first == 0 {
+            return "DuckDuckGo 没有给出结果，以下来自 Firecrawl".into();
+        }
+        if first + 1 == items.len() {
+            return format!("第 {} 条来自 Firecrawl", first + 1);
+        }
+        return format!("第 {}–{} 条来自 Firecrawl", first + 1, items.len());
+    }
     if first == 0 {
-        return "DuckDuckGo 没有给出结果，以下来自 Firecrawl".into();
+        return "DuckDuckGo returned no results; showing results from Firecrawl".into();
     }
     if first + 1 == items.len() {
-        return format!("第 {} 条来自 Firecrawl", first + 1);
+        return format!("Result {} is from Firecrawl", first + 1);
     }
-    format!("第 {}–{} 条来自 Firecrawl", first + 1, items.len())
+    format!("Results {}–{} are from Firecrawl", first + 1, items.len())
 }
 
 fn render(query: &str, items: &[SearchResult]) -> Vec<String> {
-    let mut header = format!("🦆 <b>DuckDuckGo</b> · {} · {} 条", code(query), items.len());
+    let zh = kit::is_zh();
+    let count_label = if zh {
+        format!("{} 条", items.len())
+    } else if items.len() == 1 {
+        "1 result".into()
+    } else {
+        format!("{} results", items.len())
+    };
+    let mut header = format!("🦆 <b>DuckDuckGo</b> · {} · {count_label}", code(query));
     let note = source_note(items);
     if !note.is_empty() {
         header.push('\n');
         header.push_str(&note);
     }
     let encoded_q: String = url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
+    let open_label = if zh {
+        "在 DuckDuckGo 打开"
+    } else {
+        "Open in DuckDuckGo"
+    };
     let footer = format!(
-        "<a href=\"https://duckduckgo.com/?q={}\">在 DuckDuckGo 打开</a>",
+        "<a href=\"https://duckduckgo.com/?q={}\">{open_label}</a>",
         escape(&encoded_q)
     );
     if items.is_empty() {
-        return vec![format!("{header}\n\n没有找到结果，换个关键词试试\n\n{footer}")];
+        let empty_msg = if zh {
+            "没有找到结果，换个关键词试试"
+        } else {
+            "No results found; try another keyword"
+        };
+        return vec![format!("{header}\n\n{empty_msg}\n\n{footer}")];
     }
     let mut blocks = Vec::with_capacity(items.len() + 1);
     for (idx, item) in items.iter().enumerate() {
@@ -263,12 +290,17 @@ fn render(query: &str, items: &[SearchResult]) -> Vec<String> {
     }
     blocks.push(footer);
 
+    let cont = if zh {
+        "🦆 <b>DuckDuckGo</b> · 续\n"
+    } else {
+        "🦆 <b>DuckDuckGo</b> · Cont.\n"
+    };
     let mut pages = Vec::new();
     let mut page = format!("{header}\n");
     for block in blocks {
         if kit::utf16_len_usize(&page) + 1 + kit::utf16_len_usize(&block) > PAGE_LIMIT {
             pages.push(page.trim_end_matches('\n').to_owned());
-            page = "🦆 <b>DuckDuckGo</b> · 续\n".to_owned();
+            page = cont.to_owned();
         }
         page.push('\n');
         page.push_str(&block);
@@ -290,7 +322,7 @@ async fn search_ddg(
     let mut headers = HashMap::new();
     headers.insert("Content-Type".into(), "application/x-www-form-urlencoded".into());
     let resp = tokio::select! {
-        _ = cancel.cancelled() => return Err(kit::fail("操作已取消")),
+        _ = cancel.cancelled() => return Err(kit::fail(kit::tr("Operation cancelled", "操作已取消"))),
         r = do_request(Request {
             method: Method::POST,
             url: ddg_url.to_owned(),
@@ -321,7 +353,7 @@ async fn search_firecrawl(
     }
     let req_body = FcReq { query, limit };
     let resp = tokio::select! {
-        _ = cancel.cancelled() => return Err(kit::fail("操作已取消")),
+        _ = cancel.cancelled() => return Err(kit::fail(kit::tr("Operation cancelled", "操作已取消"))),
         r = post_json(
             Request {
                 url: fc_url.to_owned(),
@@ -388,14 +420,24 @@ async fn search(
 
 fn help(prefix: &str) -> String {
     let p = escape(prefix);
-    format!(
-        "🦆 <b>DuckDuckGo 搜索</b>\n\n搜索网页，列出标题、链接和摘要。DuckDuckGo 拦下请求或结果不够时，用 Firecrawl 的免 Key 搜索补上。\n\n\
-         • <code>{p}ddg 关键词</code> 默认 {DEFAULT_LIMIT} 条\n\
-         • <code>{p}ddg 关键词 -n 5</code> 指定条数，1–{MAX_LIMIT}\n\
-         • <code>{p}duckduckgo 关键词</code> 同 {}\n\n\
-         关键词最多 {MAX_QUERY} 字。",
-        code(&format!("{prefix}ddg"))
-    )
+    let ddg_cmd = code(&format!("{prefix}ddg"));
+    if kit::is_zh() {
+        format!(
+            "🦆 <b>DuckDuckGo 搜索</b>\n\n搜索网页，列出标题、链接和摘要。DuckDuckGo 拦下请求或结果不够时，用 Firecrawl 的免 Key 搜索补上。\n\n\
+             • <code>{p}ddg 关键词</code> 默认 {DEFAULT_LIMIT} 条\n\
+             • <code>{p}ddg 关键词 -n 5</code> 指定条数，1–{MAX_LIMIT}\n\
+             • <code>{p}duckduckgo 关键词</code> 同 {ddg_cmd}\n\n\
+             关键词最多 {MAX_QUERY} 字。"
+        )
+    } else {
+        format!(
+            "🦆 <b>DuckDuckGo Search</b>\n\nSearch the web for titles, links, and snippets. Falls back to Firecrawl keyless search when DuckDuckGo blocks or returns too few results.\n\n\
+             • <code>{p}ddg query</code> Default {DEFAULT_LIMIT} results\n\
+             • <code>{p}ddg query -n 5</code> Specify result count, 1–{MAX_LIMIT}\n\
+             • <code>{p}duckduckgo query</code> Same as {ddg_cmd}\n\n\
+             Query limit is {MAX_QUERY} characters."
+        )
+    }
 }
 
 async fn handle(inv: &Invocation, app: &App) -> CmdResult {
@@ -404,33 +446,50 @@ async fn handle(inv: &Invocation, app: &App) -> CmdResult {
         return inv.edit(&help(inv.prefix())).await.map_err(Into::into);
     }
     if query.chars().count() > MAX_QUERY {
-        return Err(kit::fail(format!("关键词太长，最多 {MAX_QUERY} 字")));
+        return Err(kit::fail(if kit::is_zh() {
+            format!("关键词太长，最多 {MAX_QUERY} 字")
+        } else {
+            format!("Query is too long; max {MAX_QUERY} characters")
+        }));
     }
-    inv.edit_text(&kit::working(&format!("正在搜索 {query}"))).await?;
+    let status = if kit::is_zh() {
+        format!("正在搜索 {query}")
+    } else {
+        format!("Searching {query}")
+    };
+    inv.edit_text(&kit::working(&status)).await?;
     let items = search(&inv.cancel, Some(&app.logs), DDG_URL, FIRECRAWL_URL, &query, limit)
         .await
-        .map_err(|e| kit::fail_with("搜索失败", mibot_command::UserError::new(e.to_string())))?;
+        .map_err(|e| {
+            kit::fail_with(
+                kit::tr("Search failed", "搜索失败"),
+                mibot_command::UserError::new(e.to_string()),
+            )
+        })?;
     inv.respond_pages(&render(&query, &items)).await?;
     Ok(())
 }
 
 pub fn register(app: &Arc<App>) {
     let app_ref = Arc::clone(app);
-    app.registry.register(Command {
-        name: "ddg".into(),
-        aliases: vec!["duckduckgo".into()],
-        group: group::TOOLS.into(),
-        description: "搜索网页".into(),
-        usage: "关键词 [-n 条数]".into(),
-        help_fn: Some(Arc::new(help)),
-        timeout: Some(Duration::from_secs(60)),
-        free_text: true,
-        handle: Arc::new(move |inv| {
-            let a = Arc::clone(&app_ref);
-            Box::pin(async move { handle(&inv, &a).await })
-        }),
-        ..Default::default()
-    });
+    app.registry.register(
+        Command {
+            name: "ddg".into(),
+            aliases: vec!["duckduckgo".into()],
+            group: group::TOOLS.into(),
+            description: "Search web via DuckDuckGo".into(),
+            usage: "query [-n count]".into(),
+            help_fn: Some(Arc::new(help)),
+            timeout: Some(Duration::from_secs(60)),
+            free_text: true,
+            handle: Arc::new(move |inv| {
+                let a = Arc::clone(&app_ref);
+                Box::pin(async move { handle(&inv, &a).await })
+            }),
+            ..Default::default()
+        }
+        .zh("搜索网页", "关键词 [-n 条数]"),
+    );
 }
 
 #[cfg(test)]
@@ -521,9 +580,14 @@ mod tests {
             assert!(utf16_len(page) <= PAGE_LIMIT as i32);
             parse_html(page, None).unwrap();
         }
-        assert!(pages[0].starts_with("🦆 <b>DuckDuckGo</b> · <code>a&amp;b</code> · 15 条"));
-        assert!(pages[1].starts_with("🦆 <b>DuckDuckGo</b> · 续"));
+        assert!(pages[0].starts_with("🦆 <b>DuckDuckGo</b> · <code>a&amp;b</code> · 15 results"));
+        assert!(pages[1].starts_with("🦆 <b>DuckDuckGo</b> · Cont."));
         assert!(pages.last().unwrap().contains("https://duckduckgo.com/?q=a%26b"));
+        mibot_i18n::with_lang(mibot_i18n::Lang::Zh, || {
+            let zh_pages = render("a&b", &many);
+            assert!(zh_pages[0].starts_with("🦆 <b>DuckDuckGo</b> · <code>a&amp;b</code> · 15 条"));
+            assert!(zh_pages[1].starts_with("🦆 <b>DuckDuckGo</b> · 续"));
+        });
     }
 
     #[tokio::test]
@@ -581,6 +645,9 @@ mod tests {
         .unwrap();
         assert_eq!(*asked.lock().unwrap(), 2);
         assert_eq!(items.len(), 4);
-        assert_eq!(source_note(&items), "第 3–4 条来自 Firecrawl");
+        assert_eq!(source_note(&items), "Results 3–4 are from Firecrawl");
+        mibot_i18n::with_lang(mibot_i18n::Lang::Zh, || {
+            assert_eq!(source_note(&items), "第 3–4 条来自 Firecrawl");
+        });
     }
 }

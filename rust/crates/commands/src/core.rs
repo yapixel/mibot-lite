@@ -31,210 +31,309 @@ pub fn register(a: &Arc<App>) {
     let app_status = Arc::clone(a);
     let app_help = Arc::clone(a);
 
-    a.registry.register(kit::make_cmd(
-        "ping",
-        &[],
-        group::SYSTEM,
-        "测试网络延迟",
-        "[域名|IP]",
-        ping_help,
-        move |inv: Invocation| {
-            Box::pin(async move {
-                let target = inv.arg(0).to_owned();
-                if !target.is_empty() {
-                    let msg = probe(&target).await;
-                    return inv.edit(&msg).await.map_err(Into::into);
-                }
-                let elapsed = inv
-                    .client
-                    .ping()
-                    .await
-                    .map_err(|e| kit::fail_with_err("Telegram 延迟测试失败", e))?;
-                let editing = Instant::now();
-                inv.edit_text("🏓 Pong").await?;
-                let edit_ms = editing.elapsed().as_millis();
-                inv.edit(&format!(
-                    "🏓 <b>延迟</b>\nTelegram 接口：{} ms\n消息编辑：{edit_ms} ms",
-                    elapsed.as_millis()
-                ))
-                .await
-                .map_err(Into::into)
-            })
-        },
-    ));
-
-    a.registry.register(kit::make_cmd(
-        "version",
-        &["ver"],
-        group::SYSTEM,
-        "查看版本信息",
-        "",
-        version_help,
-        move |inv: Invocation| {
-            let app = Arc::clone(&app_ver);
-            Box::pin(async move { inv.edit(&version_text(&app)).await.map_err(Into::into) })
-        },
-    ));
-
-    a.registry.register(kit::make_cmd(
-        "memory",
-        &[],
-        group::SYSTEM,
-        "查看进程内存占用",
-        "",
-        memory_help,
-        move |inv: Invocation| {
-            Box::pin(async move { inv.edit(&memory_report()).await.map_err(Into::into) })
-        },
-    ));
-
-    a.registry.register(kit::make_cmd(
-        "status",
-        &[],
-        group::SYSTEM,
-        "查看运行状态卡片",
-        "",
-        status_help,
-        move |inv: Invocation| {
-            let app = Arc::clone(&app_status);
-            Box::pin(async move { run_status(&app, &inv).await })
-        },
-    ));
-
-    a.registry.register(kit::make_cmd(
-        "sysinfo",
-        &[],
-        group::SYSTEM,
-        "查看详细系统信息",
-        "",
-        sysinfo_help,
-        move |inv: Invocation| {
-            Box::pin(async move {
-                let machine = read_host();
-                let process = read_memory();
-                let used_mem = machine.total_memory.saturating_sub(machine.free_memory);
-                let lines = [
-                    "🖥 <b>系统信息</b>".to_owned(),
-                    String::new(),
-                    format!("主机：{}", code(&machine.hostname)),
-                    format!("系统：{}", code(&machine.platform)),
-                    format!("内核：{}", code(&machine.kernel_release)),
-                    format!("运行时间：{}", code(&format_uptime(machine.uptime))),
-                    format!(
-                        "负载：{}",
-                        code(&format!(
-                            "{:.2} / {:.2} / {:.2}",
-                            machine.load_average[0], machine.load_average[1], machine.load_average[2]
-                        ))
-                    ),
-                    format!("CPU：{}", code(&format!("{} 核", machine.cpus))),
-                    format!(
-                        "系统内存：{}",
-                        code(&format!(
-                            "{:.2} / {:.2} MB",
-                            megabytes(used_mem),
-                            megabytes(machine.total_memory)
-                        ))
-                    ),
-                    String::new(),
-                    "<b>MiBot Lite 进程</b>".to_owned(),
-                    format!("Rust：{}", code("rustc (pure-rust)")),
-                    format!("PID：{}", code(&std::process::id().to_string())),
-                    format!("RSS：{}", code(&format!("{:.2} MB", megabytes(process.rss)))),
-                    format!(
-                        "Heap：{}",
-                        code(&format!(
-                            "{:.2} / {:.2} MB",
-                            megabytes(process.heap_alloc),
-                            megabytes(process.heap_sys)
-                        ))
-                    ),
-                    format!("Sys：{}", code(&format!("{:.2} MB", megabytes(process.sys)))),
-                ];
-                inv.edit(&lines.join("\n")).await.map_err(Into::into)
-            })
-        },
-    ));
-
-    a.registry.register(kit::make_cmd(
-        "help",
-        &["h"],
-        group::SYSTEM,
-        "查看命令列表或说明",
-        "[命令|分组]",
-        help_help,
-        move |inv: Invocation| {
-            let app = Arc::clone(&app_help);
-            Box::pin(async move {
-                let name = inv.raw.trim();
-                let reg = &app.registry;
-                let prefix = inv.prefix();
-                if name.is_empty() {
-                    let blocks = help_list_rich(reg, prefix);
-                    let rich = tl::types::InputRichMessage {
-                        rtl: false,
-                        noautolink: false,
-                        blocks,
-                        photos: None,
-                        documents: None,
-                        users: None,
+    a.registry.register(
+        kit::make_cmd(
+            "ping",
+            &[],
+            group::SYSTEM,
+            "Latency test",
+            "[domain|IP]",
+            ping_help,
+            move |inv: Invocation| {
+                Box::pin(async move {
+                    let target = inv.arg(0).to_owned();
+                    if !target.is_empty() {
+                        let msg = probe(&target).await;
+                        return inv.edit(&msg).await.map_err(Into::into);
                     }
-                    .into();
-                    let html = render_help_list(reg, prefix);
-                    return inv.edit_rich(rich, &html).await.map(|_| ()).map_err(Into::into);
-                }
-                if lookup_for_help(reg, name).is_none()
-                    && let Some(grp) = find_group(name)
-                {
-                    let blocks = group_help_rich(reg, prefix, grp);
-                    let rich = tl::types::InputRichMessage {
-                        rtl: false,
-                        noautolink: false,
-                        blocks,
-                        photos: None,
-                        documents: None,
-                        users: None,
+                    let elapsed = inv.client.ping().await.map_err(|e| {
+                        kit::fail_with_err(
+                            kit::tr("Telegram latency test failed", "Telegram 延迟测试失败"),
+                            e,
+                        )
+                    })?;
+                    let editing = Instant::now();
+                    inv.edit_text("🏓 Pong").await?;
+                    let edit_ms = editing.elapsed().as_millis();
+                    let msg = if kit::is_zh() {
+                        format!(
+                            "🏓 <b>延迟</b>\nTelegram 接口：{} ms\n消息编辑：{edit_ms} ms",
+                            elapsed.as_millis()
+                        )
+                    } else {
+                        format!(
+                            "🏓 <b>Latency</b>\nTelegram API: {} ms\nMessage edit: {edit_ms} ms",
+                            elapsed.as_millis()
+                        )
+                    };
+                    inv.edit(&msg).await.map_err(Into::into)
+                })
+            },
+        )
+        .zh("测试网络延迟", "[域名|IP]"),
+    );
+
+    a.registry.register(
+        kit::make_cmd(
+            "version",
+            &["ver"],
+            group::SYSTEM,
+            "Version info",
+            "",
+            version_help,
+            move |inv: Invocation| {
+                let app = Arc::clone(&app_ver);
+                Box::pin(async move { inv.edit(&version_text(&app)).await.map_err(Into::into) })
+            },
+        )
+        .zh("查看版本信息", ""),
+    );
+
+    a.registry.register(
+        kit::make_cmd(
+            "memory",
+            &[],
+            group::SYSTEM,
+            "Process memory usage",
+            "",
+            memory_help,
+            move |inv: Invocation| {
+                Box::pin(async move { inv.edit(&memory_report()).await.map_err(Into::into) })
+            },
+        )
+        .zh("查看进程内存占用", ""),
+    );
+
+    a.registry.register(
+        kit::make_cmd(
+            "status",
+            &[],
+            group::SYSTEM,
+            "Runtime status card",
+            "",
+            status_help,
+            move |inv: Invocation| {
+                let app = Arc::clone(&app_status);
+                Box::pin(async move { run_status(&app, &inv).await })
+            },
+        )
+        .zh("查看运行状态卡片", ""),
+    );
+
+    a.registry.register(
+        kit::make_cmd(
+            "sysinfo",
+            &[],
+            group::SYSTEM,
+            "System information",
+            "",
+            sysinfo_help,
+            move |inv: Invocation| {
+                Box::pin(async move {
+                    let machine = read_host();
+                    let process = read_memory();
+                    let used_mem = machine.total_memory.saturating_sub(machine.free_memory);
+                    let lines = if kit::is_zh() {
+                        [
+                            "🖥 <b>系统信息</b>".to_owned(),
+                            String::new(),
+                            format!("主机：{}", code(&machine.hostname)),
+                            format!("系统：{}", code(&machine.platform)),
+                            format!("内核：{}", code(&machine.kernel_release)),
+                            format!("运行时间：{}", code(&format_uptime(machine.uptime))),
+                            format!(
+                                "负载：{}",
+                                code(&format!(
+                                    "{:.2} / {:.2} / {:.2}",
+                                    machine.load_average[0],
+                                    machine.load_average[1],
+                                    machine.load_average[2]
+                                ))
+                            ),
+                            format!("CPU：{}", code(&format!("{} 核", machine.cpus))),
+                            format!(
+                                "系统内存：{}",
+                                code(&format!(
+                                    "{:.2} / {:.2} MB",
+                                    megabytes(used_mem),
+                                    megabytes(machine.total_memory)
+                                ))
+                            ),
+                            String::new(),
+                            "<b>MiBot Lite 进程</b>".to_owned(),
+                            format!("Rust：{}", code("rustc (pure-rust)")),
+                            format!("PID：{}", code(&std::process::id().to_string())),
+                            format!("RSS：{}", code(&format!("{:.2} MB", megabytes(process.rss)))),
+                            format!(
+                                "Heap：{}",
+                                code(&format!(
+                                    "{:.2} / {:.2} MB",
+                                    megabytes(process.heap_alloc),
+                                    megabytes(process.heap_sys)
+                                ))
+                            ),
+                            format!("Sys：{}", code(&format!("{:.2} MB", megabytes(process.sys)))),
+                        ]
+                    } else {
+                        [
+                            "🖥 <b>System Info</b>".to_owned(),
+                            String::new(),
+                            format!("Host: {}", code(&machine.hostname)),
+                            format!("OS: {}", code(&machine.platform)),
+                            format!("Kernel: {}", code(&machine.kernel_release)),
+                            format!("Uptime: {}", code(&format_uptime(machine.uptime))),
+                            format!(
+                                "Load: {}",
+                                code(&format!(
+                                    "{:.2} / {:.2} / {:.2}",
+                                    machine.load_average[0],
+                                    machine.load_average[1],
+                                    machine.load_average[2]
+                                ))
+                            ),
+                            format!("CPU: {}", code(&format!("{} cores", machine.cpus))),
+                            format!(
+                                "Memory: {}",
+                                code(&format!(
+                                    "{:.2} / {:.2} MB",
+                                    megabytes(used_mem),
+                                    megabytes(machine.total_memory)
+                                ))
+                            ),
+                            String::new(),
+                            "<b>MiBot Lite Process</b>".to_owned(),
+                            format!("Rust: {}", code("rustc (pure-rust)")),
+                            format!("PID: {}", code(&std::process::id().to_string())),
+                            format!("RSS: {}", code(&format!("{:.2} MB", megabytes(process.rss)))),
+                            format!(
+                                "Heap: {}",
+                                code(&format!(
+                                    "{:.2} / {:.2} MB",
+                                    megabytes(process.heap_alloc),
+                                    megabytes(process.heap_sys)
+                                ))
+                            ),
+                            format!("Sys: {}", code(&format!("{:.2} MB", megabytes(process.sys)))),
+                        ]
+                    };
+                    inv.edit(&lines.join("\n")).await.map_err(Into::into)
+                })
+            },
+        )
+        .zh("查看详细系统信息", ""),
+    );
+
+    a.registry.register(
+        kit::make_cmd(
+            "help",
+            &["h"],
+            group::SYSTEM,
+            "Command list and help",
+            "[command|group]",
+            help_help,
+            move |inv: Invocation| {
+                let app = Arc::clone(&app_help);
+                Box::pin(async move {
+                    let name = inv.raw.trim();
+                    let reg = &app.registry;
+                    let prefix = inv.prefix();
+                    if name.is_empty() {
+                        let blocks = help_list_rich(reg, prefix);
+                        let rich = tl::types::InputRichMessage {
+                            rtl: false,
+                            noautolink: false,
+                            blocks,
+                            photos: None,
+                            documents: None,
+                            users: None,
+                        }
+                        .into();
+                        let html = render_help_list(reg, prefix);
+                        return inv.edit_rich(rich, &html).await.map(|_| ()).map_err(Into::into);
                     }
-                    .into();
-                    let html = render_group_help(reg, prefix, grp);
-                    return inv.edit_rich(rich, &html).await.map(|_| ()).map_err(Into::into);
-                }
-                inv.edit(&render_command_help(reg, prefix, name))
-                    .await
-                    .map_err(Into::into)
-            })
-        },
-    ));
+                    if lookup_for_help(reg, name).is_none()
+                        && let Some(grp) = find_group(name)
+                    {
+                        let blocks = group_help_rich(reg, prefix, grp);
+                        let rich = tl::types::InputRichMessage {
+                            rtl: false,
+                            noautolink: false,
+                            blocks,
+                            photos: None,
+                            documents: None,
+                            users: None,
+                        }
+                        .into();
+                        let html = render_group_help(reg, prefix, grp);
+                        return inv.edit_rich(rich, &html).await.map(|_| ()).map_err(Into::into);
+                    }
+                    inv.edit(&render_command_help(reg, prefix, name))
+                        .await
+                        .map_err(Into::into)
+                })
+            },
+        )
+        .zh("查看命令列表或说明", "[命令|分组]"),
+    );
 }
 
 fn version_text(a: &App) -> String {
-    [
-        "🔖 <b>版本信息</b>".to_owned(),
-        String::new(),
-        format!("MiBot Lite：{}", code(kit::version(a))),
-        format!("Rust：{}", code("pure-rust / rustls")),
-        format!(
-            "平台：{}",
-            code(&format!("{} {}", std::env::consts::OS, std::env::consts::ARCH))
-        ),
-        format!("PID：{}", code(&std::process::id().to_string())),
-    ]
+    if kit::is_zh() {
+        [
+            "🔖 <b>版本信息</b>".to_owned(),
+            String::new(),
+            format!("MiBot Lite：{}", code(kit::version(a))),
+            format!("Rust：{}", code("pure-rust / rustls")),
+            format!(
+                "平台：{}",
+                code(&format!("{} {}", std::env::consts::OS, std::env::consts::ARCH))
+            ),
+            format!("PID：{}", code(&std::process::id().to_string())),
+        ]
+    } else {
+        [
+            "🔖 <b>Version</b>".to_owned(),
+            String::new(),
+            format!("MiBot Lite: {}", code(kit::version(a))),
+            format!("Rust: {}", code("pure-rust / rustls")),
+            format!(
+                "Platform: {}",
+                code(&format!("{} {}", std::env::consts::OS, std::env::consts::ARCH))
+            ),
+            format!("PID: {}", code(&std::process::id().to_string())),
+        ]
+    }
     .join("\n")
 }
 
 fn memory_report() -> String {
     let current = read_memory();
-    let mut lines = vec!["🧠 <b>内存状态</b>".to_owned(), String::new()];
+    let zh = kit::is_zh();
+    let mut lines = vec![
+        if zh {
+            "🧠 <b>内存状态</b>"
+        } else {
+            "🧠 <b>Memory Usage</b>"
+        }
+        .to_owned(),
+        String::new(),
+    ];
     if current.rss > 0 {
         lines.push(format!(
-            "RSS（进程总占用）：{}",
+            "{}{}",
+            kit::tr("RSS (total): ", "RSS（进程总占用）："),
             code(&format!("{:.2} MB", megabytes(current.rss)))
         ));
     } else {
-        lines.push(format!("RSS（进程总占用）：{}", code("不可用")));
+        lines.push(format!(
+            "{}{}",
+            kit::tr("RSS (total): ", "RSS（进程总占用）："),
+            code(kit::tr("N/A", "不可用"))
+        ));
     }
     lines.push(format!(
-        "Heap（已用 / 预留）：{}",
+        "{}{}",
+        kit::tr("Heap (alloc / sys): ", "Heap（已用 / 预留）："),
         code(&format!(
             "{:.2} / {:.2} MB",
             megabytes(current.heap_alloc),
@@ -242,10 +341,15 @@ fn memory_report() -> String {
         ))
     ));
     lines.push(format!(
-        "Sys（运行时预留）：{}",
+        "{}{}",
+        kit::tr("Sys (runtime): ", "Sys（运行时预留）："),
         code(&format!("{:.2} MB", megabytes(current.sys)))
     ));
-    lines.push(format!("Tasks：{}", code(&current.tasks.to_string())));
+    lines.push(format!(
+        "{}{}",
+        kit::tr("Tasks: ", "Tasks："),
+        code(&current.tasks.to_string())
+    ));
     lines.join("\n")
 }
 
@@ -265,55 +369,84 @@ fn gauge_of(cap: Capacity) -> Gauge {
 fn status_caption(a: &App, registry: &Registry, resources: &Resources) -> String {
     let process = read_memory();
     let host = read_host();
+    let na = kit::tr("N/A", "不可用");
     let load = if host.load_average != [0.0; 3] {
         format!(
             "{:.2} / {:.2} / {:.2}",
             host.load_average[0], host.load_average[1], host.load_average[2]
         )
     } else {
-        "不可用".to_owned()
+        na.to_owned()
     };
     let host_uptime = if !host.uptime.is_zero() {
         format_uptime(host.uptime)
     } else {
-        "不可用".to_owned()
+        na.to_owned()
     };
-    let row = |label: &str, value: &str| format!("• {label}：{}", code(value));
-    [
-        "<b>进程</b>".to_owned(),
-        row("版本", kit::version(a)),
-        row("运行时间", &format_uptime(a.started_at.elapsed())),
-        row(
-            "PID",
-            &format!("{} · {} 个任务", std::process::id(), process.tasks),
-        ),
-        row("CPU", &format!("{:.1}%", resources.process_cpu)),
-        row(
-            "RSS · 堆内存",
-            &format!("{} · {}", format_bytes(process.rss), format_bytes(process.heap_alloc)),
-        ),
-        row(
-            "命令 · 前缀",
-            &format!(
-                "{} 个 · {}",
-                registry.list().len(),
-                registry.prefixes().join(" ")
+    let zh = kit::is_zh();
+    let row = |label: &str, value: &str| {
+        if zh {
+            format!("• {label}：{}", code(value))
+        } else {
+            format!("• {label}: {}", code(value))
+        }
+    };
+    if zh {
+        [
+            "<b>进程</b>".to_owned(),
+            row("版本", kit::version(a)),
+            row("运行时间", &format_uptime(a.started_at.elapsed())),
+            row("PID", &format!("{} · {} 个任务", std::process::id(), process.tasks)),
+            row("CPU", &format!("{:.1}%", resources.process_cpu)),
+            row(
+                "RSS · 堆内存",
+                &format!("{} · {}", format_bytes(process.rss), format_bytes(process.heap_alloc)),
             ),
-        ),
-        String::new(),
-        "<b>主机</b>".to_owned(),
-        row("系统", &format!("{} · {}", resources.os, host.platform)),
-        row("内核", kit::or_default(&host.kernel_release, "不可用")),
-        row("主机在线", &host_uptime),
-        row("负载 1 / 5 / 15 分钟", &load),
-        row("状态采样", &format!("{} ms", resources.sampled.as_millis())),
-    ]
+            row(
+                "命令 · 前缀",
+                &format!("{} 个 · {}", registry.list().len(), registry.prefixes().join(" ")),
+            ),
+            String::new(),
+            "<b>主机</b>".to_owned(),
+            row("系统", &format!("{} · {}", resources.os, host.platform)),
+            row("内核", kit::or_default(&host.kernel_release, na)),
+            row("主机在线", &host_uptime),
+            row("负载 1 / 5 / 15 分钟", &load),
+            row("状态采样", &format!("{} ms", resources.sampled.as_millis())),
+        ]
+    } else {
+        [
+            "<b>Process</b>".to_owned(),
+            row("Version", kit::version(a)),
+            row("Uptime", &format_uptime(a.started_at.elapsed())),
+            row("PID", &format!("{} · {} tasks", std::process::id(), process.tasks)),
+            row("CPU", &format!("{:.1}%", resources.process_cpu)),
+            row(
+                "RSS · Heap",
+                &format!("{} · {}", format_bytes(process.rss), format_bytes(process.heap_alloc)),
+            ),
+            row(
+                "Commands · Prefixes",
+                &format!("{} · {}", registry.list().len(), registry.prefixes().join(" ")),
+            ),
+            String::new(),
+            "<b>Host</b>".to_owned(),
+            row("OS", &format!("{} · {}", resources.os, host.platform)),
+            row("Kernel", kit::or_default(&host.kernel_release, na)),
+            row("Host Uptime", &host_uptime),
+            row("Load 1 / 5 / 15m", &load),
+            row("Sampled in", &format!("{} ms", resources.sampled.as_millis())),
+        ]
+    }
     .join("\n")
 }
 
 async fn run_status(a: &App, inv: &Invocation) -> mibot_command::CmdResult {
     let Ok(_guard) = drawing_lock().try_lock() else {
-        return Err(kit::fail_err("上一张状态卡片还在生成，请稍候"));
+        return Err(kit::fail_err(kit::tr(
+            "Previous status card is still rendering, please wait",
+            "上一张状态卡片还在生成，请稍候",
+        )));
     };
     let resources = sample_resources(&a.root, Duration::from_millis(160)).await;
     let caption = status_caption(a, &a.registry, &resources);
@@ -368,7 +501,10 @@ async fn run_status(a: &App, inv: &Invocation) -> mibot_command::CmdResult {
             a.logs.record(Level::Warn, "status.card_render_failed", &[("error", &e_s)]);
         }
     }
-    inv.edit(&format!("📊 <b>运行状态</b>\n\n{caption}"))
+    inv.edit(&format!(
+        "📊 <b>{}</b>\n\n{caption}",
+        kit::tr("Runtime Status", "运行状态")
+    ))
         .await
         .map_err(Into::into)
 }
@@ -393,16 +529,23 @@ fn group_lines(commands: &[Arc<Command>], prefix: &str) -> Vec<String> {
                     .iter()
                     .map(|a| code(&format!("{prefix}{a}")))
                     .collect();
-                line.push_str(&format!("（{}）", short.join(" ")));
+                if kit::is_zh() {
+                    line.push_str(&format!("（{}）", short.join(" ")));
+                } else {
+                    line.push_str(&format!(" ({})", short.join(" ")));
+                }
             }
-            format!("{line} — {}", escape(&cmd.description))
+            format!("{line} — {}", escape(cmd.desc_text()))
         })
         .collect()
 }
 
 pub fn render_help_list(registry: &Registry, prefix: &str) -> String {
     let by_group = commands_by_group(registry);
-    let mut lines = vec!["📖 <b>命令列表</b>".to_owned()];
+    let mut lines = vec![format!(
+        "📖 <b>{}</b>",
+        kit::tr("Command List", "命令列表")
+    )];
     let mut details = Vec::new();
     for &grp in GROUPS {
         let Some(cmds) = by_group.get(grp) else {
@@ -411,25 +554,34 @@ pub fn render_help_list(registry: &Registry, prefix: &str) -> String {
         if cmds.is_empty() {
             continue;
         }
+        let label = group::display(grp);
         let names: Vec<String> = cmds
             .iter()
             .map(|c| code(&format!("{prefix}{}", c.name)))
             .collect();
-        lines.push(format!("<b>{}</b>", escape(grp)));
+        lines.push(format!("<b>{}</b>", escape(label)));
         lines.push(names.join(" "));
         if !details.is_empty() {
             details.push(String::new());
         }
-        details.push(format!("<b>{}</b>", escape(grp)));
+        details.push(format!("<b>{}</b>", escape(label)));
         details.extend(group_lines(cmds, prefix));
     }
     let quoted: Vec<String> = registry.prefixes().into_iter().map(|p| code(&p)).collect();
     lines.push(String::new());
-    lines.push(format!(
-        "各命令的说明折在下面，{} 看用法 · 前缀：{}",
-        code(&format!("{prefix}help 命令")),
-        quoted.join(" ")
-    ));
+    if kit::is_zh() {
+        lines.push(format!(
+            "各命令的说明折在下面，{} 看用法 · 前缀：{}",
+            code(&format!("{prefix}help 命令")),
+            quoted.join(" ")
+        ));
+    } else {
+        lines.push(format!(
+            "Details collapsed below, {} for usage · Prefixes: {}",
+            code(&format!("{prefix}help cmd")),
+            quoted.join(" ")
+        ));
+    }
     lines.push(format!(
         "<blockquote expandable>{}</blockquote>",
         details.join("\n")
@@ -440,10 +592,14 @@ pub fn render_help_list(registry: &Registry, prefix: &str) -> String {
 pub fn render_group_help(registry: &Registry, prefix: &str, grp: &str) -> String {
     let by_group = commands_by_group(registry);
     let cmds = by_group.get(grp).map(Vec::as_slice).unwrap_or(&[]);
-    let mut lines = vec![format!("📖 <b>{}</b>", escape(grp)), String::new()];
+    let mut lines = vec![format!("📖 <b>{}</b>", escape(group::display(grp))), String::new()];
     lines.extend(group_lines(cmds, prefix));
     lines.push(String::new());
-    lines.push(format!("{} 看用法", code(&format!("{prefix}help 命令"))));
+    if kit::is_zh() {
+        lines.push(format!("{} 看用法", code(&format!("{prefix}help 命令"))));
+    } else {
+        lines.push(format!("{} for details", code(&format!("{prefix}help cmd"))));
+    }
     lines.join("\n")
 }
 
@@ -479,8 +635,8 @@ fn header_table_rows() -> Vec<tl::enums::PageTableRow> {
     vec![
         tl::types::PageTableRow {
             cells: vec![
-                cell(true, None, rich_plain("命令")),
-                cell(true, None, rich_plain("说明")),
+                cell(true, None, rich_plain(kit::tr("Command", "命令"))),
+                cell(true, None, rich_plain(kit::tr("Description", "说明"))),
             ],
         }
         .into(),
@@ -488,24 +644,25 @@ fn header_table_rows() -> Vec<tl::enums::PageTableRow> {
 }
 
 fn command_rows(commands: &[Arc<Command>], prefix: &str) -> Vec<tl::enums::PageTableRow> {
+    let zh = kit::is_zh();
     commands
         .iter()
         .map(|cmd| {
             let mut name_parts = vec![rich_code(&format!("{prefix}{}", cmd.name))];
             if !cmd.aliases.is_empty() {
-                name_parts.push(rich_plain("（"));
+                name_parts.push(rich_plain(if zh { "（" } else { " (" }));
                 for (idx, alias) in cmd.aliases.iter().enumerate() {
                     if idx > 0 {
                         name_parts.push(rich_plain(" "));
                     }
                     name_parts.push(rich_code(&format!("{prefix}{alias}")));
                 }
-                name_parts.push(rich_plain("）"));
+                name_parts.push(rich_plain(if zh { "）" } else { ")" }));
             }
             tl::types::PageTableRow {
                 cells: vec![
                     cell(false, None, rich_concat(&name_parts)),
-                    cell(false, None, rich_plain(&cmd.description)),
+                    cell(false, None, rich_plain(cmd.desc_text())),
                 ],
             }
             .into()
@@ -515,7 +672,7 @@ fn command_rows(commands: &[Arc<Command>], prefix: &str) -> Vec<tl::enums::PageT
 
 pub fn help_list_rich(registry: &Registry, prefix: &str) -> Vec<tl::enums::PageBlock> {
     let by_group = commands_by_group(registry);
-    let mut blocks = vec![rich_title("命令列表")];
+    let mut blocks = vec![rich_title(kit::tr("Command List", "命令列表"))];
     let mut rows = header_table_rows();
     for &grp in GROUPS {
         let Some(cmds) = by_group.get(grp) else {
@@ -524,7 +681,8 @@ pub fn help_list_rich(registry: &Registry, prefix: &str) -> Vec<tl::enums::PageB
         if cmds.is_empty() {
             continue;
         }
-        let mut parts = vec![rich_bold(grp), rich_plain("\n")];
+        let label = group::display(grp);
+        let mut parts = vec![rich_bold(label), rich_plain("\n")];
         for (idx, cmd) in cmds.iter().enumerate() {
             if idx > 0 {
                 parts.push(rich_plain(" "));
@@ -539,16 +697,23 @@ pub fn help_list_rich(registry: &Registry, prefix: &str) -> Vec<tl::enums::PageB
         );
         rows.push(
             tl::types::PageTableRow {
-                cells: vec![cell(true, Some(2), rich_plain(grp))],
+                cells: vec![cell(true, Some(2), rich_plain(label))],
             }
             .into(),
         );
         rows.extend(command_rows(cmds, prefix));
     }
-    let mut hint = vec![
-        rich_code(&format!("{prefix}help 命令")),
-        rich_plain(" 看用法 · 前缀："),
-    ];
+    let mut hint = if kit::is_zh() {
+        vec![
+            rich_code(&format!("{prefix}help 命令")),
+            rich_plain(" 看用法 · 前缀："),
+        ]
+    } else {
+        vec![
+            rich_code(&format!("{prefix}help cmd")),
+            rich_plain(" for usage · Prefixes: "),
+        ]
+    };
     for (idx, p) in registry.prefixes().into_iter().enumerate() {
         if idx > 0 {
             hint.push(rich_plain(" "));
@@ -564,7 +729,7 @@ pub fn help_list_rich(registry: &Registry, prefix: &str) -> Vec<tl::enums::PageB
     blocks.push(
         tl::types::PageBlockDetails {
             open: false,
-            title: rich_plain("各命令的说明"),
+            title: rich_plain(kit::tr("Command details", "各命令的说明")),
             blocks: vec![
                 tl::types::PageBlockTable {
                     bordered: true,
@@ -590,8 +755,16 @@ pub fn group_help_rich(
     let cmds = by_group.get(grp).map(Vec::as_slice).unwrap_or(&[]);
     let mut rows = header_table_rows();
     rows.extend(command_rows(cmds, prefix));
+    let hint = if kit::is_zh() {
+        vec![rich_code(&format!("{prefix}help 命令")), rich_plain(" 看用法")]
+    } else {
+        vec![
+            rich_code(&format!("{prefix}help cmd")),
+            rich_plain(" for details"),
+        ]
+    };
     vec![
-        rich_title(grp),
+        rich_title(group::display(grp)),
         tl::types::PageBlockTable {
             bordered: true,
             striped: false,
@@ -601,10 +774,7 @@ pub fn group_help_rich(
         }
         .into(),
         tl::types::PageBlockParagraph {
-            text: rich_concat(&[
-                rich_code(&format!("{prefix}help 命令")),
-                rich_plain(" 看用法"),
-            ]),
+            text: rich_concat(&hint),
         }
         .into(),
     ]
@@ -617,7 +787,7 @@ pub fn find_group(name: &str) -> Option<&'static str> {
     }
     let mut found = None;
     for &grp in GROUPS {
-        if grp.to_ascii_lowercase().contains(&trimmed) {
+        if group::matches(grp, &trimmed) {
             if found.is_some() {
                 return None;
             }
@@ -655,16 +825,28 @@ pub fn render_command_help(registry: &Registry, prefix: &str, name: &str) -> Str
     if let Some(grp) = find_group(name) {
         return render_group_help(registry, prefix, grp);
     }
-    format!(
-        "❌ 没有这个命令或分组：{}，{} 看全部命令",
-        code(name),
-        code(&format!("{prefix}help"))
-    )
+    if kit::is_zh() {
+        format!(
+            "❌ 没有这个命令或分组：{}，{} 看全部命令",
+            code(name),
+            code(&format!("{prefix}help"))
+        )
+    } else {
+        format!(
+            "❌ Unknown command or group: {}, {} for all commands",
+            code(name),
+            code(&format!("{prefix}help"))
+        )
+    }
 }
 
 pub async fn probe(target: &str) -> String {
     if !ping_target_re().is_match(target) {
-        return "❌ 无效的目标：只能是域名或 IP".to_owned();
+        return kit::tr(
+            "❌ Invalid target: domain or IP expected",
+            "❌ 无效的目标：只能是域名或 IP",
+        )
+        .to_owned();
     }
     let started = Instant::now();
     let host = match target.parse::<IpAddr>() {
@@ -680,69 +862,137 @@ pub async fn probe(target: &str) -> String {
     })
     .await
     {
-        Ok(resp) => code(&format!(
-            "{target}: HTTP {}，{} ms",
-            resp.status,
-            started.elapsed().as_millis()
-        )),
-        Err(_) => "❌ 网络测试失败或目标不可达".to_owned(),
+        Ok(resp) => {
+            if kit::is_zh() {
+                code(&format!(
+                    "{target}: HTTP {}，{} ms",
+                    resp.status,
+                    started.elapsed().as_millis()
+                ))
+            } else {
+                code(&format!(
+                    "{target}: HTTP {}, {} ms",
+                    resp.status,
+                    started.elapsed().as_millis()
+                ))
+            }
+        }
+        Err(_) => kit::tr(
+            "❌ Probe failed or target unreachable",
+            "❌ 网络测试失败或目标不可达",
+        )
+        .to_owned(),
     }
 }
 
 fn ping_help(prefix: &str) -> String {
     let p = escape(prefix);
-    format!(
-        "🏓 <b>延迟测试</b>\n\n\
-         • <code>{p}ping</code> 测 Telegram 接口和消息编辑的延迟\n\
-         • <code>{p}ping example.com</code> 对 https://example.com 发一次 HEAD 请求，显示状态码和耗时（5 秒超时）"
-    )
+    if kit::is_zh() {
+        format!(
+            "🏓 <b>延迟测试</b>\n\n\
+             • <code>{p}ping</code> 测 Telegram 接口和消息编辑的延迟\n\
+             • <code>{p}ping example.com</code> 对 https://example.com 发一次 HEAD 请求，显示状态码和耗时（5 秒超时）"
+        )
+    } else {
+        format!(
+            "🏓 <b>Latency Test</b>\n\n\
+             • <code>{p}ping</code> Measure Telegram API and message edit latency\n\
+             • <code>{p}ping example.com</code> Send a HEAD request to https://example.com (5s timeout)"
+        )
+    }
 }
 
 fn status_help(prefix: &str) -> String {
-    format!(
-        "📊 <b>运行状态</b>\n\n<code>{}status</code> 发一张状态卡片：健康状态、在线时长，\
-         CPU、内存、磁盘、Swap 的占用；卡片下面附进程和主机的文字说明。CPU 要采样约 160 毫秒。",
-        escape(prefix)
-    )
+    let p = escape(prefix);
+    if kit::is_zh() {
+        format!(
+            "📊 <b>运行状态</b>\n\n<code>{p}status</code> 发一张状态卡片：健康状态、在线时长，\
+             CPU、内存、磁盘、Swap 的占用；卡片下面附进程和主机的文字说明。CPU 要采样约 160 毫秒。"
+        )
+    } else {
+        format!(
+            "📊 <b>Runtime Status</b>\n\n<code>{p}status</code> Sends a status card with health, uptime, \
+             CPU, memory, disk, and swap usage, plus process and host details below (samples CPU for ~160ms)."
+        )
+    }
 }
 
 fn version_help(prefix: &str) -> String {
-    format!(
-        "🔖 <b>版本信息</b>\n\n{}（简写 {}）显示 MiBot Lite 和 Rust 的版本、平台和进程号。",
-        code(&format!("{prefix}version")),
-        code(&format!("{prefix}ver")),
-    )
+    if kit::is_zh() {
+        format!(
+            "🔖 <b>版本信息</b>\n\n{}（简写 {}）显示 MiBot Lite 和 Rust 的版本、平台和进程号。",
+            code(&format!("{prefix}version")),
+            code(&format!("{prefix}ver")),
+        )
+    } else {
+        format!(
+            "🔖 <b>Version</b>\n\n{} (alias {}) shows MiBot Lite and Rust version, platform, and PID.",
+            code(&format!("{prefix}version")),
+            code(&format!("{prefix}ver")),
+        )
+    }
 }
 
 fn memory_help(prefix: &str) -> String {
-    format!(
-        "🧠 <b>内存状态</b>\n\n{} 显示本进程的 RSS、堆内存、运行时预留的内存和任务数。",
-        code(&format!("{prefix}memory"))
-    )
+    if kit::is_zh() {
+        format!(
+            "🧠 <b>内存状态</b>\n\n{} 显示本进程的 RSS、堆内存、运行时预留的内存和任务数。",
+            code(&format!("{prefix}memory"))
+        )
+    } else {
+        format!(
+            "🧠 <b>Memory Usage</b>\n\n{} shows this process's RSS, heap allocation, runtime reserved memory, and task count.",
+            code(&format!("{prefix}memory"))
+        )
+    }
 }
 
 fn sysinfo_help(prefix: &str) -> String {
-    format!(
-        "🖥 <b>系统信息</b>\n\n{} 显示主机名、系统、内核、在线时长、负载、CPU 和内存，以及本进程的版本和内存。\
-         里面有主机名，只限本人使用；借给别人的是 {}。",
-        code(&format!("{prefix}sysinfo")),
-        code(&format!("{prefix}status")),
-    )
+    if kit::is_zh() {
+        format!(
+            "🖥 <b>系统信息</b>\n\n{} 显示主机名、系统、内核、在线时长、负载、CPU 和内存，以及本进程的版本和内存。\
+             里面有主机名，只限本人使用；借给别人的是 {}。",
+            code(&format!("{prefix}sysinfo")),
+            code(&format!("{prefix}status")),
+        )
+    } else {
+        format!(
+            "🖥 <b>System Info</b>\n\n{} shows hostname, OS, kernel, uptime, load, CPU, memory, and process info. \
+             Contains the hostname so it is owner-only; {} can be lent via sudo.",
+            code(&format!("{prefix}sysinfo")),
+            code(&format!("{prefix}status")),
+        )
+    }
 }
 
 fn help_help(prefix: &str) -> String {
-    format!(
-        "📖 <b>命令帮助</b>\n\n\
-         • {} 按分组列出全部命令，说明折在引用里，点开展开\n\
-         • {} 列出一组命令和各自的说明，分组名写一段就行（{}）\n\
-         • {} 看一条命令的用法和说明，命令可以带前缀、写简写或别名\n\
-         • {} 同上，只显示帮助、不执行",
-        code(&format!("{prefix}help")),
-        code(&format!("{prefix}help 分组")),
-        code(&format!("{prefix}help 群组")),
-        code(&format!("{prefix}help 命令")),
-        code("命令 --help"),
-    )
+    if kit::is_zh() {
+        format!(
+            "📖 <b>命令帮助</b>\n\n\
+             • {} 按分组列出全部命令，说明折在引用里，点开展开\n\
+             • {} 列出一组命令和各自的说明，分组名写一段就行（{}）\n\
+             • {} 看一条命令的用法和说明，命令可以带前缀、写简写或别名\n\
+             • {} 同上，只显示帮助、不执行",
+            code(&format!("{prefix}help")),
+            code(&format!("{prefix}help 分组")),
+            code(&format!("{prefix}help 群组")),
+            code(&format!("{prefix}help 命令")),
+            code("命令 --help"),
+        )
+    } else {
+        format!(
+            "📖 <b>Command Help</b>\n\n\
+             • {} List all commands by group with expandable descriptions\n\
+             • {} List commands in one group (partial match works, e.g. {})\n\
+             • {} Show usage for a command (accepts prefix, alias, or user alias)\n\
+             • {} Same as above without executing",
+            code(&format!("{prefix}help")),
+            code(&format!("{prefix}help group")),
+            code(&format!("{prefix}help admin")),
+            code(&format!("{prefix}help cmd")),
+            code("cmd --help"),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -793,7 +1043,7 @@ mod tests {
         let long = "a".repeat(254);
         for bad in ["a b", "http://x", "x/y", "a;b", &long] {
             let got = probe(bad).await;
-            assert!(got.contains("无效的目标"), "{bad:?} -> {got}");
+            assert!(got.contains("Invalid target"), "{bad:?} -> {got}");
         }
     }
 
@@ -801,31 +1051,46 @@ mod tests {
     fn test_help_list_and_groups() {
         let reg = Registry::new();
         reg.set_prefixes(vec![".".into()]);
-        reg.register(noop_cmd("ping", &[], group::SYSTEM, "测试网络延迟"));
-        reg.register(noop_cmd("speedtest", &["st"], group::TOOLS, "测量主机网络速度"));
-        let mut ai = noop_cmd("ai", &[], group::AI, "与 AI 对话");
-        ai.help_fn = Some(Arc::new(|_| "ai 的帮助".into()));
+        reg.register(noop_cmd("ping", &[], group::SYSTEM, "Latency test").zh("测试网络延迟", ""));
+        reg.register(
+            noop_cmd("speedtest", &["st"], group::TOOLS, "Host network speed test")
+                .zh("测量主机网络速度", ""),
+        );
+        let mut ai = noop_cmd("ai", &[], group::AI, "AI chat").zh("与 AI 对话", "");
+        ai.help_fn = Some(Arc::new(|_| "ai help".into()));
         reg.register(ai);
 
         let list = render_help_list(&reg, ".");
         let (names, folded) = list.split_once("<blockquote expandable>").unwrap();
         assert!(folded.ends_with("</blockquote>"));
         for want in [
-            "<b>运行与维护</b>\n<code>.ping</code>",
-            "<b>查询与工具</b>\n<code>.speedtest</code>",
-            "<code>.help 命令</code>",
+            "<b>Running &amp; Ops</b>\n<code>.ping</code>",
+            "<b>Lookups &amp; Tools</b>\n<code>.speedtest</code>",
+            "<code>.help cmd</code>",
         ] {
             assert!(names.contains(want), "missing {want}:\n{names}");
         }
-        assert!(!names.contains("测试网络延迟") && !names.contains(".st") && !list.contains("账号"));
-        assert!(folded.contains("<b>查询与工具</b>\n<code>.speedtest</code>（<code>.st</code>） — 测量主机网络速度"));
+        assert!(
+            !names.contains("Latency test") && !names.contains(".st") && !list.contains("Account")
+        );
+        assert!(folded.contains(
+            "<b>Lookups &amp; Tools</b>\n<code>.speedtest</code> (<code>.st</code>) — Host network speed test"
+        ));
 
-        let grp = render_command_help(&reg, ".", "工具");
-        assert!(grp.contains("<code>.speedtest</code>（<code>.st</code>） — 测量主机网络速度") && !grp.contains(".ping"));
-        assert_eq!(render_command_help(&reg, ".", "ai"), "ai 的帮助");
-        assert!(render_command_help(&reg, ".", "nosuch").starts_with("❌ 没有这个命令或分组"));
+        let grp = render_command_help(&reg, ".", "tools");
+        assert!(
+            grp.contains("<code>.speedtest</code> (<code>.st</code>) — Host network speed test")
+                && !grp.contains(".ping")
+        );
+        assert_eq!(render_command_help(&reg, ".", "ai"), "ai help");
+        assert!(render_command_help(&reg, ".", "nosuch").starts_with("❌ Unknown command or group"));
 
         for (name, want) in [
+            ("group", group::ADMIN),
+            ("messages", group::MEDIA),
+            ("running", group::SYSTEM),
+            ("account", group::ACCOUNT),
+            ("tools", group::TOOLS),
             ("群组", group::ADMIN),
             ("消息", group::MEDIA),
             ("运行", group::SYSTEM),
@@ -834,7 +1099,14 @@ mod tests {
         ] {
             assert_eq!(find_group(name), Some(want), "{name}");
         }
+        assert_eq!(find_group("&"), None);
         assert_eq!(find_group("与"), None);
+
+        mibot_i18n::with_lang(mibot_i18n::Lang::Zh, || {
+            let zh_list = render_help_list(&reg, ".");
+            assert!(zh_list.contains("<b>运行与维护</b>\n<code>.ping</code>"));
+            assert!(zh_list.contains("<code>.help 命令</code>"));
+        });
     }
 
     fn msg_from_blocks(blocks: Vec<tl::enums::PageBlock>) -> tl::types::Message {
@@ -904,14 +1176,17 @@ mod tests {
     fn test_help_rich() {
         let reg = Registry::new();
         reg.set_prefixes(vec![".".into(), "$".into()]);
-        reg.register(noop_cmd("ping", &[], group::SYSTEM, "测试网络延迟"));
-        reg.register(noop_cmd("speedtest", &["st"], group::TOOLS, "测量主机网络速度"));
+        reg.register(noop_cmd("ping", &[], group::SYSTEM, "Latency test").zh("测试网络延迟", ""));
+        reg.register(
+            noop_cmd("speedtest", &["st"], group::TOOLS, "Host network speed test")
+                .zh("测量主机网络速度", ""),
+        );
 
         let list = help_list_rich(&reg, ".");
         assert_eq!(list.len(), 5);
         assert_eq!(
             rich_message_text(&msg_from_blocks(list[..4].to_vec())),
-            "📖 命令列表\n运行与维护\n.ping\n查询与工具\n.speedtest\n.help 命令 看用法 · 前缀：. $"
+            "📖 Command List\nRunning & Ops\n.ping\nLookups & Tools\n.speedtest\n.help cmd for usage · Prefixes: . $"
         );
         let tl::enums::PageBlock::Details(ref details) = list[4] else {
             panic!("expected Details block");
@@ -924,7 +1199,7 @@ mod tests {
         let grp = group_help_rich(&reg, ".", group::TOOLS);
         assert_eq!(
             rich_message_text(&msg_from_blocks(grp.clone())),
-            "📖 查询与工具\n命令 | 说明\n.speedtest（.st） | 测量主机网络速度\n.help 命令 看用法"
+            "📖 Lookups & Tools\nCommand | Description\n.speedtest (.st) | Host network speed test\n.help cmd for details"
         );
         for blocks in [list, grp] {
             let input: tl::enums::InputRichMessage = tl::types::InputRichMessage {

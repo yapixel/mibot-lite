@@ -209,51 +209,107 @@ struct Service {
 fn help(prefix: &str) -> String {
     let p = escape(prefix);
     let c = |text: &str| format!("<code>{p}clean_member{text}</code>");
-    format!(
-        "🧽 <b>群成员搜索与清理</b>\n\n\
-         按最后上线时间、发言情况或账号状态找出群组成员，生成 CSV 报告，或者直接移出。\n\n\
-         <b>格式</b>\n{}\n\n\
-         <b>模式</b>\n\
-         • <code>1 天数</code> 最后上线超过这么多天；看不到上线时间的跳过\n\
-         • <code>2 天数</code> 这么多天里没有发言\n\
-         • <code>3 条数</code> 能搜到的发言少于这么多条\n\
-         • <code>4</code> 已注销的账号\n\
-         • <code>5</code> 所有普通成员\n\
-         模式 1、2 的天数少于 7 时按 7 天算。\n\n\
-         <b>选项</b>\n\
-         • <code>search</code> 只搜索、出报告，不移出；不写就直接移出\n\
-         • <code>limit:50</code> 最多移出 50 人，只对移出起作用\n\
-         • <code>chat:-1001234567890</code> 指定群组，也可以写 @用户名；不写就是当前群组\n\n\
-         <b>示例</b>\n\
-         • {} 看看超过 30 天没上线的成员\n\
-         • {} 重新查一遍，移出其中 10 人\n\
-         • {} 搜索指定群组里的注销账号\n\
-         • {} 搜索发言少于 5 条的成员\n\n\
-         <b>说明</b>\n\
-         • 移出要群主身份或封禁成员权限；搜索只要看得到成员列表\n\
-         • 管理员和你自己不会被列入\n\
-         • 移出是封禁后马上解封，对方还能重新加入\n\
-         • 同一群组、模式和参数的搜索结果缓存 24 小时；移出总是重新查，查完清掉这个群组的缓存\n\
-         • 报告以 CSV 文件发到收藏夹，不会出现在群组里\n\
-         • 上线时间和发言统计受对方隐私设置和 Telegram 的可见范围限制，成员很多时 Telegram 可能只给出一部分\n\
-         • 频道的订阅者不能发言，模式 2、3 只能用于群组\n\
-         • 参数写错会直接报错，不会当成移出执行",
-        c(" 模式 [参数] [chat:对话 ID] [limit:数量] [search]"),
-        c(" 1 30 search"),
-        c(" 1 30 limit:10"),
-        c(" 4 chat:-1001234567890 search"),
-        c(" 3 5 search"),
-    )
+    if kit::is_zh() {
+        format!(
+            "🧽 <b>群成员搜索与清理</b>\n\n\
+             按最后上线时间、发言情况或账号状态找出群组成员，生成 CSV 报告，或者直接移出。\n\n\
+             <b>格式</b>\n{}\n\n\
+             <b>模式</b>\n\
+             • <code>1 天数</code> 最后上线超过这么多天；看不到上线时间的跳过\n\
+             • <code>2 天数</code> 这么多天里没有发言\n\
+             • <code>3 条数</code> 能搜到的发言少于这么多条\n\
+             • <code>4</code> 已注销的账号\n\
+             • <code>5</code> 所有普通成员\n\
+             模式 1、2 的天数少于 7 时按 7 天算。\n\n\
+             <b>选项</b>\n\
+             • <code>search</code> 只搜索、出报告，不移出；不写就直接移出\n\
+             • <code>limit:50</code> 最多移出 50 人，只对移出起作用\n\
+             • <code>chat:-1001234567890</code> 指定群组，也可以写 @用户名；不写就是当前群组\n\n\
+             <b>示例</b>\n\
+             • {} 看看超过 30 天没上线的成员\n\
+             • {} 重新查一遍，移出其中 10 人\n\
+             • {} 搜索指定群组里的注销账号\n\
+             • {} 搜索发言少于 5 条的成员\n\n\
+             <b>说明</b>\n\
+             • 移出要群主身份或封禁成员权限；搜索只要看得到成员列表\n\
+             • 管理员和你自己不会被列入\n\
+             • 移出是封禁后马上解封，对方还能重新加入\n\
+             • 同一群组、模式和参数的搜索结果缓存 24 小时；移出总是重新查，查完清掉这个群组的缓存\n\
+             • 报告以 CSV 文件发到收藏夹，不会出现在群组里\n\
+             • 上线时间和发言统计受对方隐私设置和 Telegram 的可见范围限制，成员很多时 Telegram 可能只给出一部分\n\
+             • 频道的订阅者不能发言，模式 2、3 只能用于群组\n\
+             • 参数写错会直接报错，不会当成移出执行",
+            c(" 模式 [参数] [chat:对话 ID] [limit:数量] [search]"),
+            c(" 1 30 search"),
+            c(" 1 30 limit:10"),
+            c(" 4 chat:-1001234567890 search"),
+            c(" 3 5 search"),
+        )
+    } else {
+        format!(
+            "🧽 <b>Member Search &amp; Cleanup</b>\n\n\
+             Find group members by last seen time, message activity, or account status, export a CSV report, or remove them.\n\n\
+             <b>Syntax</b>\n{}\n\n\
+             <b>Modes</b>\n\
+             • <code>1 days</code> Last seen over N days ago (hidden status skipped)\n\
+             • <code>2 days</code> No messages sent in the last N days\n\
+             • <code>3 count</code> Fewer than N searchable messages\n\
+             • <code>4</code> Deleted accounts\n\
+             • <code>5</code> All regular members\n\
+             Modes 1 and 2 clamp days below 7 up to 7.\n\n\
+             <b>Options</b>\n\
+             • <code>search</code> Search and export CSV only; omit to remove members\n\
+             • <code>limit:50</code> Remove at most 50 members (removal only)\n\
+             • <code>chat:-1001234567890</code> Target group ID or @username (defaults to current group)\n\n\
+             <b>Examples</b>\n\
+             • {} Check members inactive for over 30 days\n\
+             • {} Re-scan and remove up to 10 inactive members\n\
+             • {} Search deleted accounts in a specific group\n\
+             • {} Search members with fewer than 5 messages\n\n\
+             <b>Notes</b>\n\
+             • Removal requires owner or ban_users permission; search only needs visible member list\n\
+             • Admins and yourself are always excluded\n\
+             • Removal kicks (ban then unban) so members can rejoin later\n\
+             • Search results are cached for 24h per group/mode/arg; removal always re-scans and clears cache\n\
+             • CSV reports are sent to Saved Messages, never posted in the group\n\
+             • Last seen and message counts depend on user privacy and Telegram visibility limits\n\
+             • Channel subscribers cannot send messages; modes 2 and 3 are for groups only\n\
+             • Invalid arguments fail immediately without removing anyone",
+            c(" mode [arg] [chat:&lt;ID&gt;] [limit:N] [search]"),
+            c(" 1 30 search"),
+            c(" 1 30 limit:10"),
+            c(" 4 chat:-1001234567890 search"),
+            c(" 3 5 search"),
+        )
+    }
 }
 
 fn mode_name(mode: &str, n: i64) -> String {
     match mode {
-        "1" => format!("未上线超过 {n} 天的用户"),
-        "2" => format!("未发言超过 {n} 天的用户"),
-        "3" => format!("发言少于 {n} 条的用户"),
-        "4" => "已注销的账号".into(),
-        "5" => "所有普通成员".into(),
-        _ => "未知".into(),
+        "1" => {
+            if kit::is_zh() {
+                format!("未上线超过 {n} 天的用户")
+            } else {
+                format!("inactive for over {n} day(s)")
+            }
+        }
+        "2" => {
+            if kit::is_zh() {
+                format!("未发言超过 {n} 天的用户")
+            } else {
+                format!("silent for over {n} day(s)")
+            }
+        }
+        "3" => {
+            if kit::is_zh() {
+                format!("发言少于 {n} 条的用户")
+            } else {
+                format!("fewer than {n} message(s)")
+            }
+        }
+        "4" => kit::tr("deleted accounts", "已注销的账号").into(),
+        "5" => kit::tr("all regular members", "所有普通成员").into(),
+        _ => kit::tr("unknown", "未知").into(),
     }
 }
 
@@ -271,21 +327,40 @@ fn option<'a>(arg: &'a str, key: &str) -> Option<&'a str> {
 fn parse_request(args: &[String], prefix: &str) -> Result<Request, CmdError> {
     let mode = args[0].to_ascii_lowercase();
     if mode.len() != 1 || !(mode.as_bytes()[0] >= b'1' && mode.as_bytes()[0] <= b'5') {
-        return Err(kit::fail(format!(
-            "没有模式 {}，模式是 1 到 5，{prefix}clean_member help 看说明",
-            args[0]
-        )));
+        return Err(kit::fail(if kit::is_zh() {
+            format!(
+                "没有模式 {}，模式是 1 到 5，{prefix}clean_member help 看说明",
+                args[0]
+            )
+        } else {
+            format!(
+                "Unknown mode {}; valid modes are 1 to 5; see {prefix}clean_member help",
+                args[0]
+            )
+        }));
     }
     let mut rest = &args[1..];
     let mut day = 0i64;
     if mode.as_str() <= "3" {
-        let what = if mode == "3" { "发言条数" } else { "天数" };
+        let what = if mode == "3" {
+            kit::tr("message count", "发言条数")
+        } else {
+            kit::tr("days", "天数")
+        };
         if rest.is_empty() {
-            return Err(kit::fail(format!("模式 {mode} 后面要写{what}")));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("模式 {mode} 后面要写{what}")
+            } else {
+                format!("Mode {mode} requires {what}")
+            }));
         }
         let parsed = rest[0].parse::<i64>().ok().filter(|&v| v >= 1 && kit::is_digits(&rest[0]));
         let Some(mut d) = parsed else {
-            return Err(kit::fail(format!("{what}要是正整数，{} 不是", rest[0])));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("{what}要是正整数，{} 不是", rest[0])
+            } else {
+                format!("{what} must be a positive integer, got {}", rest[0])
+            }));
         };
         if mode != "3" {
             d = d.max(7);
@@ -308,21 +383,29 @@ fn parse_request(args: &[String], prefix: &str) -> Result<Request, CmdError> {
         if let Some(val) = option(arg, "limit") {
             let parsed = val.parse::<usize>().ok().filter(|&v| v >= 1 && kit::is_digits(val));
             let Some(limit) = parsed else {
-                return Err(kit::fail("limit 要是正整数，如 limit:50"));
+                return Err(kit::fail(kit::tr(
+                    "limit must be a positive integer, e.g. limit:50",
+                    "limit 要是正整数，如 limit:50",
+                )));
             };
             req.limit = limit;
             continue;
         }
         if let Some(val) = option(arg, "chat") {
             if val.is_empty() {
-                return Err(kit::fail("chat: 后面要写对话 ID 或 @用户名"));
+                return Err(kit::fail(kit::tr(
+                    "chat: must be followed by a chat ID or @username",
+                    "chat: 后面要写对话 ID 或 @用户名",
+                )));
             }
             req.chat = val.to_owned();
             continue;
         }
-        return Err(kit::fail(format!(
-            "不认识的参数 {arg}，{prefix}clean_member help 看说明"
-        )));
+        return Err(kit::fail(if kit::is_zh() {
+            format!("不认识的参数 {arg}，{prefix}clean_member help 看说明")
+        } else {
+            format!("Unknown argument {arg}; see {prefix}clean_member help")
+        }));
     }
     Ok(req)
 }
@@ -343,7 +426,12 @@ async fn resolve_group(
                 client
                     .each_dialog(DialogPages { folder, max_pages: 20 }, |_| {})
                     .await
-                    .map_err(|e| kit::fail_with("读取对话列表失败", e))?;
+                    .map_err(|e| {
+                        kit::fail_with(
+                            kit::tr("Failed to load dialog list", "读取对话列表失败"),
+                            e,
+                        )
+                    })?;
                 res = client.resolve_target(target).await;
                 if res.is_ok() {
                     break;
@@ -354,11 +442,18 @@ async fn resolve_group(
             Ok(p) => p,
             Err(err) => {
                 if err.is_unaddressable_peer() {
-                    return Err(kit::fail(format!(
-                        "找不到对话 {target}：账号不在这个群组里，或者 ID 写错了"
-                    )));
+                    return Err(kit::fail(if kit::is_zh() {
+                        format!("找不到对话 {target}：账号不在这个群组里，或者 ID 写错了")
+                    } else {
+                        format!("Chat {target} not found: not a member or invalid ID")
+                    }));
                 }
-                return Err(kit::fail_with(format!("找不到对话 {target}"), err));
+                let label = if kit::is_zh() {
+                    format!("找不到对话 {target}")
+                } else {
+                    format!("Chat {target} not found")
+                };
+                return Err(kit::fail_with(label, err));
             }
         }
     };
@@ -398,7 +493,10 @@ fn describe(client: &Client, peer: tl::enums::InputPeer) -> Result<Group, CmdErr
                 broadcast: false,
             })
         }
-        _ => Err(kit::fail("只能用于群组：在群组里用，或者用 chat:对话 ID 指定")),
+        _ => Err(kit::fail(kit::tr(
+            "Groups only; run in a group or specify chat:<ID>",
+            "只能用于群组：在群组里用，或者用 chat:对话 ID 指定",
+        ))),
     }
 }
 
@@ -487,28 +585,28 @@ fn csv_cell(value: &str) -> String {
 
 fn csv_report(d: &CacheData, failed: bool) -> Vec<u8> {
     let heading = if failed {
-        "群组清理失败用户报告"
+        kit::tr("Group Cleanup Failed Users Report", "群组清理失败用户报告")
     } else {
-        "群组清理报告"
+        kit::tr("Group Cleanup Report", "群组清理报告")
     };
     let mut rows: Vec<Vec<String>> = vec![
         vec![heading.into()],
-        vec!["群组名称".into(), d.chat_title.clone()],
-        vec!["群组ID".into(), d.chat_id.clone()],
-        vec!["清理条件".into(), mode_name(&d.mode, d.day)],
-        vec!["搜索时间".into(), d.search_time.clone()],
-        vec!["符合条件用户数量".into(), d.total_found.to_string()],
+        vec![kit::tr("Group Name", "群组名称").into(), d.chat_title.clone()],
+        vec![kit::tr("Group ID", "群组ID").into(), d.chat_id.clone()],
+        vec![kit::tr("Criteria", "清理条件").into(), mode_name(&d.mode, d.day)],
+        vec![kit::tr("Search Time", "搜索时间").into(), d.search_time.clone()],
+        vec![kit::tr("Matched Users", "符合条件用户数量").into(), d.total_found.to_string()],
         vec![],
     ];
     let mut header = vec![
-        "用户ID".to_owned(),
-        "用户名".to_owned(),
-        "姓名".to_owned(),
-        "最后上线时间".to_owned(),
-        "是否注销".to_owned(),
+        kit::tr("User ID", "用户ID").to_owned(),
+        kit::tr("Username", "用户名").to_owned(),
+        kit::tr("Name", "姓名").to_owned(),
+        kit::tr("Last Online", "最后上线时间").to_owned(),
+        kit::tr("Deleted", "是否注销").to_owned(),
     ];
     if failed {
-        header.push("失败原因".into());
+        header.push(kit::tr("Failure Reason", "失败原因").into());
     }
     rows.push(header);
     for user in &d.users {
@@ -516,9 +614,14 @@ fn csv_report(d: &CacheData, failed: bool) -> Vec<u8> {
             .last_online
             .as_deref()
             .filter(|s| !s.is_empty())
-            .unwrap_or("未知")
+            .unwrap_or_else(|| kit::tr("unknown", "未知"))
             .to_owned();
-        let deleted = if user.is_deleted { "是" } else { "否" }.to_owned();
+        let deleted = if user.is_deleted {
+            kit::tr("Yes", "是")
+        } else {
+            kit::tr("No", "否")
+        }
+        .to_owned();
         let name = format!("{} {}", user.first_name, user.last_name).trim().to_owned();
         let mut row = vec![
             user.id.clone(),
@@ -549,19 +652,37 @@ fn verb(req: &Request) -> &'static str {
 }
 
 fn progress_text(g: &Group, req: &Request, out: &Outcome) -> String {
-    let mut text = format!(
-        "{}\n已扫描 {} 人，符合条件 {} 人",
-        kit::working(&format!(
-            "正在{} {} 里{}",
-            verb(req),
-            g.title,
-            mode_name(&req.mode, req.day)
-        )),
-        out.scanned,
-        out.found.len()
-    );
+    let mut text = if kit::is_zh() {
+        format!(
+            "{}\n已扫描 {} 人，符合条件 {} 人",
+            kit::working(&format!(
+                "正在{} {} 里{}",
+                verb(req),
+                g.title,
+                mode_name(&req.mode, req.day)
+            )),
+            out.scanned,
+            out.found.len()
+        )
+    } else {
+        format!(
+            "{}\nScanned {} member(s), matched {}",
+            kit::working(&format!(
+                "{} {} in {}",
+                if req.search { "Searching" } else { "Cleaning" },
+                mode_name(&req.mode, req.day),
+                g.title
+            )),
+            out.scanned,
+            out.found.len()
+        )
+    };
     if !req.search {
-        text.push_str(&format!("，已移出 {} 人", out.removed));
+        if kit::is_zh() {
+            text.push_str(&format!("，已移出 {} 人", out.removed));
+        } else {
+            text.push_str(&format!(", removed {}", out.removed));
+        }
     }
     text
 }
@@ -573,7 +694,7 @@ fn top_reasons(reasons: &HashMap<String, usize>, n: usize) -> String {
     keys.into_iter()
         .map(|k| format!("{k}×{}", reasons[k]))
         .collect::<Vec<_>>()
-        .join("、")
+        .join(kit::tr(", ", "、"))
 }
 
 fn kick_rights(until_date: i32) -> tl::types::ChatBannedRights {
@@ -596,12 +717,16 @@ fn kick_rights(until_date: i32) -> tl::types::ChatBannedRights {
 
 fn failure_reason(err: &mibot_bot::BotError) -> String {
     if err.is_rpc("CHAT_ADMIN_REQUIRED") {
-        return "权限不足".into();
+        return kit::tr("Insufficient permissions", "权限不足").into();
     }
     if err.flood_wait().is_some() {
-        return "请求频率受限".into();
+        return kit::tr("Rate limited", "请求频率受限").into();
     }
-    format!("移出失败（{}）", brief(err))
+    if kit::is_zh() {
+        format!("移出失败（{}）", brief(err))
+    } else {
+        format!("Removal failed ({})", brief(err))
+    }
 }
 
 impl Service {
@@ -643,10 +768,16 @@ impl Service {
             .await?;
         client.peers().remember_entities(&full.users, &full.chats);
         let tl::enums::ChatFull::Full(info) = full.full_chat else {
-            return Err(kit::fail("读不到这个群组的成员列表"));
+            return Err(kit::fail(kit::tr(
+                "Unable to read group member list",
+                "读不到这个群组的成员列表",
+            )));
         };
         let tl::enums::ChatParticipants::Participants(list) = info.participants else {
-            return Err(kit::fail("看不到这个群组的成员列表"));
+            return Err(kit::fail(kit::tr(
+                "Group member list is not visible",
+                "看不到这个群组的成员列表",
+            )));
         };
         let users = users_by_id(&full.users);
         let mut members = Vec::new();
@@ -955,22 +1086,25 @@ impl Service {
 
         while offset <= MAX_OFFSET {
             if inv.cancel.is_cancelled() {
-                return Err(kit::fail("操作已取消"));
+                return Err(kit::fail(kit::tr("Operation cancelled", "操作已取消")));
             }
             let (members, count) = self
                 .page(&inv.cancel, &inv.client, g, offset)
                 .await
                 .map_err(|e| {
                     if inv.cancel.is_cancelled() {
-                        kit::fail("操作已取消")
+                        kit::fail(kit::tr("Operation cancelled", "操作已取消"))
                     } else {
-                        kit::fail_with("读取成员列表失败", mibot_command::UserError::new(e.to_string()))
+                        kit::fail_with(
+                            kit::tr("Failed to load member list", "读取成员列表失败"),
+                            mibot_command::UserError::new(e.to_string()),
+                        )
                     }
                 })?;
             let mut removed_here = 0usize;
             for m in members {
                 if inv.cancel.is_cancelled() {
-                    return Err(kit::fail("操作已取消"));
+                    return Err(kit::fail(kit::tr("Operation cancelled", "操作已取消")));
                 }
                 if !seen.insert(m.user.id) {
                     continue;
@@ -983,7 +1117,7 @@ impl Service {
                     Ok(h) => h,
                     Err(_) => {
                         if inv.cancel.is_cancelled() {
-                            return Err(kit::fail("操作已取消"));
+                            return Err(kit::fail(kit::tr("Operation cancelled", "操作已取消")));
                         }
                         out.skipped += 1;
                         continue;
@@ -998,7 +1132,7 @@ impl Service {
                     match self.remove(&inv.cancel, &inv.client, g, &m.user).await {
                         Err(err) => {
                             if inv.cancel.is_cancelled() {
-                                return Err(kit::fail("操作已取消"));
+                                return Err(kit::fail(kit::tr("Operation cancelled", "操作已取消")));
                             }
                             let reason = failure_reason(&err);
                             info.error_message = reason.clone();
@@ -1013,7 +1147,7 @@ impl Service {
                                 return Ok(out);
                             }
                             if !(self.pause)(inv.cancel.clone(), (self.gap)()).await {
-                                return Err(kit::fail("操作已取消"));
+                                return Err(kit::fail(kit::tr("Operation cancelled", "操作已取消")));
                             }
                         }
                     }
@@ -1039,16 +1173,25 @@ impl Service {
 
     async fn send_report(&self, client: &Client, data: &CacheData, failed: bool) -> Result<(), mibot_bot::BotError> {
         let mut caption = if failed {
-            "🧽 <b>清理失败名单</b>\n".to_owned()
+            kit::tr("🧽 <b>Cleanup Failed List</b>\n", "🧽 <b>清理失败名单</b>\n").to_owned()
         } else {
-            "🧽 <b>群组清理报告</b>\n".to_owned()
+            kit::tr("🧽 <b>Group Cleanup Report</b>\n", "🧽 <b>群组清理报告</b>\n").to_owned()
         };
-        caption.push_str(&format!(
-            "{}\n{}：{} 人",
-            escape(&data.chat_title),
-            escape(&mode_name(&data.mode, data.day)),
-            data.total_found
-        ));
+        if kit::is_zh() {
+            caption.push_str(&format!(
+                "{}\n{}：{} 人",
+                escape(&data.chat_title),
+                escape(&mode_name(&data.mode, data.day)),
+                data.total_found
+            ));
+        } else {
+            caption.push_str(&format!(
+                "{}\n{}: {}",
+                escape(&data.chat_title),
+                escape(&mode_name(&data.mode, data.day)),
+                data.total_found
+            ));
+        }
         client
             .send_document(
                 &tl::enums::InputPeer::PeerSelf,
@@ -1067,10 +1210,14 @@ impl Service {
 
     async fn report_line(&self, inv: &Invocation, data: &CacheData) -> String {
         if data.total_found == 0 {
-            return "没有符合条件的成员，没有生成报告".into();
+            return kit::tr(
+                "No matching members found; no report generated",
+                "没有符合条件的成员，没有生成报告",
+            )
+            .into();
         }
         match self.send_report(&inv.client, data, false).await {
-            Ok(()) => "报告已发到收藏夹".into(),
+            Ok(()) => kit::tr("Report sent to Saved Messages", "报告已发到收藏夹").into(),
             Err(err) => {
                 if !inv.cancel.is_cancelled() {
                     kit::opt_log(
@@ -1080,7 +1227,11 @@ impl Service {
                         &[("error", &err.to_string())],
                     );
                 }
-                format!("⚠️ 报告没能发到收藏夹（{}）", escape(&brief(&err)))
+                if kit::is_zh() {
+                    format!("⚠️ 报告没能发到收藏夹（{}）", escape(&brief(&err)))
+                } else {
+                    format!("⚠️ Failed to send report to Saved Messages ({})", escape(&brief(&err)))
+                }
             }
         }
     }
@@ -1089,56 +1240,111 @@ impl Service {
         let when = DateTime::parse_from_rfc3339(&data.search_time)
             .map(|dt| dt.with_timezone(&chrono::Utc).format("%Y-%m-%d %H:%M UTC").to_string())
             .unwrap_or_else(|_| data.search_time.clone());
-        let lines = [
-            format!(
-                "✅ 已搜索完 {} 里{}（用的是 {} 的缓存）",
-                escape(&data.chat_title),
-                escape(&mode_name(&data.mode, data.day)),
-                escape(&when)
-            ),
-            format!("符合条件 {} 人", data.total_found),
-            self.report_line(inv, data).await,
-        ];
+        let lines = if kit::is_zh() {
+            [
+                format!(
+                    "✅ 已搜索完 {} 里{}（用的是 {} 的缓存）",
+                    escape(&data.chat_title),
+                    escape(&mode_name(&data.mode, data.day)),
+                    escape(&when)
+                ),
+                format!("符合条件 {} 人", data.total_found),
+                self.report_line(inv, data).await,
+            ]
+        } else {
+            [
+                format!(
+                    "✅ Searched {} in {} (cached from {})",
+                    escape(&mode_name(&data.mode, data.day)),
+                    escape(&data.chat_title),
+                    escape(&when)
+                ),
+                format!("Matched {} member(s)", data.total_found),
+                self.report_line(inv, data).await,
+            ]
+        };
         inv.edit(&lines.join("\n")).await?;
         Ok(())
     }
 
     async fn finish(&self, inv: &Invocation, data: &CacheData, req: &Request, out: &Outcome) -> CmdResult {
-        let mut lines = vec![
-            format!(
-                "✅ 已{}完 {} 里{}",
-                verb(req),
-                escape(&data.chat_title),
-                escape(&mode_name(&req.mode, req.day))
-            ),
-            format!("扫描 {} 人，符合条件 {} 人", out.scanned, out.found.len()),
-        ];
+        let mut lines = if kit::is_zh() {
+            vec![
+                format!(
+                    "✅ 已{}完 {} 里{}",
+                    verb(req),
+                    escape(&data.chat_title),
+                    escape(&mode_name(&req.mode, req.day))
+                ),
+                format!("扫描 {} 人，符合条件 {} 人", out.scanned, out.found.len()),
+            ]
+        } else {
+            vec![
+                format!(
+                    "✅ {} {} in {}",
+                    if req.search { "Searched" } else { "Cleaned" },
+                    escape(&mode_name(&req.mode, req.day)),
+                    escape(&data.chat_title)
+                ),
+                format!("Scanned {} member(s), matched {}", out.scanned, out.found.len()),
+            ]
+        };
         if !req.search {
-            let mut removed = format!("已移出 {} 人", out.removed);
+            let mut removed = if kit::is_zh() {
+                format!("已移出 {} 人", out.removed)
+            } else {
+                format!("Removed {} member(s)", out.removed)
+            };
             if !out.found.is_empty() {
                 let pct = (out.removed as f64) * 100.0 / (out.found.len() as f64);
-                removed.push_str(&format!("（成功率 {pct:.1}%）"));
+                if kit::is_zh() {
+                    removed.push_str(&format!("（成功率 {pct:.1}%）"));
+                } else {
+                    removed.push_str(&format!(" ({pct:.1}% success)"));
+                }
             }
             lines.push(removed);
         }
         if out.limited {
-            lines.push(format!("已达到 limit:{}，后面的成员没有再查", req.limit));
+            if kit::is_zh() {
+                lines.push(format!("已达到 limit:{}，后面的成员没有再查", req.limit));
+            } else {
+                lines.push(format!("Reached limit:{}; remaining members skipped", req.limit));
+            }
         }
         if out.skipped > 0 {
-            lines.push(format!("⚠️ {} 人查不到发言记录，已跳过", out.skipped));
+            if kit::is_zh() {
+                lines.push(format!("⚠️ {} 人查不到发言记录，已跳过", out.skipped));
+            } else {
+                lines.push(format!("⚠️ Skipped {} member(s) due to message search failure", out.skipped));
+            }
         }
         lines.push(self.report_line(inv, data).await);
         if !out.failed.is_empty() {
-            lines.push(format!(
-                "⚠️ 移出失败 {} 人（{}）",
-                out.failed.len(),
-                escape(&top_reasons(&out.reasons, 3))
-            ));
+            if kit::is_zh() {
+                lines.push(format!(
+                    "⚠️ 移出失败 {} 人（{}）",
+                    out.failed.len(),
+                    escape(&top_reasons(&out.reasons, 3))
+                ));
+            } else {
+                lines.push(format!(
+                    "⚠️ Failed to remove {} member(s) ({})",
+                    out.failed.len(),
+                    escape(&top_reasons(&out.reasons, 3))
+                ));
+            }
             let mut failed = data.clone();
             failed.total_found = out.failed.len();
             failed.users = out.failed.clone();
             match self.send_report(&inv.client, &failed, true).await {
-                Ok(()) => lines.push("失败名单另发了一份到收藏夹".into()),
+                Ok(()) => lines.push(
+                    kit::tr(
+                        "Failed list sent separately to Saved Messages",
+                        "失败名单另发了一份到收藏夹",
+                    )
+                    .into(),
+                ),
                 Err(err) => {
                     if !inv.cancel.is_cancelled() {
                         kit::opt_log(
@@ -1174,28 +1380,51 @@ impl Service {
         let req = parse_request(&inv.args, inv.prefix())?;
         let g = resolve_group(&inv.client, &inv.message, &req.chat).await?;
         if g.broadcast && (req.mode == "2" || req.mode == "3") {
-            return Err(kit::fail("频道的订阅者不能发言，模式 2、3 只能用于群组"));
+            return Err(kit::fail(kit::tr(
+                "Channel subscribers cannot send messages; modes 2 and 3 are for groups only",
+                "频道的订阅者不能发言，模式 2、3 只能用于群组",
+            )));
         }
         if !req.search {
             let allowed = self
                 .can_ban(&inv.cancel, &inv.client, &g)
                 .await
-                .map_err(|e| kit::fail_with("查不到你在这个群组的权限", mibot_command::UserError::new(e.to_string())))?;
+                .map_err(|e| {
+                    kit::fail_with(
+                        kit::tr(
+                            "Unable to check your permissions in this group",
+                            "查不到你在这个群组的权限",
+                        ),
+                        mibot_command::UserError::new(e.to_string()),
+                    )
+                })?;
             if !allowed {
-                return Err(kit::fail("权限不足：移出成员要群主身份或封禁成员权限"));
+                return Err(kit::fail(kit::tr(
+                    "Insufficient permissions: removing members requires owner or ban_users right",
+                    "权限不足：移出成员要群主身份或封禁成员权限",
+                )));
             }
         }
         let key = cache_key(&g.chat_id, &req.mode, req.day);
         if req.search && let Some(cached) = self.cache.load(&key, (self.now)()) {
             return self.finish_cached(inv, &cached).await;
         }
-        inv.edit_text(&kit::working(&format!(
-            "正在{} {} 里{}",
-            verb(&req),
-            g.title,
-            mode_name(&req.mode, req.day)
-        )))
-        .await?;
+        let working_msg = if kit::is_zh() {
+            format!(
+                "正在{} {} 里{}",
+                verb(&req),
+                g.title,
+                mode_name(&req.mode, req.day)
+            )
+        } else {
+            format!(
+                "{} {} in {}",
+                if req.search { "Searching" } else { "Cleaning" },
+                mode_name(&req.mode, req.day),
+                g.title
+            )
+        };
+        inv.edit_text(&kit::working(&working_msg)).await?;
 
         let admins = match self.admins(&inv.cancel, &inv.client, &g).await {
             Ok(a) => a,
@@ -1205,7 +1434,10 @@ impl Service {
                 }
                 if !req.search {
                     return Err(kit::fail_with(
-                        "读不到完整的管理员列表，已停止清理",
+                        kit::tr(
+                            "Failed to load full admin list; cleanup aborted",
+                            "读不到完整的管理员列表，已停止清理",
+                        ),
                         mibot_command::UserError::new(err.to_string()),
                     ));
                 }
@@ -1274,19 +1506,22 @@ pub fn register(app: &Arc<App>) {
         }),
         progress_every: Duration::from_secs(5),
     });
-    app.registry.register(Command {
-        name: "clean_member".into(),
-        group: group::ADMIN.into(),
-        description: "搜索或清理群组成员".into(),
-        usage: "模式 [参数] [chat:对话 ID] [limit:数量] [search]".into(),
-        help_fn: Some(Arc::new(help)),
-        timeout: Some(Duration::ZERO),
-        handle: Arc::new(move |inv| {
-            let s = Arc::clone(&svc);
-            Box::pin(async move { s.handle(&inv).await })
-        }),
-        ..Default::default()
-    });
+    app.registry.register(
+        Command {
+            name: "clean_member".into(),
+            group: group::ADMIN.into(),
+            description: "Search or clean group members".into(),
+            usage: "mode [arg] [chat:<ID>] [limit:N] [search]".into(),
+            help_fn: Some(Arc::new(help)),
+            timeout: Some(Duration::ZERO),
+            handle: Arc::new(move |inv| {
+                let s = Arc::clone(&svc);
+                Box::pin(async move { s.handle(&inv).await })
+            }),
+            ..Default::default()
+        }
+        .zh("搜索或清理群组成员", "模式 [参数] [chat:对话 ID] [limit:数量] [search]"),
+    );
     let _ = participant_user;
 }
 
@@ -1323,17 +1558,17 @@ mod tests {
             assert_eq!(parse_request(&args, ".").unwrap(), want, "input={input}");
         }
         let invalid = [
-            ("6", "没有模式 6"),
-            ("search", "没有模式 search"),
-            ("1", "模式 1 后面要写天数"),
-            ("3 x", "发言条数要是正整数，x 不是"),
-            ("2 -5", "天数要是正整数"),
-            ("1 1.5", "天数要是正整数"),
-            ("4 limit:0", "limit 要是正整数"),
-            ("4 limit:", "limit 要是正整数"),
-            ("4 chat:", "chat: 后面要写对话 ID"),
-            ("4 serach", "不认识的参数 serach"),
-            ("1 30 30 search", "不认识的参数 30"),
+            ("6", "Unknown mode 6"),
+            ("search", "Unknown mode search"),
+            ("1", "Mode 1 requires days"),
+            ("3 x", "message count must be a positive integer, got x"),
+            ("2 -5", "days must be a positive integer"),
+            ("1 1.5", "days must be a positive integer"),
+            ("4 limit:0", "limit must be a positive integer"),
+            ("4 limit:", "limit must be a positive integer"),
+            ("4 chat:", "chat: must be followed by a chat ID"),
+            ("4 serach", "Unknown argument serach"),
+            ("1 30 30 search", "Unknown argument 30"),
         ];
         for (input, want) in invalid {
             let args: Vec<String> = input.split_whitespace().map(str::to_owned).collect();
@@ -1404,11 +1639,11 @@ mod tests {
             expires_at: 0,
         };
         let report = String::from_utf8(csv_report(&data, false)).unwrap();
-        let want = "\u{feff}\"群组清理报告\"\n\"群组名称\",\"群\"\"一\"\"\"\n\"群组ID\",\"100\"\n\"清理条件\",\"未上线超过 30 天的用户\"\n\"搜索时间\",\"2026-09-30T00:00:00.000Z\"\n\"符合条件用户数量\",\"2\"\n\n\"用户ID\",\"用户名\",\"姓名\",\"最后上线时间\",\"是否注销\"\n\"5\",\"cat\",\"'=HYPERLINK(1) S\",\"online\",\"否\"\n\"6\",\"\",\"'-1\",\"未知\",\"是\"";
+        let want = "\u{feff}\"Group Cleanup Report\"\n\"Group Name\",\"群\"\"一\"\"\"\n\"Group ID\",\"100\"\n\"Criteria\",\"inactive for over 30 day(s)\"\n\"Search Time\",\"2026-09-30T00:00:00.000Z\"\n\"Matched Users\",\"2\"\n\n\"User ID\",\"Username\",\"Name\",\"Last Online\",\"Deleted\"\n\"5\",\"cat\",\"'=HYPERLINK(1) S\",\"online\",\"No\"\n\"6\",\"\",\"'-1\",\"unknown\",\"Yes\"";
         assert_eq!(report, want);
         let failed = String::from_utf8(csv_report(&data, true)).unwrap();
-        assert!(failed.contains("\"群组清理失败用户报告\""));
-        assert!(failed.ends_with("\"未知\",\"是\",\"权限不足\""));
+        assert!(failed.contains("\"Group Cleanup Failed Users Report\""));
+        assert!(failed.ends_with("\"unknown\",\"Yes\",\"权限不足\""));
     }
 
     #[test]
@@ -1847,12 +2082,12 @@ mod tests {
         assert_eq!(calls.iter().filter(|c| c.starts_with("recent")).count(), 2);
         assert_eq!(
             last_edit(&calls),
-            "✅ 已搜索完 测试群 里已注销的账号\n扫描 254 人，符合条件 3 人\n报告已发到收藏夹"
+            "✅ Searched deleted accounts in 测试群\nScanned 254 member(s), matched 3\nReport sent to Saved Messages"
         );
         run_cmd(&svc, &client, here.clone(), "4 search").await.unwrap();
         let calls2 = fake.take();
         assert_eq!(calls2.iter().filter(|c| c.starts_with("recent")).count(), 0);
-        assert!(last_edit(&calls2).contains("（用的是 2023-11-14 22:13 UTC 的缓存）"));
+        assert!(last_edit(&calls2).contains(" (cached from 2023-11-14 22:13 UTC)"));
         let _ = std::fs::remove_dir_all(dir);
 
         // 2. Clean does not skip shifted members
@@ -1876,7 +2111,7 @@ mod tests {
         let calls = fake.take();
         assert!(calls.iter().any(|c| c == "ban 10 until=1700000060"));
         assert_eq!(fake.inner.lock().unwrap().members.len(), 2);
-        assert!(last_edit(&calls).contains("已移出 249 人（成功率 99.6%）"));
+        assert!(last_edit(&calls).contains("Removed 249 member(s) (99.6% success)"));
         assert!(svc.cache.load("100_4_0", (svc.now)()).is_none());
         let _ = std::fs::remove_dir_all(dir);
 
@@ -1893,8 +2128,8 @@ mod tests {
         let (svc, client) = new_test_svc(dir.clone(), Arc::clone(&fake));
         run_cmd(&svc, &client, here.clone(), "2 30 search").await.unwrap();
         let calls = fake.take();
-        assert!(last_edit(&calls).contains("符合条件 1 人"));
-        assert!(last_edit(&calls).contains("⚠️ 1 人查不到发言记录，已跳过"));
+        assert!(last_edit(&calls).contains("matched 1"));
+        assert!(last_edit(&calls).contains("⚠️ Skipped 1 member(s) due to message search failure"));
 
         // Basic group
         fake.inner.lock().unwrap().admins.insert(11);
@@ -1905,7 +2140,7 @@ mod tests {
         assert!(calls.iter().any(|c| c == "remove 10"));
         assert!(calls.iter().any(|c| c == "remove 12"));
         assert!(!calls.iter().any(|c| c == "remove 11"));
-        assert!(last_edit(&calls).contains("已移出 2 人"));
+        assert!(last_edit(&calls).contains("Removed 2 member(s)"));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

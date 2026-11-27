@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 thiserror.workspace = true
+mibot-i18n.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
 rustls.workspace = true

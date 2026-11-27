@@ -53,6 +53,7 @@ also send `.update run` in Telegram. The step-by-step procedure, settings and me
 
 ## Commands
 
+The default interface language is **English** (`en`); switch to Simplified Chinese anytime with `.lang zh` (or set `MIBOT_LANG=zh` in `.env`).
 The default prefixes are `.`, `。` and `$`; change them with `.prefix`. For a command's full usage send
 `.help <command>`, or add `--help` after the command.
 
@@ -77,6 +78,7 @@ owner; blank means owner only.
 | `.log` | Export the run log (sensitive values removed) | |
 | `.bf` | Back up the configuration to Saved Messages | |
 | `.prefix` `.alias` | Change the command prefixes, give commands aliases | |
+| `.lang` | View or switch interface language (`en` / `zh`) | |
 | `.privacy` | How IP addresses in the output are masked | |
 
 **Lookups and tools**
@@ -177,7 +179,7 @@ The lists are kept in `data/sudo.json` and `data/sure.json`, and `.bf` backs the
 As in MiBox v2, IP addresses are masked in every message the account sends or edits: by default the last 2 parts of
 an IPv4 address and the last 4 groups of an IPv6 address. Links pointing at an IP are removed, and IPs in file names
 are masked too. `.privacy ip mask 2 4` changes how many parts are masked; `.privacy ip hide` replaces the whole
-address with 「[IP已隐藏]」 ("IP hidden").
+address with 「[IP hidden]」 (`[IP已隐藏]` in Chinese).
 
 Masking happens in the connection layer, so it covers the output of every command. Commands sent on someone else's
 behalf (`.sudo`, `.sure`) are not masked: those addresses were typed by that person in the first place.
@@ -233,13 +235,13 @@ deletes them). One account cannot be connected twice at once, so stop the servic
 ./mibot-lite --verify --root /deployment/dir
 ```
 
-### Verification summary (v0.4.2)
+### Verification summary (v0.5.0)
 
-- **Workspace**: **22 crates** under `rust/` covering all 45 command groups and runtime subsystems.
-- **Lint**: `cargo clippy --locked --all-targets -- -D warnings` — **0 warnings**.
-- **Unit & parity tests**: `cargo test --locked` — **246 / 246 passed** (`mibot-commands`: 145, `mibot-bot`: 17, `mibot-imaging`: 9, `mibot-tgstate`: 8, `mibot-command`: 8, `mibot-app`: 7, `mibot-backup`: 5, `mibot-config`: 5, `mibot-logtail`: 5, `mibot-session`: 5, `mibot-botapi`: 5, `mibot-httpx`: 4, `mibot-mibox`: 4, `mibot-store`: 4, `mibot-media`: 3, `mibot-statuscard`: 3, `mibot-lite`: 2, `mibot-login`: 2, `mibot-verify`: 2, `mibot-delivery`: 1, `mibot-fsutil`: 1, `mibot-sysinfo`: 1).
+- **Workspace**: **23 crates** under `rust/` covering all 45+ command modules, `mibot-i18n`, and runtime subsystems.
+- **Lint**: `cargo clippy --workspace --all-targets --locked -- -D warnings` — **0 warnings**.
+- **Unit & parity tests**: `cargo test --workspace --locked` — **249 / 249 passed** (`mibot-commands`: 146, `mibot-bot`: 17, `mibot-imaging`: 9, `mibot-tgstate`: 8, `mibot-command`: 8, `mibot-app`: 7, `mibot-backup`: 5, `mibot-config`: 5, `mibot-logtail`: 5, `mibot-session`: 5, `mibot-botapi`: 5, `mibot-httpx`: 4, `mibot-mibox`: 4, `mibot-store`: 4, `mibot-media`: 3, `mibot-statuscard`: 3, `mibot-i18n`: 2, `mibot-lite`: 2, `mibot-login`: 2, `mibot-verify`: 2, `mibot-delivery`: 1, `mibot-fsutil`: 1, `mibot-sysinfo`: 1).
 - **Pure-Rust dependency audit**: 0 occurrences of `openssl-sys`, `libsqlite3-sys`, `rusqlite`, `sqlite`, `libsql`, `aws-lc-sys`, `aws-lc-fips-sys`, `libyaml`, `webp-sys`, or `libwebp-sys` in `rust/Cargo.lock`.
-- **CLI & installer checks**: `python3 -m unittest scripts/install_test.py` (5/5 OK); offline CLI smoke checks (`--version`, no-args exit `2`, missing-root `--check` exit `1`) pass; GitHub Actions CI Run `45984816612` green.
+- **CLI & installer checks**: `python3 -m unittest scripts/install_test.py` (6/6 OK); offline CLI smoke checks (`--version`, `--help`) pass.
 - **Scope note**: live Telegram DC modes (`--serve`, `--verify`, interactive `--login`) require real account credentials and network access, and are verified in CI via offline mock harnesses.
 
 ### Code layout

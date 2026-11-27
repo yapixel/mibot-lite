@@ -15,6 +15,7 @@ grammers-session.workspace = true
 grammers-tl-types.workspace = true
 mibot-config.workspace = true
 mibot-fsutil.workspace = true
+mibot-i18n.workspace = true
 mibot-logtail.workspace = true
 mibot-session.workspace = true
 mibot-tgstate.workspace = true

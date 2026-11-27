@@ -8,4 +8,5 @@ license.workspace = true
 thiserror.workspace = true
 tiny-skia.workspace = true
 ab_glyph.workspace = true
+mibot-i18n.workspace = true
 mibot-sysinfo.workspace = true

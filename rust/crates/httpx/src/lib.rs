@@ -373,12 +373,34 @@ pub async fn post_json<P: serde::Serialize>(
 pub fn reason(err: &HttpxError) -> String {
     match err {
         HttpxError::UserFacing(msg) => msg.clone(),
-        HttpxError::Status(429) => "请求过于频繁，稍后再试".into(),
-        HttpxError::Status(code) => format!("服务返回 HTTP {code}"),
-        HttpxError::Timeout => "请求超时，稍后再试".into(),
-        HttpxError::TooLarge => "响应数据过大".into(),
-        HttpxError::Stage { is_timeout: true, .. } => "请求超时，稍后再试".into(),
-        _ => "网络请求失败，稍后再试".into(),
+        HttpxError::Status(429) => mibot_i18n::tr(
+            "Too many requests, please try again later",
+            "请求过于频繁，稍后再试",
+        )
+        .into(),
+        HttpxError::Status(code) => {
+            if mibot_i18n::is_zh() {
+                format!("服务返回 HTTP {code}")
+            } else {
+                format!("Server returned HTTP {code}")
+            }
+        }
+        HttpxError::Timeout => {
+            mibot_i18n::tr("Request timed out, please try again later", "请求超时，稍后再试")
+                .into()
+        }
+        HttpxError::TooLarge => {
+            mibot_i18n::tr("Response payload too large", "响应数据过大").into()
+        }
+        HttpxError::Stage { is_timeout: true, .. } => {
+            mibot_i18n::tr("Request timed out, please try again later", "请求超时，稍后再试")
+                .into()
+        }
+        _ => mibot_i18n::tr(
+            "Network request failed, please try again later",
+            "网络请求失败，稍后再试",
+        )
+        .into(),
     }
 }
 
@@ -837,11 +859,11 @@ mod tests {
         assert!(err.is_timeout());
 
         assert_eq!(
-            reason(&HttpxError::UserFacing("素材目录格式不对".into())),
-            "素材目录格式不对"
+            reason(&HttpxError::UserFacing("invalid asset dir".into())),
+            "invalid asset dir"
         );
-        assert!(reason(&HttpxError::Status(429)).contains("频繁"));
-        assert!(reason(&HttpxError::Timeout).contains("超时"));
+        assert!(reason(&HttpxError::Status(429)).contains("Too many"));
+        assert!(reason(&HttpxError::Timeout).contains("timed out"));
         let leak_msg = reason(&HttpxError::Stage {
             stage: "request",
             is_timeout: false,

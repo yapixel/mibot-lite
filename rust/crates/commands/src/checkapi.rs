@@ -244,7 +244,7 @@ impl Service {
                     self.logs.as_ref(),
                     Level::Warn,
                     "checkapi.legacy_skipped",
-                    &[("name", name), ("reason", "记录不完整或地址无效")],
+                    &[("name", name), ("reason", "incomplete record or invalid URL")],
                 );
                 continue;
             };
@@ -298,7 +298,10 @@ impl Service {
                 .map_err(Into::into);
         }
         let Some(ref models) = self.models else {
-            return Err(kit::fail("ai 命令没有启用"));
+            return Err(kit::fail(kit::tr(
+                "ai command is not enabled",
+                "ai 命令没有启用",
+            )));
         };
         match self.migrate() {
             Ok(count) if count > 0 => {
@@ -325,11 +328,16 @@ impl Service {
         match sub.as_str() {
             "save" | "del" | "delete" => {
                 let p = escape(inv.prefix());
-                inv.edit(&format!(
-                    "API 由 ai 命令统一管理：<code>{p}ai config add</code> 添加、<code>{p}ai config del</code> 删除、<code>{p}ai model chat</code> 选聊天模型"
-                ))
-                .await
-                .map_err(Into::into)
+                let msg = if kit::is_zh() {
+                    format!(
+                        "API 由 ai 命令统一管理：<code>{p}ai config add</code> 添加、<code>{p}ai config del</code> 删除、<code>{p}ai model chat</code> 选聊天模型"
+                    )
+                } else {
+                    format!(
+                        "APIs are managed by the ai command: <code>{p}ai config add</code> to add, <code>{p}ai config del</code> to delete, <code>{p}ai model chat</code> to select chat model"
+                    )
+                };
+                inv.edit(&msg).await.map_err(Into::into)
             }
             "list" => {
                 let providers = models.providers()?;
@@ -340,9 +348,16 @@ impl Service {
             "check" => self.check(inv, models.as_ref(), tag).await,
             "models" => {
                 if tag.is_empty() {
-                    return Err(kit::usage(inv.prefix(), "checkapi models 标签"));
+                    return Err(kit::usage(
+                        inv.prefix(),
+                        kit::tr("checkapi models tag", "checkapi models 标签"),
+                    ));
                 }
-                inv.edit_text(&kit::working("正在获取模型列表")).await?;
+                inv.edit_text(&kit::working(kit::tr(
+                    "Fetching model list",
+                    "正在获取模型列表",
+                )))
+                .await?;
                 let list = models.models(tag).await?;
                 inv.respond_pages(&html_pages(&render_models(tag, &list), PAGE_LIMIT))
                     .await
@@ -351,20 +366,32 @@ impl Service {
             "ask" => self.ask(inv, models.as_ref(), tag).await,
             "speed" => {
                 if tag.is_empty() {
-                    return Err(kit::usage(inv.prefix(), "checkapi speed 标签"));
+                    return Err(kit::usage(
+                        inv.prefix(),
+                        kit::tr("checkapi speed tag", "checkapi speed 标签"),
+                    ));
                 }
-                inv.edit_text(&kit::working("正在测速")).await?;
+                inv.edit_text(&kit::working(kit::tr("Running speed test", "正在测速")))
+                    .await?;
                 let (identity, probes) = models.benchmark(tag).await?;
                 inv.respond_pages(&html_pages(&render_speed(&identity, &probes), PAGE_LIMIT))
                     .await
                     .map_err(Into::into)
             }
             "compare" => self.compare(inv, models.as_ref(), tag, inv.arg(2)).await,
-            _ => Err(kit::fail(format!(
-                "没有 {} 这个子命令，{}checkapi help 查看用法",
-                inv.arg(0),
-                inv.prefix()
-            ))),
+            _ => Err(kit::fail(if kit::is_zh() {
+                format!(
+                    "没有 {} 这个子命令，{}checkapi help 查看用法",
+                    inv.arg(0),
+                    inv.prefix()
+                )
+            } else {
+                format!(
+                    "Unknown subcommand {}; see {}checkapi help",
+                    inv.arg(0),
+                    inv.prefix()
+                )
+            })),
         }
     }
 
@@ -374,15 +401,17 @@ impl Service {
         models: &dyn CheckApiBackend,
         tag: &str,
     ) -> CmdResult {
-        inv.edit_text(&kit::working("正在检测")).await?;
+        inv.edit_text(&kit::working(kit::tr("Checking", "正在检测")))
+            .await?;
         if !tag.is_empty() {
             let list = models.models(tag).await?;
+            let title = if kit::is_zh() {
+                format!("已连通 {tag}，共 {} 个模型", list.len())
+            } else {
+                format!("Connected to {tag}, {} models", list.len())
+            };
             return inv
-                .edit(&kit::feedback(
-                    "success",
-                    &format!("已连通 {tag}，共 {} 个模型", list.len()),
-                    "",
-                ))
+                .edit(&kit::feedback("success", &title, ""))
                 .await
                 .map_err(Into::into);
         }
@@ -395,7 +424,11 @@ impl Service {
                     if inv.cancel.is_cancelled() {
                         return Err(BotError::Cancelled.into());
                     }
-                    let msg = kit::or_default(&first_message(e.as_ref()), "检测失败").to_owned();
+                    let msg = kit::or_default(
+                        &first_message(e.as_ref()),
+                        kit::tr("Check failed", "检测失败"),
+                    )
+                    .to_owned();
                     rows.push((p.tag, msg, 0));
                 }
             }
@@ -407,11 +440,15 @@ impl Service {
 
     async fn ask(&self, inv: &Invocation, models: &dyn CheckApiBackend, tag: &str) -> CmdResult {
         if tag.is_empty() {
-            return Err(kit::usage(inv.prefix(), "checkapi ask 标签 [问题]"));
+            return Err(kit::usage(
+                inv.prefix(),
+                kit::tr("checkapi ask tag [question]", "checkapi ask 标签 [问题]"),
+            ));
         }
         let raw_q = inv.raw_after(2).trim();
         let question = if raw_q.is_empty() { "say hello" } else { raw_q };
-        inv.edit_text(&kit::working("正在提问")).await?;
+        inv.edit_text(&kit::working(kit::tr("Sending test prompt", "正在提问")))
+            .await?;
         let answer = models
             .chat(ChatRequest {
                 tag: tag.to_owned(),
@@ -421,7 +458,11 @@ impl Service {
             })
             .await?;
         let mut pages = escaped_pages(&answer, PAGE_LIMIT);
-        pages[0] = format!("🩺 <b>测试提问</b>（{}）\n\n{}", code(tag), pages[0]);
+        pages[0] = if kit::is_zh() {
+            format!("🩺 <b>测试提问</b>（{}）\n\n{}", code(tag), pages[0])
+        } else {
+            format!("🩺 <b>Test Prompt</b> ({})\n\n{}", code(tag), pages[0])
+        };
         inv.respond_pages(&pages).await.map_err(Into::into)
     }
 
@@ -433,9 +474,16 @@ impl Service {
         second: &str,
     ) -> CmdResult {
         if first.is_empty() || second.is_empty() {
-            return Err(kit::usage(inv.prefix(), "checkapi compare 标签1 标签2"));
+            return Err(kit::usage(
+                inv.prefix(),
+                kit::tr("checkapi compare tag1 tag2", "checkapi compare 标签1 标签2"),
+            ));
         }
-        inv.edit_text(&kit::working("正在检测两个 API")).await?;
+        inv.edit_text(&kit::working(kit::tr(
+            "Checking both APIs",
+            "正在检测两个 API",
+        )))
+        .await?;
         let (left_res, right_res) = tokio::join!(models.diagnose(first), models.diagnose(second));
         let left = left_res?;
         let right = right_res?;
@@ -453,6 +501,7 @@ fn first_message(err: &(dyn std::error::Error + 'static)) -> String {
 }
 
 fn render_list(providers: &[ProviderSummary], prefix: &str) -> String {
+    let zh = kit::is_zh();
     let mut rows = Vec::new();
     for p in providers {
         let mut row = format!("• {} · {}", code(&p.tag), escape(&p.kind));
@@ -466,42 +515,63 @@ fn render_list(providers: &[ProviderSummary], prefix: &str) -> String {
         rows.push(row);
     }
     if rows.is_empty() {
-        rows.push(format!(
-            "• 还没有配置，用 {} 添加",
-            code(&format!("{prefix}ai config add"))
-        ));
+        let cmd = code(&format!("{prefix}ai config add"));
+        rows.push(if zh {
+            format!("• 还没有配置，用 {cmd} 添加")
+        } else {
+            format!("• No providers configured; add one with {cmd}")
+        });
     }
-    format!("🩺 <b>AI 接口</b>\n\n{}", rows.join("\n"))
+    format!(
+        "🩺 <b>{}</b>\n\n{}",
+        kit::tr("AI Providers", "AI 接口"),
+        rows.join("\n")
+    )
 }
 
 fn render_check(rows: &[(String, String, usize)], prefix: &str) -> String {
+    let zh = kit::is_zh();
+    let title = kit::tr("API Check", "API 检测");
     if rows.is_empty() {
-        return format!(
-            "🩺 <b>API 检测</b>\n\n还没有配置 API，用 {} 添加",
-            code(&format!("{prefix}ai config add"))
-        );
+        let cmd = code(&format!("{prefix}ai config add"));
+        return if zh {
+            format!("🩺 <b>{title}</b>\n\n还没有配置 API，用 {cmd} 添加")
+        } else {
+            format!("🩺 <b>{title}</b>\n\nNo APIs configured; add one with {cmd}")
+        };
     }
     let lines: Vec<String> = rows
         .iter()
         .map(|(tag, failure, count)| {
             if !failure.is_empty() {
                 format!("{} · ❌ {}", code(tag), escape(failure))
-            } else {
+            } else if zh {
                 format!("{} · ✅ {count} 个模型", code(tag))
+            } else {
+                format!("{} · ✅ {count} models", code(tag))
             }
         })
         .collect();
-    format!("🩺 <b>API 检测</b>\n\n{}", lines.join("\n"))
+    format!("🩺 <b>{title}</b>\n\n{}", lines.join("\n"))
 }
 
 fn render_models(tag: &str, models: &[String]) -> String {
     let lines: Vec<String> = models.iter().map(|m| code(m)).collect();
-    format!(
-        "🩺 <b>模型列表</b>\n{} · {} 个\n\n{}",
-        code(tag),
-        models.len(),
-        lines.join("\n")
-    )
+    if kit::is_zh() {
+        format!(
+            "🩺 <b>模型列表</b>\n{} · {} 个\n\n{}",
+            code(tag),
+            models.len(),
+            lines.join("\n")
+        )
+    } else {
+        format!(
+            "🩺 <b>Models</b>\n{} · {}\n\n{}",
+            code(tag),
+            models.len(),
+            lines.join("\n")
+        )
+    }
 }
 
 fn ms_str(d: Duration) -> String {
@@ -516,24 +586,44 @@ fn tps_str(p: &Probe) -> String {
 }
 
 fn render_speed(identity: &ProviderIdentity, probes: &[Probe]) -> String {
-    let mut lines = vec![
-        format!("🩺 <b>{} 速度测试</b>", escape(&identity.display_name)),
-        format!("{} · 每次最多 50 token", code(&identity.tag)),
-        String::new(),
-    ];
+    let zh = kit::is_zh();
+    let name = escape(&identity.display_name);
+    let mut lines = if zh {
+        vec![
+            format!("🩺 <b>{name} 速度测试</b>"),
+            format!("{} · 每次最多 50 token", code(&identity.tag)),
+            String::new(),
+        ]
+    } else {
+        vec![
+            format!("🩺 <b>{name} Speed Test</b>"),
+            format!("{} · up to 50 tokens per probe", code(&identity.tag)),
+            String::new(),
+        ]
+    };
     for p in probes {
         if p.ok {
-            lines.push(format!(
-                "✅ {}：{}（{} tok/s）",
-                code(&p.model),
-                ms_str(p.elapsed),
-                tps_str(p)
-            ));
+            if zh {
+                lines.push(format!(
+                    "✅ {}：{}（{} tok/s）",
+                    code(&p.model),
+                    ms_str(p.elapsed),
+                    tps_str(p)
+                ));
+            } else {
+                lines.push(format!(
+                    "✅ {}: {} ({} tok/s)",
+                    code(&p.model),
+                    ms_str(p.elapsed),
+                    tps_str(p)
+                ));
+            }
         } else {
+            let sep = kit::tr(": ", "：");
             lines.push(format!(
-                "❌ {}：{}",
+                "❌ {}{sep}{}",
                 code(&p.model),
-                escape(kit::or_default(&p.error, "失败"))
+                escape(kit::or_default(&p.error, kit::tr("Failed", "失败")))
             ));
         }
     }
@@ -541,65 +631,99 @@ fn render_speed(identity: &ProviderIdentity, probes: &[Probe]) -> String {
 }
 
 fn diagnosis_lines(res: &Diagnosis) -> Vec<String> {
+    let zh = kit::is_zh();
     let mut lines = vec![
-        format!(
-            "<b>{}</b>（{}）· {}",
-            escape(&res.provider.display_name),
-            escape(&res.provider.kind),
-            code(&res.provider.tag)
-        ),
+        if zh {
+            format!(
+                "<b>{}</b>（{}）· {}",
+                escape(&res.provider.display_name),
+                escape(&res.provider.kind),
+                code(&res.provider.tag)
+            )
+        } else {
+            format!(
+                "<b>{}</b> ({}) · {}",
+                escape(&res.provider.display_name),
+                escape(&res.provider.kind),
+                code(&res.provider.tag)
+            )
+        },
         String::new(),
-        "<b>账户余额</b>".to_owned(),
+        format!("<b>{}</b>", kit::tr("Balance", "账户余额")),
     ];
+    let sep = kit::tr(": ", "：");
     if !res.balance.fields.is_empty() {
         for f in &res.balance.fields {
-            lines.push(format!("{}: {}", escape(&f.label), escape(&f.value))
-                .replace(": ", "："));
+            lines.push(format!("{}{sep}{}", escape(&f.label), escape(&f.value)));
         }
     } else if res.balance.status == "unsupported" {
-        lines.push("请到官网查看余额".into());
+        lines.push(kit::tr("Check on provider dashboard", "请到官网查看余额").into());
     } else if res.balance.status == "invalid" {
-        lines.push("⚠️ Key 无效或没有权限".into());
+        lines.push(kit::tr("⚠️ Invalid key or insufficient permissions", "⚠️ Key 无效或没有权限").into());
     } else {
-        lines.push("⚠️ 查询失败".into());
+        lines.push(kit::tr("⚠️ Query failed", "⚠️ 查询失败").into());
     }
     lines.push(String::new());
-    lines.push("<b>对话测试</b>".into());
+    lines.push(format!("<b>{}</b>", kit::tr("Chat Test", "对话测试")));
     match &res.chat {
-        None => lines.push("❌ 没有配置聊天模型".into()),
+        None => lines.push(kit::tr("❌ No chat model configured", "❌ 没有配置聊天模型").into()),
         Some(chat) if chat.ok => {
-            lines.push(format!(
-                "✅ 回复「{}」，{} · {}",
-                escape(&chat.text),
-                ms_str(chat.elapsed),
-                code(&chat.model)
-            ));
-            if let Some(u) = &chat.usage {
+            if zh {
                 lines.push(format!(
-                    "Token：输入 {} · 输出 {} · 合计 {}",
-                    u.prompt, u.completion, u.total
+                    "✅ 回复「{}」，{} · {}",
+                    escape(&chat.text),
+                    ms_str(chat.elapsed),
+                    code(&chat.model)
+                ));
+            } else {
+                lines.push(format!(
+                    "✅ Reply \"{}\", {} · {}",
+                    escape(&chat.text),
+                    ms_str(chat.elapsed),
+                    code(&chat.model)
                 ));
             }
+            if let Some(u) = &chat.usage {
+                lines.push(if zh {
+                    format!(
+                        "Token：输入 {} · 输出 {} · 合计 {}",
+                        u.prompt, u.completion, u.total
+                    )
+                } else {
+                    format!(
+                        "Tokens: input {} · output {} · total {}",
+                        u.prompt, u.completion, u.total
+                    )
+                });
+            }
             for lim in &chat.rate_limits {
-                lines.push(format!("{}：{}", escape(&lim.name), escape(&lim.value)));
+                lines.push(format!("{}{sep}{}", escape(&lim.name), escape(&lim.value)));
             }
         }
         Some(chat) => {
             lines.push(format!(
-                "❌ {}：{}",
+                "❌ {}{sep}{}",
                 code(&chat.model),
-                escape(kit::or_default(&chat.error, "失败"))
+                escape(kit::or_default(&chat.error, kit::tr("Failed", "失败")))
             ));
         }
     }
     lines.push(String::new());
-    lines.push("<b>可用模型</b>".into());
+    lines.push(format!("<b>{}</b>", kit::tr("Available Models", "可用模型")));
     if !res.models_error.is_empty() {
-        lines.push(format!("❌ 获取失败：{}", escape(&res.models_error)));
+        lines.push(if zh {
+            format!("❌ 获取失败：{}", escape(&res.models_error))
+        } else {
+            format!("❌ Failed to fetch: {}", escape(&res.models_error))
+        });
         return lines;
     }
     let names: Vec<String> = res.models.iter().map(|m| code(m)).collect();
-    lines.push(format!("共 {} 个", res.models.len()));
+    lines.push(if zh {
+        format!("共 {} 个", res.models.len())
+    } else {
+        format!("{} total", res.models.len())
+    });
     if !names.is_empty() {
         lines.push(names.join(" · "));
     }
@@ -607,7 +731,10 @@ fn diagnosis_lines(res: &Diagnosis) -> Vec<String> {
 }
 
 fn render_compare(left: &Diagnosis, right: &Diagnosis) -> String {
-    let mut lines = vec!["🩺 <b>API 对比</b>".to_owned(), String::new()];
+    let mut lines = vec![
+        format!("🩺 <b>{}</b>", kit::tr("API Comparison", "API 对比")),
+        String::new(),
+    ];
     lines.extend(diagnosis_lines(left));
     lines.push(String::new());
     lines.push("━━━━━━━━━━━━━━━━".into());
@@ -621,15 +748,27 @@ fn help(prefix: &str) -> String {
     let item = |args: &str, text: &str| {
         format!("• <code>{p}checkapi {}</code> {text}\n", escape(args))
     };
-    format!(
-        "🩺 <b>API 检测</b>\n\n检测 ai 命令统一管理的 API。地址、Key、类型和模型都在 ai 里配置，这里只按标签检测。\n\n{}{}{}{}{}{}\n添加或删除 API 用 <code>{p}ai config add</code>、<code>{p}ai config del</code>，选聊天模型用 <code>{p}ai model chat</code>。",
-        item("list", "查看 ai 配置里的标签"),
-        item("check [标签]", "验证一个或全部标签的模型接口"),
-        item("models 标签", "列出这个标签的全部模型"),
-        item("ask 标签 [问题]", "发一次测试提问，省略问题时发 say hello，最多输出 100 token"),
-        item("speed 标签", "逐个模型测响应速度，每次最多 50 token"),
-        item("compare 标签1 标签2", "对比两个标签的余额、对话和模型"),
-    )
+    if kit::is_zh() {
+        format!(
+            "🩺 <b>API 检测</b>\n\n检测 ai 命令统一管理的 API。地址、Key、类型和模型都在 ai 里配置，这里只按标签检测。\n\n{}{}{}{}{}{}\n添加或删除 API 用 <code>{p}ai config add</code>、<code>{p}ai config del</code>，选聊天模型用 <code>{p}ai model chat</code>。",
+            item("list", "查看 ai 配置里的标签"),
+            item("check [标签]", "验证一个或全部标签的模型接口"),
+            item("models 标签", "列出这个标签的全部模型"),
+            item("ask 标签 [问题]", "发一次测试提问，省略问题时发 say hello，最多输出 100 token"),
+            item("speed 标签", "逐个模型测响应速度，每次最多 50 token"),
+            item("compare 标签1 标签2", "对比两个标签的余额、对话和模型"),
+        )
+    } else {
+        format!(
+            "🩺 <b>API Check</b>\n\nTest APIs managed by the ai command. Configure URLs, keys, types, and models in ai, then test by tag here.\n\n{}{}{}{}{}{}\nAdd or remove APIs with <code>{p}ai config add</code> and <code>{p}ai config del</code>; select chat model with <code>{p}ai model chat</code>.",
+            item("list", "List configured ai tags"),
+            item("check [tag]", "Verify model endpoint for one or all tags"),
+            item("models tag", "List all models for this tag"),
+            item("ask tag [question]", "Send a test prompt (defaults to say hello, max 100 tokens)"),
+            item("speed tag", "Benchmark model latency, up to 50 tokens per probe"),
+            item("compare tag1 tag2", "Compare balance, chat, and models across two tags"),
+        )
+    }
 }
 
 pub fn register(a: &Arc<App>, models: Option<Arc<AiService>>) {
@@ -642,18 +781,19 @@ pub fn register(a: &Arc<App>, models: Option<Arc<AiService>>) {
         "checkapi",
         &[],
         group::AI,
-        "检测 AI 接口与模型",
-        "list|check|models|ask|speed|compare [标签]",
+        "Test AI APIs and models",
+        "list|check|models|ask|speed|compare [tag]",
         help,
         move |inv: Invocation| {
             let s = Arc::clone(&svc);
             Box::pin(async move {
                 s.handle(&inv)
                     .await
-                    .map_err(|e| kit::wrap_fail("API 检测失败", e))
+                    .map_err(|e| kit::wrap_fail(kit::tr("API check failed", "API 检测失败"), e))
             })
         },
-    );
+    )
+    .zh("检测 AI 接口与模型", "list|check|models|ask|speed|compare [标签]");
     cmd.timeout = Some(Duration::from_secs(15 * 60));
     a.registry.register(cmd);
 }
@@ -890,32 +1030,32 @@ mod tests {
 
         let (out, r) = run_cmd(&svc, &["list"]).await;
         r.unwrap();
-        assert_eq!(out, "🩺 AI 接口\n\n• main · auto · chat=gpt-4o\n• dead · gemini");
+        assert_eq!(out, "🩺 AI Providers\n\n• main · auto · chat=gpt-4o\n• dead · gemini");
 
         let (out, r) = run_cmd(&svc, &["check"]).await;
         r.unwrap();
-        assert!(out.contains("main · ✅ 3 个模型") && out.contains("dead · ❌ AI 接口返回 HTTP 401"));
+        assert!(out.contains("main · ✅ 3 models") && out.contains("dead · ❌ AI 接口返回 HTTP 401"));
 
         let (out, r) = run_cmd(&svc, &["check", "main"]).await;
         r.unwrap();
-        assert_eq!(out, "✅ 已连通 main，共 3 个模型");
+        assert_eq!(out, "✅ Connected to main, 3 models");
 
         let (out, r) = run_cmd(&svc, &["models", "main"]).await;
         r.unwrap();
-        assert_eq!(out, "🩺 模型列表\nmain · 3 个\n\na\nb\nc");
+        assert_eq!(out, "🩺 Models\nmain · 3\n\na\nb\nc");
 
         let (out, r) = run_cmd(&svc, &["ask", "main"]).await;
         r.unwrap();
-        assert_eq!(out, "🩺 测试提问（main）\n\nhello <world>");
+        assert_eq!(out, "🩺 Test Prompt (main)\n\nhello <world>");
         assert_eq!(ai.chats.lock().unwrap()[0].text, "say hello");
 
         let (out, r) = run_cmd(&svc, &["speed", "main"]).await;
         r.unwrap();
-        assert!(out.contains("✅ deepseek-chat：800 ms（25.0 tok/s）") && out.contains("❌ deepseek-reasoner：请求超时，稍后再试"));
+        assert!(out.contains("✅ deepseek-chat: 800 ms (25.0 tok/s)") && out.contains("❌ deepseek-reasoner: 请求超时，稍后再试"));
 
         let (out, r) = run_cmd(&svc, &["compare", "main", "other"]).await;
         r.unwrap();
-        assert!(out.contains("✅ 回复「ok」，321 ms · gpt-4o-mini") && out.contains("Token：输入 5 · 输出 1 · 合计 6"));
+        assert!(out.contains("✅ Reply \"ok\", 321 ms · gpt-4o-mini") && out.contains("Tokens: input 5 · output 1 · total 6"));
 
         assert!(run_cmd(&svc, &["compare", "main", "missing"]).await.1.is_err());
 

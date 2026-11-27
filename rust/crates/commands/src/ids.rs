@@ -45,27 +45,33 @@ fn estimate_creation(id: i64, now: DateTime<Local>) -> DateTime<Local> {
 
 fn dc_place(dc: i32) -> &'static str {
     match dc {
-        1 | 3 => "迈阿密",
-        2 | 4 => "阿姆斯特丹",
-        5 => "新加坡",
+        1 | 3 => kit::tr("Miami", "迈阿密"),
+        2 | 4 => kit::tr("Amsterdam", "阿姆斯特丹"),
+        5 => kit::tr("Singapore", "新加坡"),
         _ => "",
     }
 }
 
 fn dc_label(dc: i32) -> String {
     if dc <= 0 {
-        return "看不出（没有公开头像）".into();
+        return kit::tr("Unknown (no public photo)", "看不出（没有公开头像）").into();
     }
     let place = dc_place(dc);
     if place.is_empty() {
         format!("DC{dc}")
-    } else {
+    } else if kit::is_zh() {
         format!("DC{dc}（{place}）")
+    } else {
+        format!("DC{dc} ({place})")
     }
 }
 
-const UNKNOWN_PEER: &str =
-    "没见过这个 ID，账号需要先在某个对话里遇到过对方；用 @用户名 或回复对方的消息更可靠";
+fn unknown_peer_msg() -> &'static str {
+    kit::tr(
+        "Unknown ID; the account must encounter this peer in a chat first, or use @username / reply instead",
+        "没见过这个 ID，账号需要先在某个对话里遇到过对方；用 @用户名 或回复对方的消息更可靠",
+    )
+}
 
 struct Target {
     peer: Option<tl::enums::InputPeer>,
@@ -117,9 +123,13 @@ async fn resolve_argument(inv: &Invocation, argument: &str) -> Result<Target, Cm
                     reply: None,
                 });
             }
-            Err(kit::fail(UNKNOWN_PEER))
+            Err(kit::fail(unknown_peer_msg()))
         }
-        Err(_) => Err(kit::fail(format!("找不到 {argument}"))),
+        Err(_) => Err(kit::fail(if kit::is_zh() {
+            format!("找不到 {argument}")
+        } else {
+            format!("Cannot find {argument}")
+        })),
     }
 }
 
@@ -152,7 +162,7 @@ fn addressed(
             reply,
         });
     }
-    Err(kit::fail(UNKNOWN_PEER))
+    Err(kit::fail(unknown_peer_msg()))
 }
 
 #[derive(Debug, Default)]
@@ -175,10 +185,10 @@ async fn lookup_dc(
 ) -> Result<EntityInfo, CmdError> {
     let found = resolve_entity(inv, fallback).await?;
     let mut primary_err = match found.peer {
-        None => Err(kit::fail(UNKNOWN_PEER)),
+        None => Err(kit::fail(unknown_peer_msg())),
         Some(ref peer) => fetch_entity(&inv.client, peer)
             .await
-            .map_err(|e| kit::wrap_fail("查询失败", e)),
+            .map_err(|e| kit::wrap_fail(kit::tr("Lookup failed", "查询失败"), e)),
     };
     if primary_err.is_err()
         && let Some(ref reply) = found.reply
@@ -223,12 +233,12 @@ async fn fetch_entity(client: &Client, peer: &tl::enums::InputPeer) -> Result<En
                 info.dc = p.dc_id;
             }
             for (set, label) in [
-                (u.bot, "🤖 机器人"),
-                (u.verified, "✅ 已验证"),
+                (u.bot, kit::tr("🤖 Bot", "🤖 机器人")),
+                (u.verified, kit::tr("✅ Verified", "✅ 已验证")),
                 (u.premium, "⭐ Premium"),
-                (u.scam, "⚠️ 诈骗"),
-                (u.fake, "❌ 虚假"),
-                (u.deleted, "🗑 已注销"),
+                (u.scam, kit::tr("⚠️ Scam", "⚠️ 诈骗")),
+                (u.fake, kit::tr("❌ Fake", "❌ 虚假")),
+                (u.deleted, kit::tr("🗑 Deleted", "🗑 已注销")),
             ] {
                 if set {
                     info.flags.push(label);
@@ -236,7 +246,7 @@ async fn fetch_entity(client: &Client, peer: &tl::enums::InputPeer) -> Result<En
             }
         }
         if info.name.is_empty() {
-            info.name = "已注销的账号".into();
+            info.name = kit::tr("Deleted Account", "已注销的账号").into();
         }
         return Ok(info);
     }
@@ -272,10 +282,10 @@ async fn fetch_entity(client: &Client, peer: &tl::enums::InputPeer) -> Result<En
                 info.dc = p.dc_id;
             }
             if ch.verified {
-                info.flags.push("✅ 已验证");
+                info.flags.push(kit::tr("✅ Verified", "✅ 已验证"));
             }
             if ch.scam {
-                info.flags.push("⚠️ 诈骗");
+                info.flags.push(kit::tr("⚠️ Scam", "⚠️ 诈骗"));
             }
         }
         return Ok(info);
@@ -308,7 +318,7 @@ async fn fetch_entity(client: &Client, peer: &tl::enums::InputPeer) -> Result<En
         }
         return Ok(info);
     }
-    Err(kit::fail("这种对象查不了"))
+    Err(kit::fail(kit::tr("Unsupported peer type", "这种对象查不了")))
 }
 
 fn primary_username(username: Option<&str>, usernames: Option<&[tl::enums::Username]>) -> String {
@@ -357,9 +367,10 @@ fn render_ids(
     joined: Option<DateTime<Local>>,
     now: DateTime<Local>,
 ) -> String {
+    let zh = kit::is_zh();
     let id_text = info.id.to_string();
     let username = if info.username.is_empty() {
-        "无".to_owned()
+        kit::tr("None", "无").to_owned()
     } else {
         format!("@{}", info.username)
     };
@@ -367,28 +378,48 @@ fn render_ids(
     if info.kind == "user" {
         lines.push(format!("👤 <b>{}</b>", escape(&info.name)));
         lines.push(String::new());
-        lines.push(format!("• 用户名：{}", code(&username)));
-        lines.push(format!("• ID：{}", code(&id_text)));
-        lines.push(format!(
-            "• 注册时间：{} <i>按 ID 估算，误差约两个月</i>",
-            code(&estimate_creation(info.id, now).format("约 %Y 年 %-m 月").to_string())
-        ));
-        if let Some(j) = joined {
-            lines.push(format!("• 入群时间：{}", code(&j.format("%Y-%m-%d %H:%M").to_string())));
-        }
-        if info.unknown {
-            lines.push("• DC：未知".into());
-            lines.push(String::new());
-            lines.push("<i>账号没见过这个用户，只能给出按 ID 推算的信息</i>".into());
+        if zh {
+            lines.push(format!("• 用户名：{}", code(&username)));
+            lines.push(format!("• ID：{}", code(&id_text)));
+            lines.push(format!(
+                "• 注册时间：{} <i>按 ID 估算，误差约两个月</i>",
+                code(&estimate_creation(info.id, now).format("约 %Y 年 %-m 月").to_string())
+            ));
+            if let Some(j) = joined {
+                lines.push(format!("• 入群时间：{}", code(&j.format("%Y-%m-%d %H:%M").to_string())));
+            }
+            if info.unknown {
+                lines.push("• DC：未知".into());
+                lines.push(String::new());
+                lines.push("<i>账号没见过这个用户，只能给出按 ID 推算的信息</i>".into());
+            } else {
+                lines.push(format!("• DC：{}", escape(&dc_label(info.dc))));
+                lines.push(format!("• 共同群组：{} 个", code(&info.common.to_string())));
+            }
         } else {
-            lines.push(format!("• DC：{}", escape(&dc_label(info.dc))));
-            lines.push(format!("• 共同群组：{} 个", code(&info.common.to_string())));
+            lines.push(format!("• Username: {}", code(&username)));
+            lines.push(format!("• ID: {}", code(&id_text)));
+            lines.push(format!(
+                "• Registered: {} <i>estimated from ID, ~2 months margin</i>",
+                code(&estimate_creation(info.id, now).format("~%Y-%m").to_string())
+            ));
+            if let Some(j) = joined {
+                lines.push(format!("• Joined: {}", code(&j.format("%Y-%m-%d %H:%M").to_string())));
+            }
+            if info.unknown {
+                lines.push("• DC: Unknown".into());
+                lines.push(String::new());
+                lines.push("<i>Unseen user; showing ID-based estimate only</i>".into());
+            } else {
+                lines.push(format!("• DC: {}", escape(&dc_label(info.dc))));
+                lines.push(format!("• Common chats: {}", code(&info.common.to_string())));
+            }
         }
     } else {
         let kind = match info.kind {
-            "channel" => "频道",
-            "supergroup" => "超级群",
-            _ => "普通群",
+            "channel" => kit::tr("Channel", "频道"),
+            "supergroup" => kit::tr("Supergroup", "超级群"),
+            _ => kit::tr("Group", "普通群"),
         };
         let full_id = if info.kind == "group" {
             id_text.clone()
@@ -397,16 +428,30 @@ fn render_ids(
         };
         lines.push(format!("📢 <b>{}</b>", escape(&info.name)));
         lines.push(String::new());
-        lines.push(format!("• 类型：{kind}"));
-        lines.push(format!("• 用户名：{}", code(&username)));
-        lines.push(format!("• ID：{}", code(&full_id)));
-        if info.members > 0 {
-            lines.push(format!("• 成员：{}", code(&info.members.to_string())));
+        if zh {
+            lines.push(format!("• 类型：{kind}"));
+            lines.push(format!("• 用户名：{}", code(&username)));
+            lines.push(format!("• ID：{}", code(&full_id)));
+            if info.members > 0 {
+                lines.push(format!("• 成员：{}", code(&info.members.to_string())));
+            }
+            lines.push(format!("• DC：{}", escape(&dc_label(info.dc))));
+        } else {
+            lines.push(format!("• Type: {kind}"));
+            lines.push(format!("• Username: {}", code(&username)));
+            lines.push(format!("• ID: {}", code(&full_id)));
+            if info.members > 0 {
+                lines.push(format!("• Members: {}", code(&info.members.to_string())));
+            }
+            lines.push(format!("• DC: {}", escape(&dc_label(info.dc))));
         }
-        lines.push(format!("• DC：{}", escape(&dc_label(info.dc))));
     }
     if !info.flags.is_empty() {
-        lines.push(format!("• 状态：{}", info.flags.join(" ")));
+        lines.push(format!(
+            "{}{}",
+            kit::tr("• Status: ", "• 状态："),
+            info.flags.join(" ")
+        ));
     }
     let about = info.about.trim();
     if !about.is_empty() {
@@ -416,13 +461,19 @@ fn render_ids(
             about.to_owned()
         };
         lines.push(String::new());
-        lines.push("<b>简介</b>".into());
+        lines.push(kit::tr("<b>Bio</b>", "<b>简介</b>").into());
         lines.push(escape(&truncated));
     }
     let mut links = Vec::new();
     if info.kind == "user" {
-        links.push(format!(r#"<a href="tg://user?id={id_text}">用户资料</a>"#));
-        links.push(format!(r#"<a href="tg://openmessage?user_id={id_text}">打开对话</a>"#));
+        links.push(format!(
+            r#"<a href="tg://user?id={id_text}">{}</a>"#,
+            kit::tr("Profile", "用户资料")
+        ));
+        links.push(format!(
+            r#"<a href="tg://openmessage?user_id={id_text}">{}</a>"#,
+            kit::tr("Open Chat", "打开对话")
+        ));
     }
     if !info.username.is_empty() {
         let esc = escape(&info.username);
@@ -430,7 +481,7 @@ fn render_ids(
     }
     if !links.is_empty() {
         lines.push(String::new());
-        lines.push("<b>链接</b>".into());
+        lines.push(kit::tr("<b>Links</b>", "<b>链接</b>").into());
         lines.push(links.join(" · "));
         if info.kind == "user" {
             lines.push(code(&format!("tg://user?id={id_text}")));
@@ -441,89 +492,121 @@ fn render_ids(
 
 fn ids_help(prefix: &str) -> String {
     let p = escape(prefix);
-    format!(
-        "🆔 <b>用户信息</b>\n\n\
-        • <code>{p}ids</code> 自己\n\
-        • <code>{p}ids @用户名</code> 或 <code>{p}ids 用户 ID</code>，也可以在命令后提及对方\n\
-        • 回复某人的消息发 <code>{p}ids</code>\n\n\
-        显示 ID、用户名、估算的注册时间、所在 DC、共同群组数、简介和跳转链接；在超级群里还会显示入群时间。频道和群也能查。\n\n\
-        注册时间是按 ID 估算的，Telegram 不公开真实时间。"
-    )
+    if kit::is_zh() {
+        format!(
+            "🆔 <b>用户信息</b>\n\n\
+            • <code>{p}ids</code> 自己\n\
+            • <code>{p}ids @用户名</code> 或 <code>{p}ids 用户 ID</code>，也可以在命令后提及对方\n\
+            • 回复某人的消息发 <code>{p}ids</code>\n\n\
+            显示 ID、用户名、估算的注册时间、所在 DC、共同群组数、简介和跳转链接；在超级群里还会显示入群时间。频道和群也能查。\n\n\
+            注册时间是按 ID 估算的，Telegram 不公开真实时间。"
+        )
+    } else {
+        format!(
+            "🆔 <b>User Info</b>\n\n\
+            • <code>{p}ids</code> Yourself\n\
+            • <code>{p}ids @username</code> or <code>{p}ids user_id</code>, or mention a user\n\
+            • Reply to a message with <code>{p}ids</code>\n\n\
+            Shows ID, username, estimated registration date, DC, common chats, bio, and profile links (plus join date in supergroups). Also works for channels and groups.\n\n\
+            Registration date is estimated from ID; Telegram does not expose exact dates."
+        )
+    }
 }
 
 fn dc_help(prefix: &str) -> String {
     let p = escape(prefix);
-    format!(
-        "📍 <b>所在数据中心</b>\n\n\
-        • <code>{p}dc</code> 当前对话（私聊里是对方）\n\
-        • 回复某人的消息发 <code>{p}dc</code>\n\
-        • <code>{p}dc @用户名</code>，也可以在命令后提及对方\n\n\
-        DC 读自头像存放的位置，没有公开头像的账号看不出来。被回复的人查不到时，改看那条消息所在的对话。"
-    )
+    if kit::is_zh() {
+        format!(
+            "📍 <b>所在数据中心</b>\n\n\
+            • <code>{p}dc</code> 当前对话（私聊里是对方）\n\
+            • 回复某人的消息发 <code>{p}dc</code>\n\
+            • <code>{p}dc @用户名</code>，也可以在命令后提及对方\n\n\
+            DC 读自头像存放的位置，没有公开头像的账号看不出来。被回复的人查不到时，改看那条消息所在的对话。"
+        )
+    } else {
+        format!(
+            "📍 <b>Datacenter</b>\n\n\
+            • <code>{p}dc</code> Current chat (or peer in PM)\n\
+            • Reply to a message with <code>{p}dc</code>\n\
+            • <code>{p}dc @username</code>, or mention a user\n\n\
+            DC is inferred from the profile photo location; accounts without a public photo show as unknown. If the replied user cannot be resolved, falls back to the chat."
+        )
+    }
 }
 
 pub fn register(a: &Arc<App>) {
-    a.registry.register(kit::make_cmd(
-        "ids",
-        &[],
-        group::TOOLS,
-        "查用户或对话的资料",
-        "[@用户名|ID]",
-        ids_help,
-        |inv| {
-            Box::pin(async move {
-                let found = resolve_entity(&inv, tl::enums::InputPeer::PeerSelf).await?;
-                let Some(peer) = found.peer else {
-                    let unknown = EntityInfo {
-                        kind: "user",
-                        id: found.user_id,
-                        name: format!("用户 {}", found.user_id),
-                        unknown: true,
-                        ..Default::default()
+    a.registry.register(
+        kit::make_cmd(
+            "ids",
+            &[],
+            group::TOOLS,
+            "Look up user or chat info",
+            "[@username|ID]",
+            ids_help,
+            |inv| {
+                Box::pin(async move {
+                    let found = resolve_entity(&inv, tl::enums::InputPeer::PeerSelf).await?;
+                    let Some(peer) = found.peer else {
+                        let unknown = EntityInfo {
+                            kind: "user",
+                            id: found.user_id,
+                            name: if kit::is_zh() {
+                                format!("用户 {}", found.user_id)
+                            } else {
+                                format!("User {}", found.user_id)
+                            },
+                            unknown: true,
+                            ..Default::default()
+                        };
+                        return inv
+                            .edit(&render_ids(&unknown, None, Local::now()))
+                            .await
+                            .map_err(Into::into);
                     };
-                    return inv
-                        .edit(&render_ids(&unknown, None, Local::now()))
+                    let info = fetch_entity(&inv.client, &peer)
                         .await
-                        .map_err(Into::into);
-                };
-                let info = fetch_entity(&inv.client, &peer)
-                    .await
-                    .map_err(|e| kit::wrap_fail("查询失败", e))?;
-                let joined = if info.kind == "user" {
-                    joined_at(&inv, &peer).await
-                } else {
-                    None
-                };
-                inv.edit(&render_ids(&info, joined, Local::now()))
+                        .map_err(|e| kit::wrap_fail(kit::tr("Lookup failed", "查询失败"), e))?;
+                    let joined = if info.kind == "user" {
+                        joined_at(&inv, &peer).await
+                    } else {
+                        None
+                    };
+                    inv.edit(&render_ids(&info, joined, Local::now()))
+                        .await
+                        .map_err(Into::into)
+                })
+            },
+        )
+        .zh("查用户或对话的资料", "[@用户名|ID]"),
+    );
+    a.registry.register(
+        kit::make_cmd(
+            "dc",
+            &[],
+            group::TOOLS,
+            "Look up datacenter",
+            "[@username|ID]",
+            dc_help,
+            |inv| {
+                Box::pin(async move {
+                    let here = inv
+                        .client
+                        .input_peer(&inv.message.peer)
+                        .unwrap_or(tl::enums::InputPeer::PeerSelf);
+                    let info = lookup_dc(&inv, here).await?;
+                    inv.edit(&format!(
+                        "📍 <b>{}</b>\n{}{}",
+                        escape(&info.name),
+                        kit::tr("Datacenter: ", "所在数据中心："),
+                        escape(&dc_label(info.dc))
+                    ))
                     .await
                     .map_err(Into::into)
-            })
-        },
-    ));
-    a.registry.register(kit::make_cmd(
-        "dc",
-        &[],
-        group::TOOLS,
-        "查所在的数据中心",
-        "[@用户名|ID]",
-        dc_help,
-        |inv| {
-            Box::pin(async move {
-                let here = inv
-                    .client
-                    .input_peer(&inv.message.peer)
-                    .unwrap_or(tl::enums::InputPeer::PeerSelf);
-                let info = lookup_dc(&inv, here).await?;
-                inv.edit(&format!(
-                    "📍 <b>{}</b>\n所在数据中心：{}",
-                    escape(&info.name),
-                    escape(&dc_label(info.dc))
-                ))
-                .await
-                .map_err(Into::into)
-            })
-        },
-    ));
+                })
+            },
+        )
+        .zh("查所在的数据中心", "[@用户名|ID]"),
+    );
 }
 
 #[cfg(test)]
@@ -597,7 +680,7 @@ mod tests {
         for wanted in [
             "215959394",
             "@cat",
-            "DC5（新加坡）",
+            "DC5 (Singapore)",
             "2024-01-02 03:04",
             "tg://user?id=215959394",
             "t.me/cat",
@@ -609,17 +692,17 @@ mod tests {
             &EntityInfo {
                 kind: "supergroup",
                 id: 1_771_725_356,
-                name: "群".into(),
+                name: "Group".into(),
                 members: 42,
                 ..Default::default()
             },
             None,
             now,
         );
-        for wanted in ["超级群", "-1001771725356", "42", "看不出"] {
+        for wanted in ["Supergroup", "-1001771725356", "42", "Unknown"] {
             assert!(channel.contains(wanted), "lost {wanted}:\n{channel}");
         }
-        assert!(!channel.contains("注册时间") && !channel.contains("tg://user"));
+        assert!(!channel.contains("Registered") && !channel.contains("tg://user"));
     }
 
     #[test]
@@ -629,7 +712,7 @@ mod tests {
             &EntityInfo {
                 kind: "user",
                 id: 6_000_000_000,
-                name: "用户 6000000000".into(),
+                name: "User 6000000000".into(),
                 unknown: true,
                 ..Default::default()
             },
@@ -638,14 +721,14 @@ mod tests {
         );
         for wanted in [
             "6000000000",
-            "注册时间",
-            "DC：未知",
+            "Registered",
+            "DC: Unknown",
             "tg://user?id=6000000000",
             "tg://openmessage?user_id=6000000000",
         ] {
             assert!(card.contains(wanted), "lost {wanted}:\n{card}");
         }
-        assert!(!card.contains("共同群组") && !card.contains("看不出"));
+        assert!(!card.contains("Common chats") && !card.contains("no public photo"));
     }
 
     #[tokio::test]

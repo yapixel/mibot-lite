@@ -336,19 +336,35 @@ impl Service {
         let prefix = inv.prefix();
         match entry {
             Some(e) if e.enabled => {
-                let html = format!(
-                    "🚫 <b>访客机器人清理</b>\n本群：开启{}\n已封禁 {} 个机器人，删除 {} 条消息",
-                    strict_note(e.strict),
-                    e.bots,
-                    e.messages
-                );
+                let html = if kit::is_zh() {
+                    format!(
+                        "🚫 <b>访客机器人清理</b>\n本群：开启{}\n已封禁 {} 个机器人，删除 {} 条消息",
+                        strict_note(e.strict),
+                        e.bots,
+                        e.messages
+                    )
+                } else {
+                    format!(
+                        "🚫 <b>Guest Bot Guard</b>\nThis group: on{}\nBanned {} bot(s), deleted {} message(s)",
+                        strict_note(e.strict),
+                        e.bots,
+                        e.messages
+                    )
+                };
                 inv.edit(&html).await?;
             }
             _ => {
-                let html = format!(
-                    "🚫 <b>访客机器人清理</b>\n本群：关闭，{} 开启",
-                    code(&format!("{prefix}guestban on"))
-                );
+                let html = if kit::is_zh() {
+                    format!(
+                        "🚫 <b>访客机器人清理</b>\n本群：关闭，{} 开启",
+                        code(&format!("{prefix}guestban on"))
+                    )
+                } else {
+                    format!(
+                        "🚫 <b>Guest Bot Guard</b>\nThis group: off, {} to enable",
+                        code(&format!("{prefix}guestban on"))
+                    )
+                };
                 inv.edit(&html).await?;
             }
         }
@@ -366,9 +382,10 @@ impl Service {
                         .is_some_and(|r| r.ban_users && r.delete_messages)
             });
             if !allowed {
-                return Err(kit::fail(
+                return Err(kit::fail(kit::tr(
+                    "This account lacks ban and delete permissions in this group",
                     "账号在本群没有封禁成员和删除消息的权限，开启了也清理不了",
-                ));
+                )));
             }
             let title = info.map(|i| i.title).unwrap_or_default();
             let chat_id = inv.message.chat_id.clone();
@@ -378,7 +395,11 @@ impl Service {
                 entry.title = title;
                 Ok(())
             })?;
-            inv.edit_text("✅ 本群已开启访客机器人清理").await?;
+            inv.edit_text(kit::tr(
+                "✅ Guest bot guard enabled in this group",
+                "✅ 本群已开启访客机器人清理",
+            ))
+            .await?;
             return Ok(());
         }
         let chat_id = inv.message.chat_id.clone();
@@ -388,7 +409,11 @@ impl Service {
             }
             Ok(())
         })?;
-        inv.edit_text("✅ 本群已关闭访客机器人清理").await?;
+        inv.edit_text(kit::tr(
+            "✅ Guest bot guard disabled in this group",
+            "✅ 本群已关闭访客机器人清理",
+        ))
+        .await?;
         Ok(())
     }
 
@@ -403,10 +428,14 @@ impl Service {
             .get(&inv.message.chat_id)
             .is_some_and(|e| e.enabled)
         {
-            return Err(kit::fail(format!(
-                "本群还没开启，先发 {}guestban on",
-                inv.prefix()
-            )));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("本群还没开启，先发 {}guestban on", inv.prefix())
+            } else {
+                format!(
+                    "Not enabled in this group yet; send {}guestban on first",
+                    inv.prefix()
+                )
+            }));
         }
         let chat_id = inv.message.chat_id.clone();
         self.update(move |cfg| {
@@ -415,8 +444,12 @@ impl Service {
             }
             Ok(())
         })?;
-        inv.edit_text(&format!("✅ 严格模式已{}", kit::on_off_text(value)))
-            .await?;
+        let msg = if kit::is_zh() {
+            format!("✅ 严格模式已{}", kit::on_off_text(value))
+        } else {
+            format!("✅ Strict mode {}", kit::on_off_text(value))
+        };
+        inv.edit_text(&msg).await?;
         Ok(())
     }
 
@@ -428,14 +461,21 @@ impl Service {
         if entry.is_empty() {
             let cfg = self.current();
             if cfg.allow.is_empty() {
-                inv.edit(&format!(
-                    "🚫 <b>放行的访客机器人</b>\n还没有，{} 添加",
-                    code(&format!("{}guestban allow @机器人", inv.prefix()))
-                ))
-                .await?;
+                let html = if kit::is_zh() {
+                    format!(
+                        "🚫 <b>放行的访客机器人</b>\n还没有，{} 添加",
+                        code(&format!("{}guestban allow @机器人", inv.prefix()))
+                    )
+                } else {
+                    format!(
+                        "🚫 <b>Allowed Guest Bots</b>\nNone yet; {} to add",
+                        code(&format!("{}guestban allow @bot", inv.prefix()))
+                    )
+                };
+                inv.edit(&html).await?;
                 return Ok(());
             }
-            let mut lines = vec!["🚫 <b>放行的访客机器人</b>".to_owned()];
+            let mut lines = vec![kit::tr("🚫 <b>Allowed Guest Bots</b>", "🚫 <b>放行的访客机器人</b>").to_owned()];
             for item in &cfg.allow {
                 if kit::is_digits(item) {
                     lines.push(format!("• {}", code(item)));
@@ -447,7 +487,10 @@ impl Service {
             return Ok(());
         }
         if !kit::is_digits(&entry) && !valid_username(&entry) {
-            return Err(kit::fail("写机器人的 @用户名 或者数字 ID"));
+            return Err(kit::fail(kit::tr(
+                "Enter the bot's @username or numeric ID",
+                "写机器人的 @用户名 或者数字 ID",
+            )));
         }
         let mut changed = false;
         let entry_clone = entry.clone();
@@ -472,14 +515,32 @@ impl Service {
             format!("@{entry}")
         };
         if remove && changed {
-            inv.edit_text(&format!("✅ 已取消放行 {label}")).await?;
+            let msg = if kit::is_zh() {
+                format!("✅ 已取消放行 {label}")
+            } else {
+                format!("✅ Removed {label} from allowlist")
+            };
+            inv.edit_text(&msg).await?;
         } else if remove {
-            return Err(kit::fail(format!("放行名单里没有 {label}")));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("放行名单里没有 {label}")
+            } else {
+                format!("{label} is not on the allowlist")
+            }));
         } else if changed {
-            inv.edit_text(&format!("✅ 已放行 {label}")).await?;
+            let msg = if kit::is_zh() {
+                format!("✅ 已放行 {label}")
+            } else {
+                format!("✅ Allowed {label}")
+            };
+            inv.edit_text(&msg).await?;
         } else {
-            inv.edit_text(&format!("✅ {label} 已经在放行名单里"))
-                .await?;
+            let msg = if kit::is_zh() {
+                format!("✅ {label} 已经在放行名单里")
+            } else {
+                format!("✅ {label} is already allowed")
+            };
+            inv.edit_text(&msg).await?;
         }
         Ok(())
     }
@@ -492,27 +553,52 @@ impl Service {
                 continue;
             }
             let title = kit::or_default(&entry.title, id);
-            lines.push(format!(
-                "• {}{}：封禁 {} 个机器人，删除 {} 条",
-                escape(title),
-                strict_note(entry.strict),
-                entry.bots,
-                entry.messages
-            ));
+            if kit::is_zh() {
+                lines.push(format!(
+                    "• {}{}：封禁 {} 个机器人，删除 {} 条",
+                    escape(title),
+                    strict_note(entry.strict),
+                    entry.bots,
+                    entry.messages
+                ));
+            } else {
+                lines.push(format!(
+                    "• {}{}: banned {} bot(s), deleted {} msg(s)",
+                    escape(title),
+                    strict_note(entry.strict),
+                    entry.bots,
+                    entry.messages
+                ));
+            }
         }
         if lines.is_empty() {
-            inv.edit(&format!(
-                "🚫 <b>访客机器人清理</b>\n还没有群组开启，在群里发 {}",
-                code(&format!("{}guestban on", inv.prefix()))
-            ))
-            .await?;
+            let html = if kit::is_zh() {
+                format!(
+                    "🚫 <b>访客机器人清理</b>\n还没有群组开启，在群里发 {}",
+                    code(&format!("{}guestban on", inv.prefix()))
+                )
+            } else {
+                format!(
+                    "🚫 <b>Guest Bot Guard</b>\nNo groups enabled yet; send {} in a group",
+                    code(&format!("{}guestban on", inv.prefix()))
+                )
+            };
+            inv.edit(&html).await?;
             return Ok(());
         }
-        let header = format!(
-            "🚫 <b>访客机器人清理</b>（{} 个群组，放行 {} 个机器人）",
-            lines.len(),
-            cfg.allow.len()
-        );
+        let header = if kit::is_zh() {
+            format!(
+                "🚫 <b>访客机器人清理</b>（{} 个群组，放行 {} 个机器人）",
+                lines.len(),
+                cfg.allow.len()
+            )
+        } else {
+            format!(
+                "🚫 <b>Guest Bot Guard</b> ({} group(s), {} allowed bot(s))",
+                lines.len(),
+                cfg.allow.len()
+            )
+        };
         let body = format!("{header}\n{}", lines.join("\n"));
         let pages = html_pages(&body, PAGE_LIMIT);
         inv.respond_pages(&pages).await?;
@@ -537,21 +623,30 @@ async fn ban(
 
 fn here(client: &Client, msg: &Message) -> Result<i64, mibot_command::CmdError> {
     let tl::enums::Peer::Channel(ch) = &msg.peer else {
-        return Err(kit::fail("要在超级群组里用"));
+        return Err(kit::fail(kit::tr(
+            "Use this in a supergroup",
+            "要在超级群组里用",
+        )));
     };
     if client
         .peers()
         .channel(ch.channel_id)
         .is_some_and(|i| i.broadcast)
     {
-        return Err(kit::fail("要在超级群组里用，频道里没有访客机器人"));
+        return Err(kit::fail(kit::tr(
+            "Use this in a supergroup; channels have no guest bots",
+            "要在超级群组里用，频道里没有访客机器人",
+        )));
     }
     Ok(ch.channel_id)
 }
 
 fn strict_note(strict: bool) -> &'static str {
     if strict {
-        "，严格模式（叫它的人一起封）"
+        kit::tr(
+            ", strict mode (also ban invoker)",
+            "，严格模式（叫它的人一起封）",
+        )
     } else {
         ""
     }
@@ -571,28 +666,53 @@ fn valid_username(name: &str) -> bool {
 
 pub fn help(prefix: &str) -> String {
     let c = |text: &str| code(&format!("{prefix}guestban{text}"));
-    format!(
-        "🚫 <b>访客机器人清理</b>\n\n\
-         访客机器人不用进群，群里有人提到它就能把消息贴进来，显示成「机器人名 来自 某人」。\
-         广告号拿它刷屏：机器人的名字就是广告词。开启后，在这个群组里看到这种消息就删掉，\
-         并在本群封禁那个机器人，之后它再也贴不进来。\n\n\
-         <b>本群</b>\n\
-         • {} 查看本群的状态\n\
-         • {}、{} 在本群开启或关闭\n\
-         • {} 严格模式：叫出机器人的人也一起封禁（默认关闭，对方多半是一次性小号）\n\n\
-         <b>放行和总览</b>\n\
-         • {} 放行正经的访客机器人，{} 取消，{} 查看\n\
-         • {} 开启了的群组和清理次数\n\n\
-         账号要是本群的管理员，有封禁成员和删除消息的权限。只用于超级群组。",
-        c(""),
-        c(" on"),
-        c(" off"),
-        c(" strict on|off"),
-        c(" allow @机器人"),
-        c(" allow rm @机器人"),
-        c(" allow"),
-        c(" list"),
-    )
+    if kit::is_zh() {
+        format!(
+            "🚫 <b>访客机器人清理</b>\n\n\
+             访客机器人不用进群，群里有人提到它就能把消息贴进来，显示成「机器人名 来自 某人」。\
+             广告号拿它刷屏：机器人的名字就是广告词。开启后，在这个群组里看到这种消息就删掉，\
+             并在本群封禁那个机器人，之后它再也贴不进来。\n\n\
+             <b>本群</b>\n\
+             • {} 查看本群的状态\n\
+             • {}、{} 在本群开启或关闭\n\
+             • {} 严格模式：叫出机器人的人也一起封禁（默认关闭，对方多半是一次性小号）\n\n\
+             <b>放行和总览</b>\n\
+             • {} 放行正经的访客机器人，{} 取消，{} 查看\n\
+             • {} 开启了的群组和清理次数\n\n\
+             账号要是本群的管理员，有封禁成员和删除消息的权限。只用于超级群组。",
+            c(""),
+            c(" on"),
+            c(" off"),
+            c(" strict on|off"),
+            c(" allow @机器人"),
+            c(" allow rm @机器人"),
+            c(" allow"),
+            c(" list"),
+        )
+    } else {
+        format!(
+            "🚫 <b>Guest Bot Guard</b>\n\n\
+             Guest bots can post inline messages into a group without joining (shown as \"Bot via User\").\
+             Spammers abuse their display names as ads. When enabled, this deletes such messages \
+             and bans the bot in the group.\n\n\
+             <b>This Group</b>\n\
+             • {} Check status in this group\n\
+             • {}, {} Enable or disable in this group\n\
+             • {} Strict mode: also ban the user who invoked the bot (off by default)\n\n\
+             <b>Allowlist & Overview</b>\n\
+             • {} Allow a legitimate guest bot, {} remove, {} list\n\
+             • {} Enabled groups and cleanup counts\n\n\
+             Requires admin rights to ban users and delete messages. Supergroups only.",
+            c(""),
+            c(" on"),
+            c(" off"),
+            c(" strict on|off"),
+            c(" allow @bot"),
+            c(" allow rm @bot"),
+            c(" allow"),
+            c(" list"),
+        )
+    }
 }
 
 pub fn register(app: &Arc<App>) {
@@ -605,19 +725,22 @@ pub fn register(app: &Arc<App>) {
         Box::pin(async move { s.work(cancel).await })
     }));
     let s_cmd = Arc::clone(&s);
-    app.registry.register(Command {
-        name: "guestban".into(),
-        group: group::ADMIN.into(),
-        description: "自动清理访客机器人广告".into(),
-        usage: "[on|off|strict|allow|list]".into(),
-        help: help("."),
-        help_fn: Some(Arc::new(help)),
-        handle: Arc::new(move |inv| {
-            let s = Arc::clone(&s_cmd);
-            Box::pin(async move { s.handle(inv).await })
-        }),
-        ..Default::default()
-    });
+    app.registry.register(
+        Command {
+            name: "guestban".into(),
+            group: group::ADMIN.into(),
+            description: "Auto-ban guest bot spam".into(),
+            usage: "[on|off|strict|allow|list]".into(),
+            help: help("."),
+            help_fn: Some(Arc::new(help)),
+            handle: Arc::new(move |inv| {
+                let s = Arc::clone(&s_cmd);
+                Box::pin(async move { s.handle(inv).await })
+            }),
+            ..Default::default()
+        }
+        .zh("自动清理访客机器人广告", "[on|off|strict|allow|list]"),
+    );
 }
 
 #[cfg(test)]

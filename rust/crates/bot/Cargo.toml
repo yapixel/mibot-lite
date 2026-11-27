@@ -18,5 +18,6 @@ grammers-mtsender.workspace = true
 grammers-session.workspace = true
 grammers-tl-types.workspace = true
 mibot-delivery.workspace = true
+mibot-i18n.workspace = true
 mibot-session.workspace = true
 mibot-tgstate.workspace = true

@@ -8,4 +8,5 @@ license.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 regex.workspace = true
+mibot-i18n.workspace = true
 mibot-imaging.workspace = true

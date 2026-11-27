@@ -1,5 +1,5 @@
 use crate::kit;
-use crate::sticker::{PACK_NAME_RULE, add_to_pack, explain, valid_pack_name};
+use crate::sticker::{add_to_pack, explain, pack_name_rule, valid_pack_name};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use grammers_tl_types as tl;
@@ -218,39 +218,57 @@ pub fn register(a: &Arc<App>) {
         quote_endpoint: endpoint,
         avatars: StdMutex::new(AvatarCache::default()),
     });
-    a.registry.register(Command {
-        name: "yvlu".into(),
-        group: group::MEDIA.into(),
-        description: "把消息做成语录贴纸".into(),
-        usage: "[消息数]".into(),
-        help_fn: Some(Arc::new(yvlu_help)),
-        timeout: Some(Duration::from_secs(300)),
-        handle: Arc::new(move |inv| {
-            let svc = Arc::clone(&svc);
-            Box::pin(async move {
-                svc.handle(&inv)
-                    .await
-                    .map_err(|e| kit::wrap_fail("语录生成失败", e))
-            })
-        }),
-        ..Default::default()
-    });
+    a.registry.register(
+        Command {
+            name: "yvlu".into(),
+            group: group::MEDIA.into(),
+            description: "Create quote stickers".into(),
+            usage: "[count]".into(),
+            help_fn: Some(Arc::new(yvlu_help)),
+            timeout: Some(Duration::from_secs(300)),
+            handle: Arc::new(move |inv| {
+                let svc = Arc::clone(&svc);
+                Box::pin(async move {
+                    svc.handle(&inv)
+                        .await
+                        .map_err(|e| kit::wrap_fail(kit::tr("Failed to generate quote", "语录生成失败"), e))
+                })
+            }),
+            ..Default::default()
+        }
+        .zh("把消息做成语录贴纸", "[消息数]"),
+    );
 }
 
 fn yvlu_help(prefix: &str) -> String {
     let p = escape(prefix);
-    format!(
-        "📝 <b>生成文字语录贴纸</b>\n\n\
-         • <code>{p}yvlu [消息数]</code> 回复消息生成语录，最多 5 条\n\
-         • <code>{p}yvlu r [消息数]</code> 包含被引用的内容\n\
-         • <code>{p}yvlu f 文本</code> 伪造文本（<code>fr</code> 同时包含回复）\n\
-         • <code>{p}yvlu u 用户 ID|@用户名 [消息数]</code> 伪造发送者（<code>ur</code> 同时包含回复）\n\
-         • <code>{p}yvlu webp|image|png|stories [消息数]</code> 指定输出格式\n\
-         • <code>{p}yvlu s</code> 保存回复的贴纸或图片到贴纸包\n\
-         • <code>{p}yvlu config</code> 查看配置\n\
-         • <code>{p}yvlu config sticker 贴纸包名</code> 设置贴纸包\n\n\
-         图片由远程 quote 服务渲染，需要网络可达。"
-    )
+    if kit::is_zh() {
+        format!(
+            "📝 <b>生成文字语录贴纸</b>\n\n\
+             • <code>{p}yvlu [消息数]</code> 回复消息生成语录，最多 5 条\n\
+             • <code>{p}yvlu r [消息数]</code> 包含被引用的内容\n\
+             • <code>{p}yvlu f 文本</code> 伪造文本（<code>fr</code> 同时包含回复）\n\
+             • <code>{p}yvlu u 用户 ID|@用户名 [消息数]</code> 伪造发送者（<code>ur</code> 同时包含回复）\n\
+             • <code>{p}yvlu webp|image|png|stories [消息数]</code> 指定输出格式\n\
+             • <code>{p}yvlu s</code> 保存回复的贴纸或图片到贴纸包\n\
+             • <code>{p}yvlu config</code> 查看配置\n\
+             • <code>{p}yvlu config sticker 贴纸包名</code> 设置贴纸包\n\n\
+             图片由远程 quote 服务渲染，需要网络可达。"
+        )
+    } else {
+        format!(
+            "📝 <b>Quote Stickers</b>\n\n\
+             • <code>{p}yvlu [count]</code> reply to generate a quote sticker (max 5 messages)\n\
+             • <code>{p}yvlu r [count]</code> include replied context\n\
+             • <code>{p}yvlu f text</code> fake message text (<code>fr</code> also includes reply)\n\
+             • <code>{p}yvlu u user_id|@username [count]</code> fake sender (<code>ur</code> also includes reply)\n\
+             • <code>{p}yvlu webp|image|png|stories [count]</code> choose output format\n\
+             • <code>{p}yvlu s</code> save replied sticker or image to sticker pack\n\
+             • <code>{p}yvlu config</code> view settings\n\
+             • <code>{p}yvlu config sticker pack_name</code> set sticker pack\n\n\
+             Rendered by a remote quote service; requires network access."
+        )
+    }
 }
 
 fn is_format_arg(v: &str) -> bool {
@@ -573,7 +591,7 @@ fn forward_author(
         .filter(|s| !s.is_empty())
         .or(hdr.saved_from_name.as_deref().filter(|s| !s.is_empty()))
         .or(hdr.post_author.as_deref().filter(|s| !s.is_empty()))
-        .unwrap_or("未知来源")
+        .unwrap_or_else(|| kit::tr("Unknown source", "未知来源"))
         .to_owned();
     if id == 0 {
         id = i64::from(name_hash(&name));
@@ -608,7 +626,9 @@ async fn fake_author(
                     self_user = Some(u.clone());
                 }
             }
-            let u = self_user.ok_or_else(|| fail("无法获取账号信息"))?;
+            let u = self_user.ok_or_else(|| {
+                fail(kit::tr("Failed to get account info", "无法获取账号信息"))
+            })?;
             Ok(user_author(
                 u.id,
                 u.first_name.as_deref().unwrap_or(""),
@@ -631,7 +651,9 @@ async fn fake_author(
                     .await?;
                 peers.remember_users(&users);
             }
-            let info = peers.user(u.user_id).ok_or_else(|| fail("查不到这个用户"))?;
+            let info = peers
+                .user(u.user_id)
+                .ok_or_else(|| fail(kit::tr("User not found", "查不到这个用户")))?;
             Ok(user_author(
                 u.user_id,
                 &info.first_name,
@@ -658,11 +680,12 @@ async fn fake_author(
                 };
                 peers.remember_chats(&chats);
             }
+            let not_found = || kit::tr("Channel not found", "查不到这个频道");
             peers
                 .channel(ch.channel_id)
-                .ok_or_else(|| fail("查不到这个频道"))?;
+                .ok_or_else(|| fail(not_found()))?;
             peer_author(peers, &tl::types::PeerChannel { channel_id: ch.channel_id }.into())
-                .ok_or_else(|| fail("查不到这个频道"))
+                .ok_or_else(|| fail(not_found()))
         }
         tl::enums::InputPeer::Chat(c) => {
             if peers.chat(c.chat_id).is_none() {
@@ -677,11 +700,12 @@ async fn fake_author(
                 };
                 peers.remember_chats(&chats);
             }
-            peers.chat(c.chat_id).ok_or_else(|| fail("查不到这个群"))?;
+            let not_found = || kit::tr("Group not found", "查不到这个群");
+            peers.chat(c.chat_id).ok_or_else(|| fail(not_found()))?;
             peer_author(peers, &tl::types::PeerChat { chat_id: c.chat_id }.into())
-                .ok_or_else(|| fail("查不到这个群"))
+                .ok_or_else(|| fail(not_found()))
         }
-        _ => Err(fail("不支持的伪造对象")),
+        _ => Err(fail(kit::tr("Unsupported fake target", "不支持的伪造对象"))),
     }
 }
 
@@ -802,33 +826,38 @@ impl YvluService {
             return inv.edit(&yvlu_help(inv.prefix())).await.map_err(Into::into);
         };
         if opts.count > 5 {
-            return Err(fail("太多了 哒咩"));
+            return Err(fail(kit::tr("Too many messages (max 5)", "太多了 哒咩")));
         }
         let sub = inv.arg(0).to_ascii_lowercase();
         if sub == "u" || sub == "ur" {
             let target = inv.arg(1);
+            let bad_target = || {
+                if kit::is_zh() {
+                    format!("无法获取 {target} 的信息，请检查用户 ID 或用户名是否正确")
+                } else {
+                    format!("Failed to get info for {target}; check the user ID or username")
+                }
+            };
             let peer = inv
                 .client
                 .resolve_target(target)
                 .await
-                .map_err(|_| {
-                    fail(format!(
-                        "无法获取 {target} 的信息，请检查用户 ID 或用户名是否正确"
-                    ))
-                })?;
-            let author = fake_author(&inv.client, &peer).await.map_err(|_| {
-                fail(format!(
-                    "无法获取 {target} 的信息，请检查用户 ID 或用户名是否正确"
-                ))
-            })?;
+                .map_err(|_| fail(bad_target()))?;
+            let author = fake_author(&inv.client, &peer)
+                .await
+                .map_err(|_| fail(bad_target()))?;
             opts.fake_sender = Some(peer);
             opts.fake_author = Some(author);
         }
         let Some(reply) = kit::reply_msg(inv).await? else {
-            return Err(fail("请回复一条消息"));
+            return Err(fail(kit::tr("Reply to a message first", "请回复一条消息")));
         };
-        inv.edit(&kit::feedback("working", "正在生成语录贴纸", ""))
-            .await?;
+        inv.edit(&kit::feedback(
+            "working",
+            kit::tr("Generating quote sticker", "正在生成语录贴纸"),
+            "",
+        ))
+        .await?;
 
         let started = Instant::now();
         let payload = self.build(inv, &reply, &opts).await?;
@@ -908,25 +937,48 @@ impl YvluService {
         if action.is_empty() {
             let cur = self.store.read()?;
             let name = cur.sticker_set.as_str();
-            let mut text = format!(
-                "📝 <b>语录配置</b>\n贴纸包名：{}",
-                code(if name.is_empty() { "未设置" } else { name })
-            );
+            let mut text = if kit::is_zh() {
+                format!(
+                    "📝 <b>语录配置</b>\n贴纸包名：{}",
+                    code(if name.is_empty() { "未设置" } else { name })
+                )
+            } else {
+                format!(
+                    "📝 <b>Quote Settings</b>\nSticker pack: {}",
+                    code(if name.is_empty() { "Not set" } else { name })
+                )
+            };
             if !name.is_empty() {
-                text.push_str(&format!("\n贴纸包链接：t.me/addstickers/{}", escape(name)));
+                text.push_str(&if kit::is_zh() {
+                    format!("\n贴纸包链接：t.me/addstickers/{}", escape(name))
+                } else {
+                    format!("\nPack link: t.me/addstickers/{}", escape(name))
+                });
             }
             text.push_str(&format!(
                 "\n{}",
-                code(&format!("{}yvlu config sticker 贴纸包名", inv.prefix()))
+                code(&if kit::is_zh() {
+                    format!("{}yvlu config sticker 贴纸包名", inv.prefix())
+                } else {
+                    format!("{}yvlu config sticker pack_name", inv.prefix())
+                })
             ));
             return inv.edit(&text).await.map_err(Into::into);
         }
         if !matches!(action.as_str(), "sticker" | "stickerset" | "set") {
-            return Err(fail(format!(
-                "未知的配置项：{}。可用配置命令：{}yvlu config sticker 贴纸包名",
-                inv.arg(1),
-                inv.prefix()
-            )));
+            return Err(fail(if kit::is_zh() {
+                format!(
+                    "未知的配置项：{}。可用配置命令：{}yvlu config sticker 贴纸包名",
+                    inv.arg(1),
+                    inv.prefix()
+                )
+            } else {
+                format!(
+                    "Unknown setting: {}. Usage: {}yvlu config sticker pack_name",
+                    inv.arg(1),
+                    inv.prefix()
+                )
+            }));
         }
         let name = if inv.args.len() > 2 {
             inv.args[2..].join("_")
@@ -934,17 +986,24 @@ impl YvluService {
             String::new()
         };
         if name.is_empty() {
-            return Err(kit::usage(inv.prefix(), "yvlu config sticker 贴纸包名"));
+            return Err(kit::usage(
+                inv.prefix(),
+                kit::tr("yvlu config sticker pack_name", "yvlu config sticker 贴纸包名"),
+            ));
         }
         if !valid_pack_name(&name) {
-            return Err(fail(PACK_NAME_RULE));
+            return Err(fail(pack_name_rule()));
         }
         let name_save = name.clone();
         kit::update_ok(&self.store, |cfg| cfg.sticker_set = name_save)?;
         inv.edit(&kit::feedback(
             "success",
-            "贴纸包配置已更新",
-            &format!("已设置贴纸包：{name}\n贴纸包链接：t.me/addstickers/{name}"),
+            kit::tr("Sticker pack updated", "贴纸包配置已更新"),
+            &if kit::is_zh() {
+                format!("已设置贴纸包：{name}\n贴纸包链接：t.me/addstickers/{name}")
+            } else {
+                format!("Sticker pack: {name}\nPack link: t.me/addstickers/{name}")
+            },
         ))
         .await
         .map_err(Into::into)
@@ -953,14 +1012,28 @@ impl YvluService {
     async fn save_sticker(&self, inv: &Invocation) -> CmdResult {
         let cfg = self.store.read()?;
         if cfg.sticker_set.trim().is_empty() {
-            return Err(fail(format!(
-                "未配置贴纸包，请使用 {}yvlu config sticker 贴纸包名",
-                inv.prefix()
-            )));
+            return Err(fail(if kit::is_zh() {
+                format!("未配置贴纸包，请使用 {}yvlu config sticker 贴纸包名", inv.prefix())
+            } else {
+                format!(
+                    "Sticker pack not configured; run {}yvlu config sticker pack_name",
+                    inv.prefix()
+                )
+            }));
         }
         let Some(reply) = kit::reply_msg(inv).await? else {
-            return Err(fail("请回复一张贴纸或图片"));
+            return Err(fail(kit::tr(
+                "Reply to a sticker or image",
+                "请回复一张贴纸或图片",
+            )));
         };
+        let bad_media = || {
+            kit::tr(
+                "Unsupported media; reply to a sticker or image",
+                "不支持的媒体类型，请回复贴纸或图片",
+            )
+        };
+        let upload_err = || kit::tr("Failed to upload sticker", "上传贴纸失败");
         let doc = if let Some(existing) = mibot_bot::document_of(&reply.raw)
             && is_sticker_document(&reply.raw)
         {
@@ -970,9 +1043,8 @@ impl YvluService {
                 .client
                 .download_media(&reply.raw, 8 << 20)
                 .await
-                .map_err(|_| fail("不支持的媒体类型，请回复贴纸或图片"))?;
-            let decoded = imaging_decode(&file.data)
-                .map_err(|_| fail("不支持的媒体类型，请回复贴纸或图片"))?;
+                .map_err(|_| fail(bad_media()))?;
+            let decoded = imaging_decode(&file.data).map_err(|_| fail(bad_media()))?;
             let resized = resize_sticker(&decoded)?;
             let png = encode_png(&resized)?;
             let uploaded = inv.client.upload_bytes("sticker.png", &png).await?;
@@ -998,10 +1070,10 @@ impl YvluService {
                 })
                 .await?;
             let tl::enums::MessageMedia::Document(doc_m) = msg_media else {
-                return Err(fail("上传贴纸失败"));
+                return Err(fail(upload_err()));
             };
             let Some(tl::enums::Document::Document(doc)) = doc_m.document else {
-                return Err(fail("上传贴纸失败"));
+                return Err(fail(upload_err()));
             };
             tl::types::InputDocument {
                 id: doc.id,
@@ -1019,11 +1091,19 @@ impl YvluService {
         let created = add_to_pack(&inv.client, &cfg.sticker_set, &cfg.sticker_set, item)
             .await
             .map_err(explain)?;
-        let title = if created { "贴纸包已创建" } else { "贴纸已添加" };
+        let title = if created {
+            kit::tr("Sticker pack created", "贴纸包已创建")
+        } else {
+            kit::tr("Sticker added", "贴纸已添加")
+        };
         inv.edit(&kit::feedback(
             "success",
             title,
-            &format!("贴纸包：t.me/addstickers/{}", cfg.sticker_set),
+            &if kit::is_zh() {
+                format!("贴纸包：t.me/addstickers/{}", cfg.sticker_set)
+            } else {
+                format!("Pack: t.me/addstickers/{}", cfg.sticker_set)
+            },
         ))
         .await
         .map_err(Into::into)
@@ -1043,17 +1123,25 @@ impl YvluService {
             .insert("Content-Type".into(), "application/json".into());
         req.headers
             .insert("User-Agent".into(), QUOTE_USER_AGENT.into());
-        let resp = do_request(req)
-            .await
-            .map_err(|e| fail(format!("quote 服务不可用：{}", httpx_reason(&e))))?;
+        let resp = do_request(req).await.map_err(|e| {
+            fail(if kit::is_zh() {
+                format!("quote 服务不可用：{}", httpx_reason(&e))
+            } else {
+                format!("Quote service unavailable: {}", httpx_reason(&e))
+            })
+        })?;
         if resp.status == 403 {
-            return Err(fail("quote 服务拒绝了请求（403），可能是它换了准入规则"));
+            return Err(fail(kit::tr(
+                "Quote service rejected the request (403)",
+                "quote 服务拒绝了请求（403），可能是它换了准入规则",
+            )));
         }
         if !resp.ok() {
-            return Err(fail(format!(
-                "语录渲染服务出错了（HTTP {}），稍后再试",
-                resp.status
-            )));
+            return Err(fail(if kit::is_zh() {
+                format!("语录渲染服务出错了（HTTP {}），稍后再试", resp.status)
+            } else {
+                format!("Quote service error (HTTP {}); try again later", resp.status)
+            }));
         }
         if resp.body.len() >= 12 && &resp.body[0..4] == b"RIFF" && &resp.body[8..12] == b"WEBP" {
             return Ok((resp.body, "webp"));
@@ -1064,7 +1152,10 @@ impl YvluService {
         if resp.body.len() >= 4 && resp.body[0] == 0x1a && resp.body[1] == 0x45 {
             return Ok((resp.body, "webm"));
         }
-        Err(fail("quote 服务返回了非图片数据"))
+        Err(fail(kit::tr(
+            "Quote service returned non-image data",
+            "quote 服务返回了非图片数据",
+        )))
     }
 
     async fn build(
@@ -1100,7 +1191,7 @@ impl YvluService {
 
         for (idx, msg) in messages.iter().enumerate() {
             if inv.cancel.is_cancelled() {
-                return Err(fail("任务已取消"));
+                return Err(fail(kit::tr("Task cancelled", "任务已取消")));
             }
             let (mut author, face) = self.author(inv, msg, opts)?;
             let show = author.id != previous;
@@ -1194,7 +1285,7 @@ impl YvluService {
         }
 
         if payload.messages.is_empty() {
-            return Err(fail("没有可生成的消息"));
+            return Err(fail(kit::tr("No messages to quote", "没有可生成的消息")));
         }
         Ok(payload)
     }
@@ -1254,7 +1345,7 @@ impl YvluService {
             return Ok((from, face));
         }
         let from = peer_author(inv.client.peers(), &msg.sender)
-            .ok_or_else(|| fail("无法获取消息发送者信息"))?;
+            .ok_or_else(|| fail(kit::tr("Failed to get message sender info", "无法获取消息发送者信息")))?;
         let face = inv.client.peers().input_peer(&msg.sender);
         Ok((from, face))
     }

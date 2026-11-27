@@ -29,42 +29,42 @@ impl Default for TranslateConfig {
     }
 }
 
-fn languages() -> &'static HashMap<&'static str, &'static str> {
-    static MAP: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+fn languages() -> &'static HashMap<&'static str, (&'static str, &'static str)> {
+    static MAP: OnceLock<HashMap<&'static str, (&'static str, &'static str)>> = OnceLock::new();
     MAP.get_or_init(|| {
         HashMap::from([
-            ("ar", "阿拉伯语"),
-            ("bg", "保加利亚语"),
-            ("cs", "捷克语"),
-            ("da", "丹麦语"),
-            ("de", "德语"),
-            ("el", "希腊语"),
-            ("en", "英语"),
-            ("es", "西班牙语"),
-            ("fa", "波斯语"),
-            ("fi", "芬兰语"),
-            ("fr", "法语"),
-            ("he", "希伯来语"),
-            ("hi", "印地语"),
-            ("hu", "匈牙利语"),
-            ("id", "印尼语"),
-            ("it", "意大利语"),
-            ("ja", "日语"),
-            ("ko", "韩语"),
-            ("ms", "马来语"),
-            ("nl", "荷兰语"),
-            ("no", "挪威语"),
-            ("pl", "波兰语"),
-            ("pt", "葡萄牙语"),
-            ("ro", "罗马尼亚语"),
-            ("ru", "俄语"),
-            ("sv", "瑞典语"),
-            ("th", "泰语"),
-            ("tr", "土耳其语"),
-            ("uk", "乌克兰语"),
-            ("vi", "越南语"),
-            ("zh-CN", "简体中文"),
-            ("zh-TW", "繁体中文"),
+            ("ar", ("Arabic", "阿拉伯语")),
+            ("bg", ("Bulgarian", "保加利亚语")),
+            ("cs", ("Czech", "捷克语")),
+            ("da", ("Danish", "丹麦语")),
+            ("de", ("German", "德语")),
+            ("el", ("Greek", "希腊语")),
+            ("en", ("English", "英语")),
+            ("es", ("Spanish", "西班牙语")),
+            ("fa", ("Persian", "波斯语")),
+            ("fi", ("Finnish", "芬兰语")),
+            ("fr", ("French", "法语")),
+            ("he", ("Hebrew", "希伯来语")),
+            ("hi", ("Hindi", "印地语")),
+            ("hu", ("Hungarian", "匈牙利语")),
+            ("id", ("Indonesian", "印尼语")),
+            ("it", ("Italian", "意大利语")),
+            ("ja", ("Japanese", "日语")),
+            ("ko", ("Korean", "韩语")),
+            ("ms", ("Malay", "马来语")),
+            ("nl", ("Dutch", "荷兰语")),
+            ("no", ("Norwegian", "挪威语")),
+            ("pl", ("Polish", "波兰语")),
+            ("pt", ("Portuguese", "葡萄牙语")),
+            ("ro", ("Romanian", "罗马尼亚语")),
+            ("ru", ("Russian", "俄语")),
+            ("sv", ("Swedish", "瑞典语")),
+            ("th", ("Thai", "泰语")),
+            ("tr", ("Turkish", "土耳其语")),
+            ("uk", ("Ukrainian", "乌克兰语")),
+            ("vi", ("Vietnamese", "越南语")),
+            ("zh-CN", ("Simplified Chinese", "简体中文")),
+            ("zh-TW", ("Traditional Chinese", "繁体中文")),
         ])
     })
 }
@@ -87,7 +87,7 @@ fn language_name(code_s: &str) -> String {
     let canon = canonical_language(code_s);
     languages()
         .get(canon.as_str())
-        .map(|s| (*s).to_owned())
+        .map(|&(en, zh)| kit::tr(en, zh).to_owned())
         .unwrap_or_else(|| code_s.to_owned())
 }
 
@@ -116,14 +116,21 @@ struct TranslateResult {
 }
 
 fn parse_translation(raw: &[u8]) -> Result<TranslateResult, mibot_command::CmdError> {
+    let bad = || {
+        kit::fail(kit::tr(
+            "Translation service returned unparseable content",
+            "翻译服务返回了无法解析的内容",
+        ))
+    };
+    let empty = || kit::fail(kit::tr("Translation result is empty", "翻译结果为空"));
     let outer: Vec<Value> = serde_json::from_slice(raw)
         .ok()
         .filter(|v: &Vec<Value>| !v.is_empty())
-        .ok_or_else(|| kit::fail("翻译服务返回了无法解析的内容"))?;
+        .ok_or_else(bad)?;
     match &outer[0] {
         Value::String(s) => {
             if s.trim().is_empty() {
-                return Err(kit::fail("翻译结果为空"));
+                return Err(empty());
             }
             Ok(TranslateResult {
                 text: s.clone(),
@@ -132,10 +139,10 @@ fn parse_translation(raw: &[u8]) -> Result<TranslateResult, mibot_command::CmdEr
         }
         Value::Array(arr) if !arr.is_empty() => {
             let Some(txt) = arr[0].as_str() else {
-                return Err(kit::fail("翻译服务返回了无法解析的内容"));
+                return Err(bad());
             };
             if txt.trim().is_empty() {
-                return Err(kit::fail("翻译结果为空"));
+                return Err(empty());
             }
             let src = arr.get(1).and_then(|v| v.as_str()).unwrap_or("").to_owned();
             Ok(TranslateResult {
@@ -143,7 +150,7 @@ fn parse_translation(raw: &[u8]) -> Result<TranslateResult, mibot_command::CmdEr
                 source: src,
             })
         }
-        _ => Err(kit::fail("翻译服务返回了无法解析的内容")),
+        _ => Err(bad()),
     }
 }
 
@@ -163,7 +170,7 @@ async fn translate_text(
     let mut headers = HashMap::new();
     headers.insert("Content-Type".into(), "application/x-www-form-urlencoded".into());
     let resp = tokio::select! {
-        _ = cancel.cancelled() => return Err(kit::fail("操作已取消")),
+        _ = cancel.cancelled() => return Err(kit::fail(kit::tr("Operation cancelled", "操作已取消"))),
         r = do_request(Request {
             method: Method::POST,
             url,
@@ -175,10 +182,17 @@ async fn translate_text(
         }) => r?,
     };
     if resp.status == 429 {
-        return Err(kit::fail("翻译服务暂时拒绝了请求（429），稍后再试"));
+        return Err(kit::fail(kit::tr(
+            "Translation service temporarily rejected the request (429); try again later",
+            "翻译服务暂时拒绝了请求（429），稍后再试",
+        )));
     }
     if !resp.ok() {
-        return Err(kit::fail(format!("翻译服务返回 HTTP {}", resp.status)));
+        return Err(kit::fail(if kit::is_zh() {
+            format!("翻译服务返回 HTTP {}", resp.status)
+        } else {
+            format!("Translation service returned HTTP {}", resp.status)
+        }));
     }
     parse_translation(&resp.body)
 }
@@ -187,18 +201,31 @@ fn translate_help(prefix: &str) -> String {
     let p = escape(prefix);
     let mut codes: Vec<&str> = languages().keys().copied().collect();
     codes.sort_unstable();
-    format!(
-        "🌐 <b>翻译</b>\n\n直接调用谷歌翻译，不需要任何配置或 API Key。\n\n\
-         • <code>{p}tr 文本</code> 翻译。中文译成英文，其他语言译成中文\n\
-         • <code>{p}tr en 文本</code> 指定目标语言\n\
-         • 回复一条消息发 <code>{p}tr</code> 翻译那条消息\n\
-         • 回复消息发 <code>{p}tr ja</code> 译成指定语言\n\
-         • <code>{p}tr set 语言</code> 设置默认目标语言\n\n\
-         <b>语言代码</b>\n<blockquote expandable>{}</blockquote>\n\
-         单次最多 {} 字符，长译文自动分段。",
-        escape(&codes.join(" ")),
-        code(&TRANSLATE_LIMIT.to_string()),
-    )
+    let joined = escape(&codes.join(" "));
+    let limit = code(&TRANSLATE_LIMIT.to_string());
+    if kit::is_zh() {
+        format!(
+            "🌐 <b>翻译</b>\n\n直接调用谷歌翻译，不需要任何配置或 API Key。\n\n\
+             • <code>{p}tr 文本</code> 翻译。中文译成英文，其他语言译成中文\n\
+             • <code>{p}tr en 文本</code> 指定目标语言\n\
+             • 回复一条消息发 <code>{p}tr</code> 翻译那条消息\n\
+             • 回复消息发 <code>{p}tr ja</code> 译成指定语言\n\
+             • <code>{p}tr set 语言</code> 设置默认目标语言\n\n\
+             <b>语言代码</b>\n<blockquote expandable>{joined}</blockquote>\n\
+             单次最多 {limit} 字符，长译文自动分段。"
+        )
+    } else {
+        format!(
+            "🌐 <b>Translate</b>\n\nCalls Google Translate directly with no setup or API key required.\n\n\
+             • <code>{p}tr text</code> Translate (Chinese to English, others to Chinese)\n\
+             • <code>{p}tr en text</code> Specify target language\n\
+             • Reply to a message with <code>{p}tr</code> to translate it\n\
+             • Reply to a message with <code>{p}tr ja</code> to translate to a target language\n\
+             • <code>{p}tr set lang</code> Set default target language\n\n\
+             <b>Language Codes</b>\n<blockquote expandable>{joined}</blockquote>\n\
+             Up to {limit} characters per request; long translations are split automatically."
+        )
+    }
 }
 
 async fn run_translate(
@@ -215,21 +242,34 @@ async fn run_translate(
     }
     if first == "set" {
         let Some(code_s) = named_language(inv.arg(1)) else {
-            return Err(kit::fail(format!(
-                "不认识的语言代码：{}。可用代码见 {}tr help",
-                inv.arg(1),
-                inv.prefix()
-            )));
+            return Err(kit::fail(if kit::is_zh() {
+                format!(
+                    "不认识的语言代码：{}。可用代码见 {}tr help",
+                    inv.arg(1),
+                    inv.prefix()
+                )
+            } else {
+                format!(
+                    "Unknown language code: {}. See {}tr help for available codes",
+                    inv.arg(1),
+                    inv.prefix()
+                )
+            }));
         };
         settings.update(|c| {
             c.target = code_s.clone();
             Ok::<(), mibot_store::StoreError>(())
         })?;
+        let detail = if kit::is_zh() {
+            format!("{}（{code_s}）", language_name(&code_s))
+        } else {
+            format!("{} ({code_s})", language_name(&code_s))
+        };
         return inv
             .edit(&kit::feedback(
                 "success",
-                "默认目标语言已设置",
-                &format!("{}（{code_s}）", language_name(&code_s)),
+                kit::tr("Default target language set", "默认目标语言已设置"),
+                &detail,
             ))
             .await
             .map_err(Into::into);
@@ -246,32 +286,46 @@ async fn run_translate(
         return inv.edit(&translate_help(inv.prefix())).await.map_err(Into::into);
     }
     if mibot_bot::utf16_len(&text) > TRANSLATE_LIMIT as i32 {
-        return Err(kit::fail(format!(
-            "文本过长，请保持在 {TRANSLATE_LIMIT} 字符以内"
-        )));
+        return Err(kit::fail(if kit::is_zh() {
+            format!("文本过长，请保持在 {TRANSLATE_LIMIT} 字符以内")
+        } else {
+            format!("Text is too long; keep it within {TRANSLATE_LIMIT} characters")
+        }));
     }
     let mut target = named_target.clone().unwrap_or(config.target);
     if named_target.is_none() && has_han(&text) && canonical_language(&target) == "zh-CN" {
         target = "en".into();
     }
-    inv.edit(&kit::feedback("working", "翻译中", "")).await?;
+    inv.edit(&kit::feedback("working", kit::tr("Translating", "翻译中"), ""))
+        .await?;
     let res = translate_text(&inv.cancel, TRANSLATE_ENDPOINT, &text, &target).await?;
     let source = if res.source.is_empty() {
-        "自动检测".into()
+        kit::tr("Auto-detected", "自动检测").into()
     } else {
         language_name(&res.source)
     };
     let preview = kit::truncate_runes(&text, 60);
     let suffix = if text.chars().count() > 60 { "…" } else { "" };
     let mut pages = escaped_pages(&res.text, PAGE_LIMIT);
-    pages[0] = format!(
-        "🌐 <b>翻译</b>（{} → {}）\n\n<b>原文</b>\n<code>{}{}</code>\n\n<b>译文</b>\n{}",
-        escape(&source),
-        escape(&language_name(&target)),
-        escape(&preview),
-        suffix,
-        pages[0],
-    );
+    pages[0] = if kit::is_zh() {
+        format!(
+            "🌐 <b>翻译</b>（{} → {}）\n\n<b>原文</b>\n<code>{}{}</code>\n\n<b>译文</b>\n{}",
+            escape(&source),
+            escape(&language_name(&target)),
+            escape(&preview),
+            suffix,
+            pages[0],
+        )
+    } else {
+        format!(
+            "🌐 <b>Translation</b> ({} → {})\n\n<b>Source</b>\n<code>{}{}</code>\n\n<b>Result</b>\n{}",
+            escape(&source),
+            escape(&language_name(&target)),
+            escape(&preview),
+            suffix,
+            pages[0],
+        )
+    };
     inv.respond_pages(&pages).await.map_err(Into::into)
 }
 
@@ -281,18 +335,19 @@ pub fn register(app: &Arc<App>) {
         "tr",
         &[],
         group::TOOLS,
-        "用谷歌翻译文本",
-        "[语言] 文本|set 语言",
+        "Translate text with Google",
+        "[lang] text|set lang",
         translate_help,
         move |inv| {
             let s = Arc::clone(&settings);
             Box::pin(async move {
                 run_translate(&inv, &s)
                     .await
-                    .map_err(|e| kit::wrap_fail("翻译失败", e))
+                    .map_err(|e| kit::wrap_fail(kit::tr("Translation failed", "翻译失败"), e))
             })
         },
-    );
+    )
+    .zh("用谷歌翻译文本", "[语言] 文本|set 语言");
     cmd.timeout = Some(Duration::from_secs(120));
     cmd.free_text = true;
     app.registry.register(cmd);
@@ -324,7 +379,10 @@ mod tests {
         }
         assert!(has_han("今天天气不错") && has_han("mixed 中文 text"));
         assert!(!has_han("hello world") && !has_han("こんにちは") && !has_han(""));
-        assert_eq!(language_name("en"), "英语");
+        assert_eq!(language_name("en"), "English");
+        mibot_i18n::with_lang(mibot_i18n::Lang::Zh, || {
+            assert_eq!(language_name("en"), "英语");
+        });
         assert_eq!(language_name("qqq"), "qqq");
     }
 }

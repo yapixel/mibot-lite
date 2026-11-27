@@ -12,9 +12,9 @@ use tokio::sync::{Mutex, Semaphore};
 
 #[derive(Debug, Error)]
 pub enum BotApiError {
-    #[error("Bot API 推送排队已满")]
+    #[error("Bot API push queue is full")]
     QueueFull,
-    #[error("Bot API 返回 {code}：{description}")]
+    #[error("Bot API returned {code}: {description}")]
     Api {
         code: i64,
         description: String,
@@ -259,7 +259,7 @@ impl Client {
                 Err(_) => {
                     let api_err = BotApiError::Api {
                         code: i64::from(resp.status),
-                        description: "响应不是 JSON".into(),
+                        description: mibot_i18n::tr("response is not JSON", "响应不是 JSON").into(),
                         retry_after: None,
                     };
                     if resp.status >= 500 || resp.ok() {
@@ -275,7 +275,11 @@ impl Client {
                         return Err(BotApiError::Uncertain(UncertainError::new(
                             BotApiError::Api {
                                 code: i64::from(resp.status),
-                                description: "响应缺少 ok 字段".into(),
+                                description: mibot_i18n::tr(
+                                    "response is missing ok field",
+                                    "响应缺少 ok 字段",
+                                )
+                                .into(),
                                 retry_after: None,
                             },
                         )));

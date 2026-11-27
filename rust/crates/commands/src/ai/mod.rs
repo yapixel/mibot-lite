@@ -97,7 +97,10 @@ pub fn valid_tier(v: &str) -> bool {
 
 pub fn assert_allowed_model(model: &str) -> Result<(), CmdError> {
     if forbidden_model_re().is_match(model.trim()) {
-        return Err(kit::fail("该模型不可用于此项目"));
+        return Err(kit::fail(kit::tr(
+            "This model is not allowed in this project",
+            "该模型不可用于此项目",
+        )));
     }
     Ok(())
 }
@@ -391,9 +394,17 @@ impl RequestInfo {
         {
             u.text.clone()
         } else if let Some(h) = mibot_command::errors::find_in_chain::<HttpxError>(err.as_ref()) {
-            format!("AI 请求失败：{}", mibot_httpx::reason(h))
+            format!(
+                "{}{}",
+                kit::tr("AI request failed: ", "AI 请求失败："),
+                mibot_httpx::reason(h)
+            )
         } else {
-            "AI 请求失败：网络请求失败，稍后再试".to_owned()
+            kit::tr(
+                "AI request failed: network request failed, please try again later",
+                "AI 请求失败：网络请求失败，稍后再试",
+            )
+            .to_owned()
         };
         let raw_detail = format!(
             "AI request tag={:?} model={:?} stream={} responses={} timeout={:?} took={:?} stage={}: {}",
@@ -478,9 +489,9 @@ pub(crate) fn resolve_provider_type(provider: &AiProvider) -> String {
 }
 
 pub fn provider_endpoint(base: &str, kind: &str, endpoint: &str) -> Result<String, CmdError> {
-    let mut u = Url::parse(base).map_err(|_| kit::fail("API 地址无效"))?;
+    let mut u = Url::parse(base).map_err(|_| kit::fail(kit::tr("Invalid API URL", "API 地址无效")))?;
     if u.host_str().is_none() || (u.scheme() != "http" && u.scheme() != "https") {
-        return Err(kit::fail("API 地址无效"));
+        return Err(kit::fail(kit::tr("Invalid API URL", "API 地址无效")));
     }
     let raw_path = u.path().trim_end_matches('/').to_owned();
     let base_prefix = if raw_path.is_empty() {
@@ -634,13 +645,23 @@ pub fn error_detail(body: &[u8], secret: &str) -> String {
 
 pub fn http_failure(status: u16, body: &[u8], secret: &str) -> String {
     if status == 429 {
-        return "请求过于频繁，稍后再试".into();
+        return kit::tr(
+            "Too many requests; please try again later",
+            "请求过于频繁，稍后再试",
+        )
+        .into();
     }
     let detail = error_detail(body, secret);
     if detail.is_empty() {
-        format!("AI 接口返回 HTTP {status}")
-    } else {
+        if kit::is_zh() {
+            format!("AI 接口返回 HTTP {status}")
+        } else {
+            format!("AI API returned HTTP {status}")
+        }
+    } else if kit::is_zh() {
         format!("AI 接口返回 HTTP {status}：{detail}")
+    } else {
+        format!("AI API returned HTTP {status}: {detail}")
     }
 }
 
@@ -668,9 +689,11 @@ pub(crate) fn provider_failure(payload: &Value, secret: &str) -> CmdError {
         clean.to_owned()
     };
     if short.is_empty() {
-        kit::fail("AI 提供商返回错误")
-    } else {
+        kit::fail(kit::tr("AI provider returned an error", "AI 提供商返回错误"))
+    } else if kit::is_zh() {
         kit::fail(format!("AI 提供商返回错误：{short}"))
+    } else {
+        kit::fail(format!("AI provider returned an error: {short}"))
     }
 }
 
@@ -688,29 +711,40 @@ fn build_chat_request(
     max_output_tokens: Option<i32>,
 ) -> Result<AiRequest, CmdError> {
     let Some(mut provider) = cfg.configs.get(&sel.tag).cloned() else {
-        return Err(kit::fail("请先用 ai config add 添加 API，并用 ai model chat 选择模型"));
+        return Err(kit::fail(kit::tr(
+            "Please add an API with ai config add and select a model with ai model chat first",
+            "请先用 ai config add 添加 API，并用 ai model chat 选择模型",
+        )));
     };
     if sel.tag.is_empty() || sel.model.is_empty() {
-        return Err(kit::fail("请先用 ai config add 添加 API，并用 ai model chat 选择模型"));
+        return Err(kit::fail(kit::tr(
+            "Please add an API with ai config add and select a model with ai model chat first",
+            "请先用 ai config add 添加 API，并用 ai model chat 选择模型",
+        )));
     }
     assert_allowed_model(&sel.model)?;
     if images.len() > AI_MAX_IMAGES {
-        return Err(kit::fail("图片输入无效"));
+        return Err(kit::fail(kit::tr("Invalid image input", "图片输入无效")));
     }
     let mut total_bytes = 0usize;
     for img in images {
         total_bytes += img.data.len();
         if !image_mime_re().is_match(&img.mime_type) {
-            return Err(kit::fail("图片输入无效"));
+            return Err(kit::fail(kit::tr("Invalid image input", "图片输入无效")));
         }
     }
     if total_bytes > AI_MAX_IMAGE_BYTES {
-        return Err(kit::fail("图片输入过大"));
+        return Err(kit::fail(kit::tr("Image input is too large", "图片输入过大")));
     }
 
     let kind = resolve_provider_type(&provider);
     let (format, endpoint) = match kind.as_str() {
-        "codex" => return Err(kit::fail("codex 类型的 API 不支持对话")),
+        "codex" => {
+            return Err(kit::fail(kit::tr(
+                "codex API does not support chat",
+                "codex 类型的 API 不支持对话",
+            )));
+        }
         "gemini" => {
             let method = if provider.stream {
                 ":streamGenerateContent"
@@ -886,9 +920,9 @@ fn payloads(raw: &[u8]) -> Result<(Vec<Value>, bool), CmdError> {
     let trimmed = String::from_utf8_lossy(raw);
     let trimmed = trimmed.trim();
     if trimmed.is_empty() {
-        return Err(kit::fail("AI 返回内容为空"));
+        return Err(kit::fail(kit::tr("AI returned empty response", "AI 返回内容为空")));
     }
-    let invalid = || kit::fail("AI 返回无效 JSON");
+    let invalid = || kit::fail(kit::tr("AI returned invalid JSON", "AI 返回无效 JSON"));
     if trimmed.starts_with('{') {
         let obj: Value = serde_json::from_str(trimmed).map_err(|_| invalid())?;
         if !obj.is_object() {
@@ -1011,14 +1045,20 @@ pub(crate) fn decode_reply(
         }
     };
     if !complete {
-        return Err(kit::fail("AI 流式回复在结束前中断"));
+        return Err(kit::fail(kit::tr(
+            "AI stream interrupted before completion",
+            "AI 流式回复在结束前中断",
+        )));
     }
     let trimmed = answer.trim().to_owned();
     if trimmed.is_empty() {
-        return Err(kit::fail("AI 返回内容为空"));
+        return Err(kit::fail(kit::tr("AI returned empty response", "AI 返回内容为空")));
     }
     if utf16_len(&trimmed) as usize > AI_OUTPUT_LIMIT {
-        return Err(kit::fail("AI 输出超出长度限制"));
+        return Err(kit::fail(kit::tr(
+            "AI output exceeded length limit",
+            "AI 输出超出长度限制",
+        )));
     }
     Ok((trimmed, events))
 }
@@ -1050,7 +1090,11 @@ fn gemini_text(events: &[Value], mut complete: bool) -> Result<(String, bool), C
             {
                 complete = true;
                 if reason != "STOP" {
-                    return Err(kit::fail(format!("AI 回答未完成（{reason}）")));
+                    return Err(kit::fail(if kit::is_zh() {
+                        format!("AI 回答未完成（{reason}）")
+                    } else {
+                        format!("AI response incomplete ({reason})")
+                    }));
                 }
             }
         }
@@ -1060,7 +1104,11 @@ fn gemini_text(events: &[Value], mut complete: bool) -> Result<(String, bool), C
             .and_then(|v| v.as_str())
             && !reason.is_empty()
         {
-            return Err(kit::fail(format!("AI 拒绝了输入（{reason}）")));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("AI 拒绝了输入（{reason}）")
+            } else {
+                format!("AI rejected the input ({reason})")
+            }));
         }
     }
     Ok((text, complete))
@@ -1107,7 +1155,11 @@ fn anthropic_text(events: &[Value], mut complete: bool) -> Result<(String, bool)
             event.get("stop_reason").and_then(|v| v.as_str())
         };
         if let Some(r @ ("pause_turn" | "max_tokens" | "model_context_window_exceeded")) = reason {
-            return Err(kit::fail(format!("AI 回答未完成（{r}）")));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("AI 回答未完成（{r}）")
+            } else {
+                format!("AI response incomplete ({r})")
+            }));
         }
     }
     Ok((text, complete))
@@ -1133,9 +1185,11 @@ fn openai_text(events: &[Value], mut complete: bool) -> Result<(String, bool), C
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             return Err(kit::fail(if reason.is_empty() {
-                "AI 回答未完成".into()
-            } else {
+                kit::tr("AI response incomplete", "AI 回答未完成").into()
+            } else if kit::is_zh() {
                 format!("AI 回答未完成（{reason}）")
+            } else {
+                format!("AI response incomplete ({reason})")
             }));
         }
         let ev_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
@@ -1200,7 +1254,11 @@ fn openai_text(events: &[Value], mut complete: bool) -> Result<(String, bool), C
             {
                 complete = true;
                 if reason == "length" || reason == "content_filter" {
-                    return Err(kit::fail(format!("AI 回答未完成（{reason}）")));
+                    return Err(kit::fail(if kit::is_zh() {
+                        format!("AI 回答未完成（{reason}）")
+                    } else {
+                        format!("AI response incomplete ({reason})")
+                    }));
                 }
             }
             if let Some(delta) = choice.get("delta") {
@@ -1307,11 +1365,18 @@ async fn search_text(
 ) -> Result<(String, Vec<AiSource>, String), CmdError> {
     let sel = cfg.selection("search");
     let Some(mut provider) = cfg.configs.get(&sel.tag).cloned() else {
-        return Err(kit::fail("请先用 ai model search 选择搜索模型"));
+        return Err(kit::fail(kit::tr(
+            "Please select a search model with ai model search first",
+            "请先用 ai model search 选择搜索模型",
+        )));
     };
     let kind = resolve_provider_type(&provider);
     if kind == "doubao" || kind == "moonshot" {
-        return Err(kit::fail(format!("当前 {kind} 提供商不支持 search 模式")));
+        return Err(kit::fail(if kit::is_zh() {
+            format!("当前 {kind} 提供商不支持 search 模式")
+        } else {
+            format!("Provider type {kind} does not support search mode")
+        }));
     }
     let mut cfg_clone = cfg.clone();
     if kind == "local-cliproxy" && sel.model.contains("gemini") {
@@ -1404,7 +1469,11 @@ async fn search_text(
                     && res.get("type").and_then(|v| v.as_str()) == Some("web_search_tool_result_error")
                 {
                     let code = res.get("error_code").and_then(|v| v.as_str()).unwrap_or("");
-                    return Err(kit::fail(format!("AI 搜索失败（{code}）")));
+                    return Err(kit::fail(if kit::is_zh() {
+                        format!("AI 搜索失败（{code}）")
+                    } else {
+                        format!("AI search failed ({code})")
+                    }));
                 }
             }
             if let Some(cit) = payload.get("delta").and_then(|d| d.get("citation")) {
@@ -1539,17 +1608,26 @@ impl Service {
             req.tag.clone()
         };
         if tag.is_empty() {
-            return Err(kit::fail("请先用 ai config add 添加 API，并用 ai model chat 选择模型"));
+            return Err(kit::fail(kit::tr(
+                "Please add an API with ai config add and select a model with ai model chat first",
+                "请先用 ai config add 添加 API，并用 ai model chat 选择模型",
+            )));
         }
         let Some(provider) = cfg.configs.get(&tag).cloned() else {
-            return Err(kit::fail("未找到指定的 AI 提供商"));
+            return Err(kit::fail(kit::tr(
+                "Specified AI provider not found",
+                "未找到指定的 AI 提供商",
+            )));
         };
         let mut model = provider.models.get("chat").cloned().unwrap_or_default();
         if tag == cfg.current_chat_tag && !cfg.current_chat_model.is_empty() {
             model = cfg.current_chat_model.clone();
         }
         if model.is_empty() {
-            return Err(kit::fail("请先用 .ai model chat 配置聊天模型"));
+            return Err(kit::fail(kit::tr(
+                "Please select a chat model with ai model chat first",
+                "请先用 .ai model chat 配置聊天模型",
+            )));
         }
         assert_allowed_model(&model)?;
         let min_secs = req.min_timeout.as_secs() as i32;
@@ -1829,7 +1907,7 @@ async fn collect_images(
         }
         let img = image_of(&inv.client, m)
             .await
-            .map_err(|e| kit::wrap_fail("图片下载失败", Box::new(e)))?;
+            .map_err(|e| kit::wrap_fail(kit::tr("Failed to download image", "图片下载失败"), Box::new(e)))?;
         if let Some(i) = img {
             collected.push(i);
         }
@@ -1864,14 +1942,21 @@ fn sources_html(sources: &[AiSource]) -> String {
             )
         })
         .collect();
-    format!("\n\n<b>来源</b>\n{}", rows.join("\n"))
+    format!("\n\n<b>{}</b>\n{}", kit::tr("Sources", "来源"), rows.join("\n"))
 }
 
 fn telegraph_link_html(link: &str) -> String {
-    format!(
-        r#"📰 回答比较长，放在 Telegraph 上了：<a href="{}">点这里阅读</a>"#,
-        escape(link)
-    )
+    if kit::is_zh() {
+        format!(
+            r#"📰 回答比较长，放在 Telegraph 上了：<a href="{}">点这里阅读</a>"#,
+            escape(link)
+        )
+    } else {
+        format!(
+            r#"📰 Answer is long, published on Telegraph: <a href="{}">Read here</a>"#,
+            escape(link)
+        )
+    }
 }
 
 pub(crate) fn answer_pages(
@@ -1880,6 +1965,7 @@ pub(crate) fn answer_pages(
     model: &str,
     collapse: bool,
 ) -> Vec<String> {
+    let zh = kit::is_zh();
     let wrap = |h: &str| -> String {
         if collapse && !h.trim().is_empty() {
             format!("<blockquote expandable>{h}</blockquote>")
@@ -1888,22 +1974,39 @@ pub(crate) fn answer_pages(
         }
     };
     let sep = if collapse { "\n" } else { "\n\n" };
-    let source = format!(
-        "问：\n{}{sep}答：\n{}",
-        wrap(&escape(question)),
-        wrap(answer_html)
-    );
+    let source = if zh {
+        format!(
+            "问：\n{}{sep}答：\n{}",
+            wrap(&escape(question)),
+            wrap(answer_html)
+        )
+    } else {
+        format!(
+            "Q:\n{}{sep}A:\n{}",
+            wrap(&escape(question)),
+            wrap(answer_html)
+        )
+    };
     let mut pages = markdown::html_pages(&source, ANSWER_PAGE_LIMIT);
     let extra = pages.len() - 1;
     for (idx, p) in pages.iter_mut().enumerate() {
         if idx > 0 {
-            *p = format!("<b>续（{idx}/{extra}）</b>\n\n{p}");
+            *p = if zh {
+                format!("<b>续（{idx}/{extra}）</b>\n\n{p}")
+            } else {
+                format!("<b>Cont. ({idx}/{extra})</b>\n\n{p}")
+            };
         }
     }
     if !model.is_empty()
         && let Some(last) = pages.last_mut()
     {
-        last.push_str(&format!("\n<i>🍀 由 {} 生成</i>", escape(model)));
+        let m = escape(model);
+        if zh {
+            last.push_str(&format!("\n<i>🍀 由 {m} 生成</i>"));
+        } else {
+            last.push_str(&format!("\n<i>🍀 Generated by {m}</i>"));
+        }
     }
     pages
 }
@@ -1915,9 +2018,10 @@ pub(crate) fn answer_rich(
     model: &str,
     collapse: bool,
 ) -> Vec<tl::enums::PageBlock> {
+    let zh = kit::is_zh();
     let mut blocks: Vec<tl::enums::PageBlock> = vec![
         tl::types::PageBlockParagraph {
-            text: rich_plain("问："),
+            text: rich_plain(if zh { "问：" } else { "Q:" }),
         }
         .into(),
     ];
@@ -1942,7 +2046,7 @@ pub(crate) fn answer_rich(
     }
     blocks.push(
         tl::types::PageBlockParagraph {
-            text: rich_plain("答："),
+            text: rich_plain(if zh { "答：" } else { "A:" }),
         }
         .into(),
     );
@@ -1962,7 +2066,7 @@ pub(crate) fn answer_rich(
                 tl::types::PageBlockDetails {
                     open: false,
                     blocks: rest,
-                    title: rich_plain("展开全文"),
+                    title: rich_plain(if zh { "展开全文" } else { "Show full text" }),
                 }
                 .into(),
             );
@@ -2014,7 +2118,11 @@ pub(crate) fn answer_rich(
                     }
                     .into(),
                 ],
-                title: rich_plain(&format!("来源（{}）", limited.len())),
+                title: rich_plain(&if zh {
+                    format!("来源（{}）", limited.len())
+                } else {
+                    format!("Sources ({})", limited.len())
+                }),
             }
             .into(),
         );
@@ -2023,7 +2131,11 @@ pub(crate) fn answer_rich(
         blocks.push(
             tl::types::PageBlockFooter {
                 text: tl::types::TextItalic {
-                    text: rich_plain(&format!("🍀 由 {model} 生成")),
+                    text: rich_plain(&if zh {
+                        format!("🍀 由 {model} 生成")
+                    } else {
+                        format!("🍀 Generated by {model}")
+                    }),
                 }
                 .into(),
             }
@@ -2142,18 +2254,36 @@ impl Service {
             body,
         )
         .await
-        .map_err(|e| kit::fail(format!("Telegraph 请求失败：{}", mibot_httpx::reason(&e))))?;
+        .map_err(|e| {
+            kit::fail(if kit::is_zh() {
+                format!("Telegraph 请求失败：{}", mibot_httpx::reason(&e))
+            } else {
+                format!("Telegraph request failed: {}", mibot_httpx::reason(&e))
+            })
+        })?;
         if !resp.ok() {
-            return Err(kit::fail(format!("Telegraph 返回 HTTP {}", resp.status)));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("Telegraph 返回 HTTP {}", resp.status)
+            } else {
+                format!("Telegraph returned HTTP {}", resp.status)
+            }));
         }
-        let parsed: Value =
-            serde_json::from_slice(&resp.body).map_err(|_| kit::fail("Telegraph 返回错误"))?;
+        let parsed: Value = serde_json::from_slice(&resp.body).map_err(|_| {
+            kit::fail(kit::tr("Telegraph returned an error", "Telegraph 返回错误"))
+        })?;
         if parsed.get("ok").and_then(|v| v.as_bool()) != Some(true) {
             let detail = parsed.get("error").and_then(|v| v.as_str()).unwrap_or("");
             if detail.is_empty() {
-                return Err(kit::fail("Telegraph 返回错误"));
+                return Err(kit::fail(kit::tr(
+                    "Telegraph returned an error",
+                    "Telegraph 返回错误",
+                )));
             }
-            return Err(kit::fail(format!("Telegraph 返回错误：{detail}")));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("Telegraph 返回错误：{detail}")
+            } else {
+                format!("Telegraph returned an error: {detail}")
+            }));
         }
         Ok(parsed
             .get("result")
@@ -2184,7 +2314,10 @@ impl Service {
                 .unwrap_or("")
                 .to_owned();
             if token.is_empty() {
-                return Err(kit::fail("Telegraph 未返回 token"));
+                return Err(kit::fail(kit::tr(
+                    "Telegraph did not return a token",
+                    "Telegraph 未返回 token",
+                )));
             }
             self.update(|c| {
                 c.telegraph_token = token.clone();
@@ -2211,7 +2344,7 @@ impl Service {
                     format!("{}. {t}\n{}", i + 1, s.url)
                 })
                 .collect();
-            md.push_str(&format!("\n**来源**\n{}\n", rows.join("\n")));
+            md.push_str(&format!("\n**{}**\n{}\n", kit::tr("Sources", "来源"), rows.join("\n")));
         }
         let content = markdown::telegraph_nodes(&md);
         let page = self
@@ -2232,7 +2365,10 @@ impl Service {
             .unwrap_or("")
             .to_owned();
         if !link.starts_with("https://telegra.ph/") {
-            return Err(kit::fail("Telegraph 返回无效链接"));
+            return Err(kit::fail(kit::tr(
+                "Telegraph returned an invalid link",
+                "Telegraph 返回无效链接",
+            )));
         }
         let item = AiTelegraphItem {
             url: link.clone(),
@@ -2272,7 +2408,12 @@ impl Service {
             "config" => return self.configure(inv).await,
             "model" => return self.model(inv).await,
             "reasoning" | "service" => return self.level(inv, &sub).await,
-            "image" | "video" => return Err(kit::fail("Lite 版不支持 image / video 生成")),
+            "image" | "video" => {
+                return Err(kit::fail(kit::tr(
+                    "Lite edition does not support image or video generation",
+                    "Lite 版不支持 image / video 生成",
+                )));
+            }
             "prompt" => return self.prompt(inv).await,
             "collapse" => return self.collapse(inv).await,
             "timeout" => return self.timeout(inv).await,
@@ -2290,15 +2431,21 @@ impl Service {
         let tag = inv.arg(2);
         let model = inv.arg(3);
         if mode == "image" || mode == "video" {
-            return Err(kit::fail("Lite 版不支持 image / video 生成"));
+            return Err(kit::fail(kit::tr(
+                "Lite edition does not support image or video generation",
+                "Lite 版不支持 image / video 生成",
+            )));
         }
         if (mode != "chat" && mode != "search") || tag.is_empty() || model.is_empty() {
-            return Err(kit::usage(inv.prefix(), "ai model chat|search 标签 模型"));
+            return Err(kit::usage(
+                inv.prefix(),
+                kit::tr("ai model chat|search tag model", "ai model chat|search 标签 模型"),
+            ));
         }
         assert_allowed_model(model)?;
         self.update(|cfg| {
             let Some(p) = cfg.configs.get_mut(tag) else {
-                return Err(kit::fail("API 配置不存在"));
+                return Err(kit::fail(kit::tr("API config not found", "API 配置不存在")));
             };
             if mode == "chat" {
                 cfg.current_chat_tag = tag.to_owned();
@@ -2310,14 +2457,18 @@ impl Service {
             p.models.insert(mode.clone(), model.to_owned());
             Ok(())
         })?;
-        inv.edit(&kit::feedback("success", &format!("{mode} 模型已设置"), ""))
+        let title = if kit::is_zh() {
+            format!("{mode} 模型已设置")
+        } else {
+            format!("{mode} model updated")
+        };
+        inv.edit(&kit::feedback("success", &title, ""))
             .await
             .map_err(Into::into)
     }
 
     async fn level(&self, inv: &Invocation, sub: &str) -> CmdResult {
         if inv.arg(1).is_empty() {
-            let label = if sub == "service" { "服务等级" } else { "思考强度" };
             return self
                 .show_status(inv, |cfg| {
                     let (chat, search) = if sub == "service" {
@@ -2325,14 +2476,24 @@ impl Service {
                     } else {
                         (&cfg.current_chat_reasoning_effort, &cfg.current_search_reasoning_effort)
                     };
-                    format!("💭 <b>当前{label}</b>\n\nchat: {}\nsearch: {}", code(chat), code(search))
+                    let title = if sub == "service" {
+                        kit::tr("Service Tier", "当前服务等级")
+                    } else {
+                        kit::tr("Reasoning Effort", "当前思考强度")
+                    };
+                    format!("💭 <b>{title}</b>\n\nchat: {}\nsearch: {}", code(chat), code(search))
                 })
                 .await;
         }
         let mode = inv.arg(1).to_ascii_lowercase();
         let value = inv.arg(2).to_ascii_lowercase();
         if mode != "chat" && mode != "search" {
-            return Err(kit::usage(inv.prefix(), &format!("ai {sub} chat|search 值")));
+            let spec = if kit::is_zh() {
+                format!("ai {sub} chat|search 值")
+            } else {
+                format!("ai {sub} chat|search value")
+            };
+            return Err(kit::usage(inv.prefix(), &spec));
         }
         let values = if sub == "service" {
             TIER_VALUES
@@ -2340,7 +2501,7 @@ impl Service {
             REASONING_VALUES
         };
         if !values.contains(&value.as_str()) {
-            return Err(kit::fail("无效选项"));
+            return Err(kit::fail(kit::tr("Invalid option", "无效选项")));
         }
         self.update(|cfg| {
             match (sub, mode.as_str()) {
@@ -2351,7 +2512,12 @@ impl Service {
             }
             Ok(())
         })?;
-        inv.edit(&kit::feedback("success", &format!("{sub} 已设置为 {value}"), ""))
+        let title = if kit::is_zh() {
+            format!("{sub} 已设置为 {value}")
+        } else {
+            format!("{sub} set to {value}")
+        };
+        inv.edit(&kit::feedback("success", &title, ""))
             .await
             .map_err(Into::into)
     }
@@ -2361,17 +2527,25 @@ impl Service {
         if action.is_empty() {
             return self
                 .show_status(inv, |cfg| {
-                    format!("💭 <b>当前提示词</b>\n\n📝 内容：{}", code(or_unset(&cfg.prompt)))
+                    format!(
+                        "💭 <b>{}</b>\n\n📝 {}{}",
+                        kit::tr("Current Prompt", "当前提示词"),
+                        kit::tr("Content: ", "内容："),
+                        code(or_unset(&cfg.prompt))
+                    )
                 })
                 .await;
         }
         if action != "set" && action != "del" {
-            return Err(kit::usage(inv.prefix(), "ai prompt set 内容|del"));
+            return Err(kit::usage(
+                inv.prefix(),
+                kit::tr("ai prompt set text|del", "ai prompt set 内容|del"),
+            ));
         }
         let prompt = if action == "set" {
             let text = inv.raw_after(2).trim().to_owned();
             if text.is_empty() {
-                return Err(kit::fail("提示词不能为空"));
+                return Err(kit::fail(kit::tr("Prompt cannot be empty", "提示词不能为空")));
             }
             text
         } else {
@@ -2381,9 +2555,13 @@ impl Service {
             cfg.prompt = prompt;
             Ok(())
         })?;
-        inv.edit(&kit::feedback("success", "AI 输出设置已更新", ""))
-            .await
-            .map_err(Into::into)
+        inv.edit(&kit::feedback(
+            "success",
+            kit::tr("AI output settings updated", "AI 输出设置已更新"),
+            "",
+        ))
+        .await
+        .map_err(Into::into)
     }
 
     async fn collapse(&self, inv: &Invocation) -> CmdResult {
@@ -2391,7 +2569,9 @@ impl Service {
             return self
                 .show_status(inv, |cfg| {
                     format!(
-                        "📖 <b>消息折叠状态</b>\n\n📄 当前状态：{}",
+                        "📖 <b>{}</b>\n\n📄 {}{}",
+                        kit::tr("Message Collapse", "消息折叠状态"),
+                        kit::tr("Current state: ", "当前状态："),
                         kit::on_off_text(cfg.collapse)
                     )
                 })
@@ -2402,41 +2582,65 @@ impl Service {
             cfg.collapse = val;
             Ok(())
         })?;
-        inv.edit(&kit::feedback("success", "AI 输出设置已更新", ""))
-            .await
-            .map_err(Into::into)
+        inv.edit(&kit::feedback(
+            "success",
+            kit::tr("AI output settings updated", "AI 输出设置已更新"),
+            "",
+        ))
+        .await
+        .map_err(Into::into)
     }
 
     async fn timeout(&self, inv: &Invocation) -> CmdResult {
         if inv.arg(1).is_empty() {
             return self
                 .show_status(inv, |cfg| {
+                    let secs = if kit::is_zh() {
+                        format!("{} 秒", cfg.timeout)
+                    } else {
+                        format!("{} s", cfg.timeout)
+                    };
                     format!(
-                        "⏱️ <b>当前超时设置</b>\n\n⏰ 超时时间：{}",
-                        code(&format!("{} 秒", cfg.timeout))
+                        "⏱️ <b>{}</b>\n\n⏰ {}{}",
+                        kit::tr("Timeout Settings", "当前超时设置"),
+                        kit::tr("Timeout: ", "超时时间："),
+                        code(&secs)
                     )
                 })
                 .await;
         }
+        let err_msg = kit::tr("Timeout must be between 1 and 600 seconds", "超时范围为 1-600 秒");
         let secs = inv
             .arg(1)
             .parse::<i32>()
-            .map_err(|_| kit::fail("超时范围为 1-600 秒"))?;
+            .map_err(|_| kit::fail(err_msg))?;
         if !(1..=600).contains(&secs) {
-            return Err(kit::fail("超时范围为 1-600 秒"));
+            return Err(kit::fail(err_msg));
         }
         self.update(|cfg| {
             cfg.timeout = secs;
             Ok(())
         })?;
-        inv.edit(&kit::feedback("success", "AI 输出设置已更新", ""))
-            .await
-            .map_err(Into::into)
+        inv.edit(&kit::feedback(
+            "success",
+            kit::tr("AI output settings updated", "AI 输出设置已更新"),
+            "",
+        ))
+        .await
+        .map_err(Into::into)
     }
 
     async fn telegraph(&self, inv: &Invocation) -> CmdResult {
         let action = inv.arg(1).to_ascii_lowercase();
-        let u_err = || kit::usage(inv.prefix(), "ai telegraph on|off|limit 数量|del 序号|del all");
+        let u_err = || {
+            kit::usage(
+                inv.prefix(),
+                kit::tr(
+                    "ai telegraph on|off|limit count|del index|del all",
+                    "ai telegraph on|off|limit 数量|del 序号|del all",
+                ),
+            )
+        };
         match action.as_str() {
             "" => return self.show_status(inv, telegraph_status).await,
             "on" | "off" => {
@@ -2446,12 +2650,13 @@ impl Service {
                 })?;
             }
             "limit" => {
+                let err_msg = kit::tr("History limit must be between 1 and 100", "记录容量范围为 1-100");
                 let lim = inv
                     .arg(2)
                     .parse::<i32>()
-                    .map_err(|_| kit::fail("记录容量范围为 1-100"))?;
+                    .map_err(|_| kit::fail(err_msg))?;
                 if !(1..=100).contains(&lim) {
-                    return Err(kit::fail("记录容量范围为 1-100"));
+                    return Err(kit::fail(err_msg));
                 }
                 self.update(|cfg| {
                     cfg.telegraph.limit = lim;
@@ -2469,7 +2674,11 @@ impl Service {
                         Ok(())
                     })?;
                     return inv
-                        .edit(&kit::feedback("success", "已删除所有记录", ""))
+                        .edit(&kit::feedback(
+                            "success",
+                            kit::tr("All records deleted", "已删除所有记录"),
+                            "",
+                        ))
                         .await
                         .map_err(Into::into);
                 }
@@ -2477,25 +2686,38 @@ impl Service {
                     .parse::<usize>()
                     .ok()
                     .filter(|&n| n >= 1 && n.to_string() == target)
-                    .ok_or_else(|| kit::fail("序号必须是正整数"))?;
+                    .ok_or_else(|| kit::fail(kit::tr("Index must be a positive integer", "序号必须是正整数")))?;
                 self.update(|cfg| {
                     let count = cfg.telegraph.list.len();
                     if num > count {
-                        return Err(kit::fail(format!("序号超出范围（1–{count}）")));
+                        return Err(kit::fail(if kit::is_zh() {
+                            format!("序号超出范围（1–{count}）")
+                        } else {
+                            format!("Index out of range (1–{count})")
+                        }));
                     }
                     cfg.telegraph.list.remove(num - 1);
                     Ok(())
                 })?;
+                let title = if kit::is_zh() {
+                    format!("已删除第 {num} 项")
+                } else {
+                    format!("Deleted item {num}")
+                };
                 return inv
-                    .edit(&kit::feedback("success", &format!("已删除第 {num} 项"), ""))
+                    .edit(&kit::feedback("success", &title, ""))
                     .await
                     .map_err(Into::into);
             }
             _ => return Err(u_err()),
         }
-        inv.edit(&kit::feedback("success", "AI 输出设置已更新", ""))
-            .await
-            .map_err(Into::into)
+        inv.edit(&kit::feedback(
+            "success",
+            kit::tr("AI output settings updated", "AI 输出设置已更新"),
+            "",
+        ))
+        .await
+        .map_err(Into::into)
     }
 
     async fn ask(&self, inv: &Invocation, search: bool) -> CmdResult {
@@ -2523,19 +2745,33 @@ impl Service {
         let images = merge_images(&[from_reply, from_own]);
         if question.is_empty() && images.images.is_empty() {
             return Err(kit::fail(if search {
-                "请输入搜索问题或回复一条文字消息"
+                kit::tr(
+                    "Please enter a search query or reply to a text message",
+                    "请输入搜索问题或回复一条文字消息",
+                )
             } else {
-                "请输入问题或回复一条文字消息"
+                kit::tr(
+                    "Please enter a question or reply to a text message",
+                    "请输入问题或回复一条文字消息",
+                )
             }));
         }
         if utf16_len(&question) > 100_000 {
-            return Err(kit::fail("输入内容过长"));
+            return Err(kit::fail(kit::tr("Input is too long", "输入内容过长")));
         }
         let cfg = self.read()?;
         if images.dropped {
-            inv.reply("⚠️ 部分图片因数量或体积限制被忽略").await?;
+            inv.reply(kit::tr(
+                "⚠️ Some images were skipped due to count or size limits",
+                "⚠️ 部分图片因数量或体积限制被忽略",
+            ))
+            .await?;
         }
-        let title = if search { "AI 搜索中" } else { "AI 思考中" };
+        let title = if search {
+            kit::tr("AI searching", "AI 搜索中")
+        } else {
+            kit::tr("AI thinking", "AI 思考中")
+        };
         inv.edit(&kit::feedback("working", title, "")).await?;
 
         let (answer, sources, model) = if search {
@@ -2589,6 +2825,7 @@ impl Service {
         let tag = inv.arg(2);
         match action.as_str() {
             "list" => {
+                let zh = kit::is_zh();
                 let cfg = self.read()?;
                 let mut tags: Vec<&String> = cfg.configs.keys().collect();
                 tags.sort();
@@ -2609,49 +2846,81 @@ impl Service {
                     } else {
                         format!(" · {}", escape(&models.join(" · ")))
                     };
-                    rows.push(format!(
-                        "• {} · {} · {}{} · 流式{} · Responses {}",
-                        code(name),
-                        escape(&provider_host(&p.url)),
-                        escape(kind),
-                        model_text,
-                        kit::on_off_text(p.stream),
-                        kit::on_off_text(p.responses)
-                    ));
+                    if zh {
+                        rows.push(format!(
+                            "• {} · {} · {}{} · 流式{} · Responses {}",
+                            code(name),
+                            escape(&provider_host(&p.url)),
+                            escape(kind),
+                            model_text,
+                            kit::on_off_text(p.stream),
+                            kit::on_off_text(p.responses)
+                        ));
+                    } else {
+                        rows.push(format!(
+                            "• {} · {} · {}{} · Stream {} · Responses {}",
+                            code(name),
+                            escape(&provider_host(&p.url)),
+                            escape(kind),
+                            model_text,
+                            kit::on_off_text(p.stream),
+                            kit::on_off_text(p.responses)
+                        ));
+                    }
                 }
                 if rows.is_empty() {
-                    rows.push("• 还没有配置".into());
+                    rows.push(kit::tr("• No providers configured", "• 还没有配置").into());
                 }
                 let search = cfg.selection("search");
-                return inv
-                    .edit(&format!(
-                        "🤖 <b>AI 配置</b>\n{}\n\n聊天：{}\n搜索：{}\n超时：{}\n折叠长回答：{}",
+                let chat_val = code(&format!(
+                    "{} / {}",
+                    or_unset(&cfg.current_chat_tag),
+                    or_unset(&cfg.current_chat_model)
+                ));
+                let search_val = code(&format!(
+                    "{} / {}",
+                    or_unset(&search.tag),
+                    or_unset(&search.model)
+                ));
+                let timeout_val = code(&if zh {
+                    format!("{} 秒", cfg.timeout)
+                } else {
+                    format!("{} s", cfg.timeout)
+                });
+                let html = if zh {
+                    format!(
+                        "🤖 <b>AI 配置</b>\n{}\n\n聊天：{chat_val}\n搜索：{search_val}\n超时：{timeout_val}\n折叠长回答：{}",
                         rows.join("\n"),
-                        code(&format!(
-                            "{} / {}",
-                            or_unset(&cfg.current_chat_tag),
-                            or_unset(&cfg.current_chat_model)
-                        )),
-                        code(&format!("{} / {}", or_unset(&search.tag), or_unset(&search.model))),
-                        code(&format!("{} 秒", cfg.timeout)),
                         kit::on_off_text(cfg.collapse)
-                    ))
-                    .await
-                    .map_err(Into::into);
+                    )
+                } else {
+                    format!(
+                        "🤖 <b>AI Config</b>\n{}\n\nChat: {chat_val}\nSearch: {search_val}\nTimeout: {timeout_val}\nCollapse long replies: {}",
+                        rows.join("\n"),
+                        kit::on_off_text(cfg.collapse)
+                    )
+                };
+                return inv.edit(&html).await.map_err(Into::into);
             }
             "add" => {
                 let link = inv.arg(3);
                 let key = inv.arg(4);
                 let kind = inv.arg(5).to_ascii_lowercase();
                 if tag.is_empty() || link.is_empty() || key.is_empty() {
-                    return Err(kit::usage(inv.prefix(), "ai config add 标签 URL Key [类型]"));
+                    return Err(kit::usage(
+                        inv.prefix(),
+                        kit::tr("ai config add tag URL Key [type]", "ai config add 标签 URL Key [类型]"),
+                    ));
                 }
                 if !inv.message.saved {
-                    return Err(kit::fail("API Key 只能在收藏夹中配置"));
+                    return Err(kit::fail(kit::tr(
+                        "API keys can only be configured in Saved Messages",
+                        "API Key 只能在收藏夹中配置",
+                    )));
                 }
                 check_provider_url(link)?;
                 if !kind.is_empty() && !AI_PROVIDER_TYPES.contains(&kind.as_str()) {
-                    return Err(kit::fail("无效 API 类型"));
+                    return Err(kit::fail(kit::tr("Invalid API type", "无效 API 类型")));
                 }
                 let mut replaced = false;
                 self.update(|cfg| {
@@ -2682,11 +2951,19 @@ impl Service {
                     Ok(())
                 })?;
                 if replaced {
+                    let title = if kit::is_zh() {
+                        format!("已更新 {tag} 的地址和 Key")
+                    } else {
+                        format!("Updated {tag} URL and key")
+                    };
                     return inv
                         .edit(&kit::feedback(
                             "success",
-                            &format!("已更新 {tag} 的地址和 Key"),
-                            "流式、Responses 和模型沿用原来的设置",
+                            &title,
+                            kit::tr(
+                                "Stream, Responses, and model settings are preserved",
+                                "流式、Responses 和模型沿用原来的设置",
+                            ),
                         ))
                         .await
                         .map_err(Into::into);
@@ -2694,7 +2971,10 @@ impl Service {
             }
             "del" => {
                 if tag.is_empty() {
-                    return Err(kit::usage(inv.prefix(), "ai config del 标签"));
+                    return Err(kit::usage(
+                        inv.prefix(),
+                        kit::tr("ai config del tag", "ai config del 标签"),
+                    ));
                 }
                 self.update(|cfg| {
                     cfg.configs.remove(tag);
@@ -2715,7 +2995,10 @@ impl Service {
                 if tag.is_empty() || field.is_empty() || value.is_empty() {
                     return Err(kit::usage(
                         inv.prefix(),
-                        "ai config set 标签 url|key|type|stream|responses 值",
+                        kit::tr(
+                            "ai config set tag url|key|type|stream|responses value",
+                            "ai config set 标签 url|key|type|stream|responses 值",
+                        ),
                     ));
                 }
                 return self.set_provider(inv, tag, &field, value).await;
@@ -2723,18 +3006,24 @@ impl Service {
             "type" | "stream" | "responses" => {
                 let value = inv.arg(3);
                 if tag.is_empty() || value.is_empty() {
-                    return Err(kit::usage(
-                        inv.prefix(),
-                        &format!("ai config {action} 标签 值"),
-                    ));
+                    let spec = if kit::is_zh() {
+                        format!("ai config {action} 标签 值")
+                    } else {
+                        format!("ai config {action} tag value")
+                    };
+                    return Err(kit::usage(inv.prefix(), &spec));
                 }
                 return self.set_provider(inv, tag, &action, value).await;
             }
-            _ => return Err(kit::fail("未知 config 子命令")),
+            _ => return Err(kit::fail(kit::tr("Unknown config subcommand", "未知 config 子命令"))),
         }
-        inv.edit(&kit::feedback("success", "AI 配置已更新", ""))
-            .await
-            .map_err(Into::into)
+        inv.edit(&kit::feedback(
+            "success",
+            kit::tr("AI config updated", "AI 配置已更新"),
+            "",
+        ))
+        .await
+        .map_err(Into::into)
     }
 
     async fn set_provider(
@@ -2747,16 +3036,26 @@ impl Service {
         let value = match field {
             "url" | "key" => {
                 if !inv.message.saved {
-                    return Err(kit::fail("API 地址和 Key 只能在收藏夹中修改"));
+                    return Err(kit::fail(kit::tr(
+                        "API URL and key can only be changed in Saved Messages",
+                        "API 地址和 Key 只能在收藏夹中修改",
+                    )));
                 }
                 raw_value.to_owned()
             }
             "type" | "stream" | "responses" => raw_value.to_ascii_lowercase(),
             _ => {
-                return Err(kit::fail(format!(
-                    "能改的有 url、key、type、stream、responses，{}help ai 看用法",
-                    inv.prefix()
-                )));
+                return Err(kit::fail(if kit::is_zh() {
+                    format!(
+                        "能改的有 url、key、type、stream、responses，{}help ai 看用法",
+                        inv.prefix()
+                    )
+                } else {
+                    format!(
+                        "Editable fields: url, key, type, stream, responses; see {}help ai",
+                        inv.prefix()
+                    )
+                }));
             }
         };
         if field == "url" {
@@ -2765,38 +3064,63 @@ impl Service {
         let mut label = String::new();
         self.update(|cfg| {
             let Some(p) = cfg.configs.get_mut(tag) else {
-                return Err(kit::fail(format!(
-                    "没有标签是 {tag} 的 API 配置，{}ai config list 可以看全部",
-                    inv.prefix()
-                )));
+                return Err(kit::fail(if kit::is_zh() {
+                    format!(
+                        "没有标签是 {tag} 的 API 配置，{}ai config list 可以看全部",
+                        inv.prefix()
+                    )
+                } else {
+                    format!(
+                        "No API config tagged {tag}; run {}ai config list to view all",
+                        inv.prefix()
+                    )
+                }));
             };
             match field {
                 "url" => {
                     p.url = value.clone();
-                    label = format!("地址已改为 {}", provider_host(&value));
+                    let host = provider_host(&value);
+                    label = if kit::is_zh() {
+                        format!("地址已改为 {host}")
+                    } else {
+                        format!("URL set to {host}")
+                    };
                 }
                 "key" => {
                     p.key = value.clone();
-                    label = "Key 已更新".into();
+                    label = kit::tr("Key updated", "Key 已更新").into();
                 }
                 "type" => {
                     if !AI_PROVIDER_TYPES.contains(&value.as_str()) {
-                        return Err(kit::fail(format!(
-                            "无效 API 类型，可选：{}",
-                            AI_PROVIDER_TYPES.join("、")
-                        )));
+                        return Err(kit::fail(if kit::is_zh() {
+                            format!("无效 API 类型，可选：{}", AI_PROVIDER_TYPES.join("、"))
+                        } else {
+                            format!("Invalid API type; options: {}", AI_PROVIDER_TYPES.join(", "))
+                        }));
                     }
                     p.kind = value.clone();
-                    label = format!("接口类型已设为 {value}");
+                    label = if kit::is_zh() {
+                        format!("接口类型已设为 {value}")
+                    } else {
+                        format!("type set to {value}")
+                    };
                 }
                 "stream" | "responses" => {
                     let enabled = kit::on_off(&value)?;
                     if field == "stream" {
                         p.stream = enabled;
-                        label = format!("流式传输已{}", kit::on_off_text(enabled));
+                        label = if kit::is_zh() {
+                            format!("流式传输已{}", kit::on_off_text(enabled))
+                        } else {
+                            format!("stream {}", kit::on_off_text(enabled))
+                        };
                     } else {
                         p.responses = enabled;
-                        label = format!("Responses 模式已{}", kit::on_off_text(enabled));
+                        label = if kit::is_zh() {
+                            format!("Responses 模式已{}", kit::on_off_text(enabled))
+                        } else {
+                            format!("Responses {}", kit::on_off_text(enabled))
+                        };
                     }
                 }
                 _ => {}
@@ -2810,9 +3134,15 @@ impl Service {
 }
 
 fn check_provider_url(link: &str) -> Result<(), CmdError> {
-    let parsed = Url::parse(link).map_err(|_| kit::fail("API 地址无效，要写完整的 https:// 地址"))?;
+    let err = || {
+        kit::fail(kit::tr(
+            "Invalid API URL; provide a full https:// URL",
+            "API 地址无效，要写完整的 https:// 地址",
+        ))
+    };
+    let parsed = Url::parse(link).map_err(|_| err())?;
     if parsed.host_str().is_none() || (parsed.scheme() != "https" && parsed.scheme() != "http") {
-        return Err(kit::fail("API 地址无效，要写完整的 https:// 地址"));
+        return Err(err());
     }
     Ok(())
 }
@@ -2821,39 +3151,70 @@ fn provider_host(link: &str) -> String {
     Url::parse(link)
         .ok()
         .and_then(|u| u.host_str().map(str::to_owned))
-        .unwrap_or_else(|| "地址无效".into())
+        .unwrap_or_else(|| kit::tr("invalid URL", "地址无效").into())
 }
 
 fn or_unset(v: &str) -> &str {
-    if v.is_empty() { "未设置" } else { v }
+    if v.is_empty() {
+        kit::tr("unset", "未设置")
+    } else {
+        v
+    }
 }
 
 fn model_status(cfg: &AiConfig) -> String {
     let search = cfg.selection("search");
-    let rows = [
-        "<b>聊天</b>".to_owned(),
-        format!("配置：{}", code(or_unset(&cfg.current_chat_tag))),
-        format!("模型：{}", code(or_unset(&cfg.current_chat_model))),
-        format!("思考强度：{}", code(&cfg.current_chat_reasoning_effort)),
-        format!("服务等级：{}", code(&cfg.current_chat_service_tier)),
-        String::new(),
-        "<b>搜索</b>".to_owned(),
-        format!("配置：{}", code(or_unset(&search.tag))),
-        format!("模型：{}", code(or_unset(&search.model))),
-        format!("思考强度：{}", code(&cfg.current_search_reasoning_effort)),
-        format!("服务等级：{}", code(&cfg.current_search_service_tier)),
-    ];
-    format!("🤖 <b>当前 AI 模型</b>\n\n{}", rows.join("\n"))
+    if kit::is_zh() {
+        let rows = [
+            "<b>聊天</b>".to_owned(),
+            format!("配置：{}", code(or_unset(&cfg.current_chat_tag))),
+            format!("模型：{}", code(or_unset(&cfg.current_chat_model))),
+            format!("思考强度：{}", code(&cfg.current_chat_reasoning_effort)),
+            format!("服务等级：{}", code(&cfg.current_chat_service_tier)),
+            String::new(),
+            "<b>搜索</b>".to_owned(),
+            format!("配置：{}", code(or_unset(&search.tag))),
+            format!("模型：{}", code(or_unset(&search.model))),
+            format!("思考强度：{}", code(&cfg.current_search_reasoning_effort)),
+            format!("服务等级：{}", code(&cfg.current_search_service_tier)),
+        ];
+        format!("🤖 <b>当前 AI 模型</b>\n\n{}", rows.join("\n"))
+    } else {
+        let rows = [
+            "<b>Chat</b>".to_owned(),
+            format!("Config: {}", code(or_unset(&cfg.current_chat_tag))),
+            format!("Model: {}", code(or_unset(&cfg.current_chat_model))),
+            format!("Reasoning: {}", code(&cfg.current_chat_reasoning_effort)),
+            format!("Service tier: {}", code(&cfg.current_chat_service_tier)),
+            String::new(),
+            "<b>Search</b>".to_owned(),
+            format!("Config: {}", code(or_unset(&search.tag))),
+            format!("Model: {}", code(or_unset(&search.model))),
+            format!("Reasoning: {}", code(&cfg.current_search_reasoning_effort)),
+            format!("Service tier: {}", code(&cfg.current_search_service_tier)),
+        ];
+        format!("🤖 <b>Current AI Models</b>\n\n{}", rows.join("\n"))
+    }
 }
 
 fn telegraph_status(cfg: &AiConfig) -> String {
-    let mut status = format!(
-        "📰 <b>Telegraph 状态</b>\n\n🌐 当前状态：{}\n📊 限制数量：<code>{}</code>\n📈 记录数量：<code>{}/{}</code>",
-        kit::on_off_text(cfg.telegraph.enabled),
-        cfg.telegraph.limit,
-        cfg.telegraph.list.len(),
-        cfg.telegraph.limit
-    );
+    let mut status = if kit::is_zh() {
+        format!(
+            "📰 <b>Telegraph 状态</b>\n\n🌐 当前状态：{}\n📊 限制数量：<code>{}</code>\n📈 记录数量：<code>{}/{}</code>",
+            kit::on_off_text(cfg.telegraph.enabled),
+            cfg.telegraph.limit,
+            cfg.telegraph.list.len(),
+            cfg.telegraph.limit
+        )
+    } else {
+        format!(
+            "📰 <b>Telegraph Status</b>\n\n🌐 Status: {}\n📊 Limit: <code>{}</code>\n📈 Records: <code>{}/{}</code>",
+            kit::on_off_text(cfg.telegraph.enabled),
+            cfg.telegraph.limit,
+            cfg.telegraph.list.len(),
+            cfg.telegraph.limit
+        )
+    };
     if !cfg.telegraph.list.is_empty() {
         let rows: Vec<String> = cfg
             .telegraph
@@ -2885,27 +3246,51 @@ fn ai_help(prefix: &str) -> String {
             format!("• <code>{p}ai{}</code> {text}\n", escape(args))
         }
     };
-    format!(
-        "🤖 <b>AI 助手</b>\n\n{}{}\n<blockquote expandable><b>API 配置</b>\n{}{}{}{}{}{}{}\n<b>模型</b>\n{}{}{}{}{}\n<b>输出</b>\n{}{}{}{}\nLite 版不支持生成图片和视频。</blockquote>\n\n涉及 API Key 的命令请在收藏夹里执行。",
-        item(" 问题", "向 AI 提问；回复一条消息时，那条消息作为上下文，其中的图片一并发送"),
-        item(" search 问题", "使用所选模型的联网搜索能力，回答附带来源"),
-        item(" config add 标签 URL Key [类型]", "添加一个配置；标签已存在时换掉它的地址和 Key"),
-        item(" config set 标签 url|key 新值", "只改地址或 Key"),
-        item(" config set 标签 type openai-compatible|openai|gemini|anthropic|doubao|moonshot|local-cliproxy", "设置接口类型"),
-        item(" config set 标签 stream on|off", "从接口流式接收回答，收齐后发到 Telegram"),
-        item(" config set 标签 responses on|off", "OpenAI 协议选择 Responses（on）或 Chat Completions（off）"),
-        item(" config del 标签", "删除配置"),
-        item(" config list", "查看配置"),
-        item(" model", "查看当前模型"),
-        item(" model chat 标签 模型", "设置聊天模型"),
-        item(" model search 标签 模型", "设置搜索模型（未设置时沿用聊天模型）"),
-        item(" reasoning chat|search auto|none|minimal|low|medium|high|xhigh", ""),
-        item(" service chat|search auto|default|priority|fast|flex", ""),
-        item(" prompt [set 内容|del]", "查看或设置提示词"),
-        item(" collapse [on|off]", "折叠长回答"),
-        item(" timeout [秒数]", ""),
-        item(" telegraph [on|off|limit 数量|del 序号|del all]", "长回答发布到 Telegraph"),
-    )
+    if kit::is_zh() {
+        format!(
+            "🤖 <b>AI 助手</b>\n\n{}{}\n<blockquote expandable><b>API 配置</b>\n{}{}{}{}{}{}{}\n<b>模型</b>\n{}{}{}{}{}\n<b>输出</b>\n{}{}{}{}\nLite 版不支持生成图片和视频。</blockquote>\n\n涉及 API Key 的命令请在收藏夹里执行。",
+            item(" 问题", "向 AI 提问；回复一条消息时，那条消息作为上下文，其中的图片一并发送"),
+            item(" search 问题", "使用所选模型的联网搜索能力，回答附带来源"),
+            item(" config add 标签 URL Key [类型]", "添加一个配置；标签已存在时换掉它的地址和 Key"),
+            item(" config set 标签 url|key 新值", "只改地址或 Key"),
+            item(" config set 标签 type openai-compatible|openai|gemini|anthropic|doubao|moonshot|local-cliproxy", "设置接口类型"),
+            item(" config set 标签 stream on|off", "从接口流式接收回答，收齐后发到 Telegram"),
+            item(" config set 标签 responses on|off", "OpenAI 协议选择 Responses（on）或 Chat Completions（off）"),
+            item(" config del 标签", "删除配置"),
+            item(" config list", "查看配置"),
+            item(" model", "查看当前模型"),
+            item(" model chat 标签 模型", "设置聊天模型"),
+            item(" model search 标签 模型", "设置搜索模型（未设置时沿用聊天模型）"),
+            item(" reasoning chat|search auto|none|minimal|low|medium|high|xhigh", ""),
+            item(" service chat|search auto|default|priority|fast|flex", ""),
+            item(" prompt [set 内容|del]", "查看或设置提示词"),
+            item(" collapse [on|off]", "折叠长回答"),
+            item(" timeout [秒数]", ""),
+            item(" telegraph [on|off|limit 数量|del 序号|del all]", "长回答发布到 Telegraph"),
+        )
+    } else {
+        format!(
+            "🤖 <b>AI Assistant</b>\n\n{}{}\n<blockquote expandable><b>API Config</b>\n{}{}{}{}{}{}{}\n<b>Models</b>\n{}{}{}{}{}\n<b>Output</b>\n{}{}{}{}\nLite edition does not support generating images or videos.</blockquote>\n\nRun commands involving API keys in Saved Messages.",
+            item(" question", "Ask AI; when replying to a message, it and its images are included as context"),
+            item(" search question", "Use the selected search model with web search and cited sources"),
+            item(" config add tag URL Key [type]", "Add a provider; updates URL and key if the tag exists"),
+            item(" config set tag url|key value", "Update URL or key only"),
+            item(" config set tag type openai-compatible|openai|gemini|anthropic|doubao|moonshot|local-cliproxy", "Set provider type"),
+            item(" config set tag stream on|off", "Receive streamed responses and deliver once complete"),
+            item(" config set tag responses on|off", "Use OpenAI Responses API (on) or Chat Completions (off)"),
+            item(" config del tag", "Delete a provider"),
+            item(" config list", "List providers"),
+            item(" model", "Show current models"),
+            item(" model chat tag model", "Set chat model"),
+            item(" model search tag model", "Set search model (falls back to chat model if unset)"),
+            item(" reasoning chat|search auto|none|minimal|low|medium|high|xhigh", ""),
+            item(" service chat|search auto|default|priority|fast|flex", ""),
+            item(" prompt [set text|del]", "View or set system prompt"),
+            item(" collapse [on|off]", "Collapse long answers"),
+            item(" timeout [seconds]", ""),
+            item(" telegraph [on|off|limit count|del index|del all]", "Publish long answers to Telegraph"),
+        )
+    }
 }
 
 pub fn convert_mibox(raw: &[u8]) -> Result<Vec<u8>, serde_json::Error> {
@@ -2966,18 +3351,19 @@ pub fn register(a: &Arc<App>) -> Arc<Service> {
         "ai",
         &[],
         group::AI,
-        "与 AI 对话或联网搜索",
-        "[search] 问题",
+        "Chat with AI or search the web",
+        "[search] question",
         ai_help,
         move |inv: Invocation| {
             let s = Arc::clone(&svc_cmd);
             Box::pin(async move {
                 s.handle(&inv)
                     .await
-                    .map_err(|e| kit::wrap_fail("AI 操作失败", e))
+                    .map_err(|e| kit::wrap_fail(kit::tr("AI operation failed", "AI 操作失败"), e))
             })
         },
-    );
+    )
+    .zh("与 AI 对话或联网搜索", "[search] 问题");
     cmd.timeout = Some(Duration::from_secs(15 * 60));
     cmd.free_text = true;
     a.registry.register(cmd);
@@ -3116,16 +3502,16 @@ mod tests {
         .unwrap();
         let (t, r) = run_cfg(&svc, true, &["config", "add", "main", "https://third.example.com", "sk-3"]).await;
         r.unwrap();
-        assert!(t.contains("已更新 main"));
+        assert!(t.contains("Updated main"));
         let got2 = &svc.read().unwrap().configs["main"];
         assert!(!got2.stream && got2.responses && got2.models["chat"] == "m1");
         let (list, _) = run_cfg(&svc, true, &["config", "list"]).await;
         assert!(list.contains("third.example.com") && !list.contains("sk-3"));
 
         let (_, e1) = run_cfg(&svc, false, &["config", "set", "main", "key", "sk-leak"]).await;
-        assert!(e1.unwrap_err().to_string().contains("只能在收藏夹中修改"));
+        assert!(e1.unwrap_err().to_string().contains("Saved Messages"));
         let (_, e2) = run_cfg(&svc, true, &["config", "set", "main", "url", "api.example.com"]).await;
-        assert!(e2.unwrap_err().to_string().contains("API 地址无效"));
+        assert!(e2.unwrap_err().to_string().contains("Invalid API URL"));
     }
 
     #[test]
@@ -3141,7 +3527,13 @@ mod tests {
             error_detail(br#"{"error":{"message":"Incorrect API key provided: sk-secret-123"}}"#, "sk-secret-123"),
             "Incorrect API key provided: ***"
         );
-        assert_eq!(http_failure(429, b"", "k"), "请求过于频繁，稍后再试");
+        assert_eq!(
+            http_failure(429, b"", "k"),
+            "Too many requests; please try again later"
+        );
+        mibot_i18n::with_lang(mibot_i18n::Lang::Zh, || {
+            assert_eq!(http_failure(429, b"", "k"), "请求过于频繁，稍后再试");
+        });
         assert_eq!(mask_secret("a sk%2Bx b sk+x", "sk+x"), "a *** b ***");
 
         assert_eq!(

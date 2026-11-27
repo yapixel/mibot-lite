@@ -112,17 +112,18 @@ fn whois_field(raw: &str, name: &str) -> String {
 }
 
 fn whois_report(domain: &str, raw: &str) -> Vec<String> {
+    let zh = kit::is_zh();
     let mut expiry = whois_field(raw, "Registry Expiry Date");
     if expiry.is_empty() {
         expiry = whois_field(raw, "Registrar Registration Expiration Date");
     }
-    let mut lines = vec![format!("WHOIS 结果\n{domain}")];
+    let mut lines = vec![format!("{}\n{domain}", kit::tr("WHOIS Result", "WHOIS 结果"))];
     for (label, val) in [
-        ("注册商", whois_field(raw, "Registrar")),
-        ("注册日期", whois_field(raw, "Creation Date")),
-        ("更新日期", whois_field(raw, "Updated Date")),
-        ("到期日期", expiry.clone()),
-        ("域名状态", whois_field(raw, "Domain Status")),
+        (kit::tr("Registrar", "注册商"), whois_field(raw, "Registrar")),
+        (kit::tr("Created", "注册日期"), whois_field(raw, "Creation Date")),
+        (kit::tr("Updated", "更新日期"), whois_field(raw, "Updated Date")),
+        (kit::tr("Expires", "到期日期"), expiry.clone()),
+        (kit::tr("Status", "域名状态"), whois_field(raw, "Domain Status")),
     ] {
         if !val.is_empty() {
             lines.push(format!("{label}: {val}"));
@@ -133,9 +134,13 @@ fn whois_report(domain: &str, raw: &str) -> Vec<String> {
     {
         let remaining = when.with_timezone(&Utc) - Utc::now();
         if remaining < chrono::Duration::zero() {
-            lines.push("到期提醒：已过期".into());
+            lines.push(kit::tr("Expiry Notice: Expired", "到期提醒：已过期").into());
         } else if remaining < chrono::Duration::days(90) {
-            lines.push(format!("到期提醒：{} 天后过期", remaining.num_days()));
+            lines.push(if zh {
+                format!("到期提醒：{} 天后过期", remaining.num_days())
+            } else {
+                format!("Expiry Notice: Expires in {} days", remaining.num_days())
+            });
         }
     }
     let mut seen = HashSet::new();
@@ -149,7 +154,11 @@ fn whois_report(domain: &str, raw: &str) -> Vec<String> {
         }
     }
     if !ordered.is_empty() {
-        lines.push(format!("DNS 服务器：\n{}", ordered.join("\n")));
+        lines.push(if zh {
+            format!("DNS 服务器：\n{}", ordered.join("\n"))
+        } else {
+            format!("Name Servers:\n{}", ordered.join("\n"))
+        });
     }
     let mut pages = Vec::new();
     for p in escaped_pages(&lines.join("\n"), PAGE_LIMIT) {
@@ -179,7 +188,7 @@ async fn whois_query(
     let mut headers = HashMap::new();
     headers.insert("User-Agent".into(), "Mi Box".into());
     let resp = tokio::select! {
-        _ = cancel.cancelled() => return Err(kit::fail("操作已取消")),
+        _ = cancel.cancelled() => return Err(kit::fail(kit::tr("Cancelled", "操作已取消"))),
         r = do_request(Request {
             url: format!("{endpoint}?query={q}"),
             headers,
@@ -218,14 +227,25 @@ async fn whois_query(
 }
 
 fn whois_help(prefix: &str) -> String {
-    format!(
-        "🔍 <b>WHOIS 域名查询</b>\n\n• {}\n• {} 回复含域名的消息\n• {} 批量查询，最多 {MAX_BATCH} 个\n• {} 查看历史\n• {} 清除历史\n查询结果缓存 24 小时。",
-        code(&format!("{prefix}whois example.com")),
-        code(&format!("{prefix}whois")),
-        code(&format!("{prefix}whois batch a.com b.com")),
-        code(&format!("{prefix}whois history")),
-        code(&format!("{prefix}whois clear")),
-    )
+    if kit::is_zh() {
+        format!(
+            "🔍 <b>WHOIS 域名查询</b>\n\n• {}\n• {} 回复含域名的消息\n• {} 批量查询，最多 {MAX_BATCH} 个\n• {} 查看历史\n• {} 清除历史\n查询结果缓存 24 小时。",
+            code(&format!("{prefix}whois example.com")),
+            code(&format!("{prefix}whois")),
+            code(&format!("{prefix}whois batch a.com b.com")),
+            code(&format!("{prefix}whois history")),
+            code(&format!("{prefix}whois clear")),
+        )
+    } else {
+        format!(
+            "🔍 <b>WHOIS Lookup</b>\n\n• {}\n• {} Reply to a message containing a domain\n• {} Batch lookup (up to {MAX_BATCH} domains)\n• {} View history\n• {} Clear history\nResults are cached for 24 hours.",
+            code(&format!("{prefix}whois example.com")),
+            code(&format!("{prefix}whois")),
+            code(&format!("{prefix}whois batch a.com b.com")),
+            code(&format!("{prefix}whois history")),
+            code(&format!("{prefix}whois clear")),
+        )
+    }
 }
 
 async fn whois_batch(
@@ -238,28 +258,53 @@ async fn whois_batch(
         return inv.edit(&whois_help(inv.prefix())).await.map_err(Into::into);
     }
     if inputs.len() > MAX_BATCH {
-        return inv.edit_text(&format!("批量查询最多支持 {MAX_BATCH} 个域名")).await.map_err(Into::into);
+        return inv
+            .edit_text(&if kit::is_zh() {
+                format!("批量查询最多支持 {MAX_BATCH} 个域名")
+            } else {
+                format!("Batch lookup supports up to {MAX_BATCH} domains")
+            })
+            .await
+            .map_err(Into::into);
     }
-    inv.edit_text(&kit::working(&format!("正在批量查询 {} 个域名", inputs.len()))).await?;
+    inv.edit_text(&kit::working(&if kit::is_zh() {
+        format!("正在批量查询 {} 个域名", inputs.len())
+    } else {
+        format!("Looking up {} domains", inputs.len())
+    }))
+    .await?;
     let mut results = Vec::with_capacity(inputs.len());
     for input in inputs {
         if inv.cancel.is_cancelled() {
-            return Err(kit::fail("操作已取消"));
+            return Err(kit::fail(kit::tr("Cancelled", "操作已取消")));
         }
         let Some(name) = normalize_domain(input) else {
-            results.push(format!("❌ {}：格式无效", escape(input)));
+            results.push(if kit::is_zh() {
+                format!("❌ {}：格式无效", escape(input))
+            } else {
+                format!("❌ {}: invalid format", escape(input))
+            });
             continue;
         };
         let res = whois_query(&inv.cancel, Some(logs), WHOIS_URL, &name, data).await;
         if inv.cancel.is_cancelled() {
-            return Err(kit::fail("操作已取消"));
+            return Err(kit::fail(kit::tr("Cancelled", "操作已取消")));
         }
         match res {
             Ok(s) if !s.is_empty() => results.push(format!("✅ {}", code(&name))),
-            _ => results.push(format!("❌ {}：查询失败", code(&name))),
+            _ => results.push(if kit::is_zh() {
+                format!("❌ {}：查询失败", code(&name))
+            } else {
+                format!("❌ {}: lookup failed", code(&name))
+            }),
         }
     }
-    inv.edit(&format!("🔍 <b>WHOIS 批量查询</b>\n\n{}", results.join("\n"))).await?;
+    inv.edit(&if kit::is_zh() {
+        format!("🔍 <b>WHOIS 批量查询</b>\n\n{}", results.join("\n"))
+    } else {
+        format!("🔍 <b>WHOIS Batch Lookup</b>\n\n{}", results.join("\n"))
+    })
+    .await?;
     Ok(())
 }
 
@@ -288,17 +333,24 @@ async fn handle(inv: &Invocation, app: &App, data: &Store<WhoisData>) -> CmdResu
             d.cache.clear();
         }) {
             kit::opt_log(Some(&app.logs), mibot_logtail::Level::Warn, "whois.clear_failed", &[("error", &err.to_string())]);
-            return Err(kit::fail("清除失败，历史和缓存都还在"));
+            return Err(kit::fail(kit::tr(
+                "Failed to clear; history and cache remain",
+                "清除失败，历史和缓存都还在",
+            )));
         }
         return inv
-            .edit_text(&format!("已清除历史 {} 条、缓存 {} 个域名", counts.0, counts.1))
+            .edit_text(&if kit::is_zh() {
+                format!("已清除历史 {} 条、缓存 {} 个域名", counts.0, counts.1)
+            } else {
+                format!("Cleared {} history entries and {} cached domains", counts.0, counts.1)
+            })
             .await
             .map_err(Into::into);
     }
     if lower == "history" {
         let current = data.read().map_err(|e| {
             kit::opt_log(Some(&app.logs), mibot_logtail::Level::Warn, "whois.history_read_failed", &[("error", &e.to_string())]);
-            kit::fail("读不到查询历史")
+            kit::fail(kit::tr("Failed to read query history", "读不到查询历史"))
         })?;
         let mut rows = Vec::new();
         for (idx, item) in current.history.iter().take(20).enumerate() {
@@ -312,26 +364,52 @@ async fn handle(inv: &Invocation, app: &App, data: &Store<WhoisData>) -> CmdResu
             rows.push(format!("{}. {} <i>{}</i>", idx + 1, code(&item.domain), escape(&short)));
         }
         let body = if rows.is_empty() {
-            "暂无查询历史".to_owned()
+            kit::tr("No query history yet", "暂无查询历史").to_owned()
         } else {
             rows.join("\n")
         };
         return inv
-            .edit(&format!(
-                "🔍 <b>WHOIS 查询历史</b>\n\n{body}\n\n共 {} 条，缓存 {} 个",
-                current.history.len(),
-                current.cache.len()
-            ))
+            .edit(&if kit::is_zh() {
+                format!(
+                    "🔍 <b>WHOIS 查询历史</b>\n\n{body}\n\n共 {} 条，缓存 {} 个",
+                    current.history.len(),
+                    current.cache.len()
+                )
+            } else {
+                format!(
+                    "🔍 <b>WHOIS History</b>\n\n{body}\n\nTotal {} entries, {} cached",
+                    current.history.len(),
+                    current.cache.len()
+                )
+            })
             .await
             .map_err(Into::into);
     }
-    let name = normalize_domain(&raw).ok_or_else(|| kit::fail("请输入有效域名，例如 example.com"))?;
-    inv.edit_text(&kit::working(&format!("正在查询 {name}"))).await?;
+    let name = normalize_domain(&raw).ok_or_else(|| {
+        kit::fail(kit::tr(
+            "Enter a valid domain, e.g. example.com",
+            "请输入有效域名，例如 example.com",
+        ))
+    })?;
+    inv.edit_text(&kit::working(&if kit::is_zh() {
+        format!("正在查询 {name}")
+    } else {
+        format!("Looking up {name}")
+    }))
+    .await?;
     let result = whois_query(&inv.cancel, Some(&app.logs), WHOIS_URL, &name, data)
         .await
-        .map_err(|e| kit::fail_with("WHOIS 查询失败，稍后再试", mibot_command::UserError::new(e.to_string())))?;
+        .map_err(|e| {
+            kit::fail_with(
+                kit::tr("WHOIS lookup failed; try again later", "WHOIS 查询失败，稍后再试"),
+                mibot_command::UserError::new(e.to_string()),
+            )
+        })?;
     if result.is_empty() {
-        return inv.edit_text("未取得 WHOIS 数据").await.map_err(Into::into);
+        return inv
+            .edit_text(kit::tr("No WHOIS data returned", "未取得 WHOIS 数据"))
+            .await
+            .map_err(Into::into);
     }
     inv.respond_pages(&whois_report(&name, &result)).await?;
     Ok(())
@@ -340,20 +418,23 @@ async fn handle(inv: &Invocation, app: &App, data: &Store<WhoisData>) -> CmdResu
 pub fn register(app: &Arc<App>) {
     let data = Arc::new(kit::new_store(app, "whois.json", WhoisData::default));
     let app_ref = Arc::clone(app);
-    app.registry.register(Command {
-        name: "whois".into(),
-        group: group::TOOLS.into(),
-        description: "查询域名注册信息".into(),
-        usage: "[域名|batch 域名…|history|clear]".into(),
-        help_fn: Some(Arc::new(whois_help)),
-        timeout: Some(Duration::from_secs(180)),
-        handle: Arc::new(move |inv| {
-            let a = Arc::clone(&app_ref);
-            let d = Arc::clone(&data);
-            Box::pin(async move { handle(&inv, &a, &d).await })
-        }),
-        ..Default::default()
-    });
+    app.registry.register(
+        Command {
+            name: "whois".into(),
+            group: group::TOOLS.into(),
+            description: "Query domain WHOIS info".into(),
+            usage: "[domain|batch domains…|history|clear]".into(),
+            help_fn: Some(Arc::new(whois_help)),
+            timeout: Some(Duration::from_secs(180)),
+            handle: Arc::new(move |inv| {
+                let a = Arc::clone(&app_ref);
+                let d = Arc::clone(&data);
+                Box::pin(async move { handle(&inv, &a, &d).await })
+            }),
+            ..Default::default()
+        }
+        .zh("查询域名注册信息", "[域名|batch 域名…|history|clear]"),
+    );
 }
 
 #[cfg(test)]
@@ -379,7 +460,7 @@ mod tests {
 
         let expired = (Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
         let pages = whois_report("example.com", &format!("Registry Expiry Date: {expired}"));
-        assert!(pages[0].contains("已过期"));
+        assert!(pages[0].contains("Expired"));
 
         let raw = "Domain Name: EXAMPLE.COM\nRegistrar: Example Registrar\nCreation Date: 1995-08-14T04:00:00Z\nRegistry Expiry Date: 2030-08-13T04:00:00Z\nName Server: A.IANA-SERVERS.NET\nName Server: A.IANA-SERVERS.NET\nName Server: B.IANA-SERVERS.NET\n";
         let pages = whois_report("example.com", raw);

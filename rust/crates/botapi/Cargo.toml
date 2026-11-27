@@ -12,3 +12,4 @@ serde_json.workspace = true
 sha2.workspace = true
 mibot-delivery.workspace = true
 mibot-httpx.workspace = true
+mibot-i18n.workspace = true

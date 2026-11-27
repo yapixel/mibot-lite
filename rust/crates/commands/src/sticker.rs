@@ -24,20 +24,30 @@ const AUTO_PACKS: usize = 50;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Kind {
     suffix: &'static str,
-    label: &'static str,
+    label_en: &'static str,
+    label_zh: &'static str,
+}
+
+impl Kind {
+    fn label(&self) -> &'static str {
+        kit::tr(self.label_en, self.label_zh)
+    }
 }
 
 const STATIC_KIND: Kind = Kind {
     suffix: "_static",
-    label: "静态",
+    label_en: "static",
+    label_zh: "静态",
 };
 const ANIMATED_KIND: Kind = Kind {
     suffix: "_animated",
-    label: "动态",
+    label_en: "animated",
+    label_zh: "动态",
 };
 const VIDEO_KIND: Kind = Kind {
     suffix: "_video",
-    label: "视频",
+    label_en: "video",
+    label_zh: "视频",
 };
 
 #[derive(Debug, Clone)]
@@ -47,7 +57,12 @@ struct Found {
     kind: Kind,
 }
 
-pub const PACK_NAME_RULE: &str = "贴纸包名只能用字母、数字和下划线，字母开头，最长 64 个字符";
+pub fn pack_name_rule() -> &'static str {
+    kit::tr(
+        "Pack short name may only contain letters, digits, and underscores, starting with a letter (max 64 chars)",
+        "贴纸包名只能用字母、数字和下划线，字母开头，最长 64 个字符",
+    )
+}
 
 pub fn valid_pack_name(name: &str) -> bool {
     if name.is_empty() || name.len() > 64 {
@@ -120,26 +135,41 @@ fn own_username(self_user: Option<&tl::types::User>) -> String {
 }
 
 pub fn explain(err: BotError) -> CmdError {
-    for (rpc_code, text) in [
-        ("STICKERS_TOO_MUCH", "贴纸包已满"),
-        ("STICKERPACK_STICKERS_TOO_MUCH", "贴纸包已满"),
-        ("STICKER_VIDEO_LONG", "视频贴纸不能超过 3 秒"),
-        ("STICKER_PNG_DIMENSIONS", "静态贴纸要有一边正好 512 像素"),
+    for (rpc_code, en, zh) in [
+        ("STICKERS_TOO_MUCH", "Sticker pack is full", "贴纸包已满"),
+        ("STICKERPACK_STICKERS_TOO_MUCH", "Sticker pack is full", "贴纸包已满"),
+        (
+            "STICKER_VIDEO_LONG",
+            "Video stickers cannot exceed 3 seconds",
+            "视频贴纸不能超过 3 秒",
+        ),
+        (
+            "STICKER_PNG_DIMENSIONS",
+            "Static sticker must have one side exactly 512 px",
+            "静态贴纸要有一边正好 512 像素",
+        ),
         (
             "STICKERSET_INVALID",
+            "Invalid pack name, already taken, or not owned by you",
             "贴纸包名无效、已被别人占用，或者不是你建的",
         ),
-        ("SHORTNAME_OCCUPY_FAILED", "贴纸包名已被占用"),
-        ("STICKER_EMOJI_INVALID", "这张贴纸的 emoji 无效"),
-        ("PACK_SHORT_NAME_INVALID", PACK_NAME_RULE),
-        ("PACK_SHORT_NAME_OCCUPIED", "贴纸包名已被占用"),
+        ("SHORTNAME_OCCUPY_FAILED", "Sticker pack name is already taken", "贴纸包名已被占用"),
+        ("STICKER_EMOJI_INVALID", "Invalid sticker emoji", "这张贴纸的 emoji 无效"),
+        ("PACK_SHORT_NAME_OCCUPIED", "Sticker pack name is already taken", "贴纸包名已被占用"),
     ] {
         if err.is_rpc(rpc_code) {
-            return kit::fail(text);
+            return kit::fail(kit::tr(en, zh));
         }
     }
+    if err.is_rpc("PACK_SHORT_NAME_INVALID") {
+        return kit::fail(pack_name_rule());
+    }
     if let Some(wait) = err.flood_wait() {
-        return kit::fail(format!("请求太频繁，{} 秒后再试", wait.as_secs()));
+        return kit::fail(if kit::is_zh() {
+            format!("请求太频繁，{} 秒后再试", wait.as_secs())
+        } else {
+            format!("Too many requests, retry in {}s", wait.as_secs())
+        });
     }
     err.into()
 }
@@ -212,7 +242,11 @@ async fn save(
     };
     let self_user = client.self_user();
     let username = own_username(self_user.as_ref());
-    let mut title = format!("@{username} 的收藏（{}）", sticker.kind.label);
+    let mut title = if kit::is_zh() {
+        format!("@{username} 的收藏（{}）", sticker.kind.label())
+    } else {
+        format!("@{username}'s Stickers ({})", sticker.kind.label())
+    };
     if !target.is_empty() {
         if username.is_empty() {
             title = target.to_owned();
@@ -223,9 +257,13 @@ async fn save(
         return Ok((target.to_owned(), created));
     }
     if username.is_empty() {
-        return Err(kit::fail(format!(
-            "账号没有用户名，没法自动给贴纸包起名。先用 {prefix}sticker 包名 设一个默认包"
-        )));
+        return Err(kit::fail(if kit::is_zh() {
+            format!("账号没有用户名，没法自动给贴纸包起名。先用 {prefix}sticker 包名 设一个默认包")
+        } else {
+            format!(
+                "Your account has no username for auto-naming packs. Set a default pack first with {prefix}sticker pack_name"
+            )
+        }));
     }
     for idx in 1..=AUTO_PACKS {
         let name = format!("{username}{}_{idx}", sticker.kind.suffix);
@@ -235,24 +273,42 @@ async fn save(
             Err(e) => return Err(explain(e)),
         }
     }
-    Err(kit::fail(format!(
-        "自动命名的 {AUTO_PACKS} 个贴纸包都满了，用 {prefix}sticker to 包名 存到别的包"
-    )))
+    Err(kit::fail(if kit::is_zh() {
+        format!("自动命名的 {AUTO_PACKS} 个贴纸包都满了，用 {prefix}sticker to 包名 存到别的包")
+    } else {
+        format!(
+            "All {AUTO_PACKS} auto-named packs are full; use {prefix}sticker to pack_name to save elsewhere"
+        )
+    }))
 }
 
 fn help(prefix: &str) -> String {
     let p = escape(prefix);
-    format!(
-        "⭐ <b>收藏贴纸</b>\n\n\
-        把别人的贴纸存进你自己的贴纸包，静态、动态、视频贴纸都行。\n\n\
-        • 回复一个贴纸发 <code>{p}sticker</code> 存到默认包；没设默认包就存到自动命名的 \
-        <code>用户名_static_1</code> 这类包里，满了自动换下一个\n\
-        • 回复贴纸发 <code>{p}sticker to 包名</code> 这一次存到指定的包\n\
-        • <code>{p}sticker 包名</code> 设默认包，包不存在的话第一次存时新建\n\
-        • <code>{p}sticker cancel</code> 取消默认包\n\
-        • 不回复发 <code>{p}sticker</code> 看当前设置\n\n\
-        包名只能用字母、数字和下划线，字母开头，最长 64 个字符。贴纸没带 emoji 时随机配一个。"
-    )
+    if kit::is_zh() {
+        format!(
+            "⭐ <b>收藏贴纸</b>\n\n\
+            把别人的贴纸存进你自己的贴纸包，静态、动态、视频贴纸都行。\n\n\
+            • 回复一个贴纸发 <code>{p}sticker</code> 存到默认包；没设默认包就存到自动命名的 \
+            <code>用户名_static_1</code> 这类包里，满了自动换下一个\n\
+            • 回复贴纸发 <code>{p}sticker to 包名</code> 这一次存到指定的包\n\
+            • <code>{p}sticker 包名</code> 设默认包，包不存在的话第一次存时新建\n\
+            • <code>{p}sticker cancel</code> 取消默认包\n\
+            • 不回复发 <code>{p}sticker</code> 看当前设置\n\n\
+            包名只能用字母、数字和下划线，字母开头，最长 64 个字符。贴纸没带 emoji 时随机配一个。"
+        )
+    } else {
+        format!(
+            "⭐ <b>Save Stickers</b>\n\n\
+            Save someone else's sticker into your own pack (static, animated, or video).\n\n\
+            • Reply to a sticker with <code>{p}sticker</code> to save to your default pack (or auto-named \
+            <code>username_static_1</code>, rolling over when full)\n\
+            • Reply to a sticker with <code>{p}sticker to pack_name</code> to save to a specific pack this time\n\
+            • <code>{p}sticker pack_name</code> set default pack (created on first save if missing)\n\
+            • <code>{p}sticker cancel</code> clear default pack\n\
+            • <code>{p}sticker</code> without replying to view current settings\n\n\
+            Pack names may only contain letters, digits, and underscores, starting with a letter (max 64 chars). A random emoji is used if the sticker has none."
+        )
+    }
 }
 
 fn pack_link(name: &str) -> String {
@@ -266,8 +322,8 @@ pub fn register(a: &Arc<App>) {
         "sticker",
         &[],
         group::MEDIA,
-        "把贴纸存进自己的贴纸包",
-        "[to 包名|包名|cancel]",
+        "Save stickers to your pack",
+        "[to pack|pack|cancel]",
         help,
         move |inv| {
             let saved = Arc::clone(&saved);
@@ -277,7 +333,10 @@ pub fn register(a: &Arc<App>) {
                 let sticker = reply.as_ref().and_then(|r| sticker_of(&r.raw));
                 let Some(sticker) = sticker else {
                     if reply.is_some() && sub.is_empty() {
-                        return Err(kit::fail("回复的不是贴纸"));
+                        return Err(kit::fail(kit::tr(
+                            "Replied message is not a sticker",
+                            "回复的不是贴纸",
+                        )));
                     }
                     return configure(&inv, &saved).await;
                 };
@@ -286,16 +345,16 @@ pub fn register(a: &Arc<App>) {
                 if sub == "to" {
                     target = inv.arg(1).to_owned();
                     if !valid_pack_name(&target) {
-                        return Err(kit::fail(PACK_NAME_RULE));
+                        return Err(kit::fail(pack_name_rule()));
                     }
                 }
-                inv.edit_text(&kit::working("正在收藏")).await?;
+                inv.edit_text(&kit::working(kit::tr("Saving sticker", "正在收藏"))).await?;
                 let (name, created) =
                     save(&inv.client, inv.prefix(), &target, &sticker).await?;
                 let verb = if created {
-                    "新建了贴纸包并存进"
+                    kit::tr("Created pack and saved to", "新建了贴纸包并存进")
                 } else {
-                    "已存进"
+                    kit::tr("Saved to", "已存进")
                 };
                 inv.edit(&format!("✅ {verb} {}", pack_link(&name)))
                     .await?;
@@ -305,7 +364,8 @@ pub fn register(a: &Arc<App>) {
                 Ok(())
             })
         },
-    );
+    )
+    .zh("把贴纸存进自己的贴纸包", "[to 包名|包名|cancel]");
     cmd.timeout = Some(Duration::from_secs(120));
     a.registry.register(cmd);
 }
@@ -316,50 +376,81 @@ async fn configure(inv: &Invocation, saved: &Store<Settings>) -> Result<(), CmdE
         let current = saved.read()?;
         let self_user = inv.client.self_user();
         let username = own_username(self_user.as_ref());
-        let mut text = String::from("⭐ <b>收藏贴纸</b>\n\n");
+        let mut text = String::from(kit::tr("⭐ <b>Save Stickers</b>\n\n", "⭐ <b>收藏贴纸</b>\n\n"));
         if !current.default_pack.is_empty() {
-            text.push_str("默认贴纸包：");
+            text.push_str(kit::tr("Default pack: ", "默认贴纸包："));
             text.push_str(&pack_link(&current.default_pack));
         } else if !username.is_empty() {
-            text.push_str(&format!(
-                "没设默认包，会存进 {} 这类自动命名的包",
-                code(&format!("{username}_static_1"))
-            ));
+            text.push_str(&if kit::is_zh() {
+                format!(
+                    "没设默认包，会存进 {} 这类自动命名的包",
+                    code(&format!("{username}_static_1"))
+                )
+            } else {
+                format!(
+                    "No default pack; saving to auto-named packs like {}",
+                    code(&format!("{username}_static_1"))
+                )
+            });
         } else {
-            text.push_str(&format!(
-                "没设默认包，账号也没有用户名，收藏前要先用 {} 设一个",
-                code(&format!("{}sticker 包名", inv.prefix()))
-            ));
+            text.push_str(&if kit::is_zh() {
+                format!(
+                    "没设默认包，账号也没有用户名，收藏前要先用 {} 设一个",
+                    code(&format!("{}sticker 包名", inv.prefix()))
+                )
+            } else {
+                format!(
+                    "No default pack and no username; set one with {} before saving",
+                    code(&format!("{}sticker pack_name", inv.prefix()))
+                )
+            });
         }
-        text.push_str(&format!(
-            "\n\n回复一个贴纸发 {} 收藏。",
-            code(&format!("{}sticker", inv.prefix()))
-        ));
+        text.push_str(&if kit::is_zh() {
+            format!("\n\n回复一个贴纸发 {} 收藏。", code(&format!("{}sticker", inv.prefix())))
+        } else {
+            format!("\n\nReply to a sticker with {} to save.", code(&format!("{}sticker", inv.prefix())))
+        });
         return inv.edit(&text).await.map_err(Into::into);
     }
     if argument.eq_ignore_ascii_case("cancel") {
         kit::update_ok(saved, |v| v.default_pack.clear())?;
-        return inv.edit_text("✅ 已取消默认贴纸包").await.map_err(Into::into);
+        return inv
+            .edit_text(kit::tr("✅ Default sticker pack cleared", "✅ 已取消默认贴纸包"))
+            .await
+            .map_err(Into::into);
     }
     if argument.eq_ignore_ascii_case("to") {
-        return Err(kit::fail("要回复一个贴纸再用 to"));
+        return Err(kit::fail(kit::tr(
+            "Reply to a sticker when using to",
+            "要回复一个贴纸再用 to",
+        )));
     }
     if !valid_pack_name(argument) {
-        return Err(kit::fail(PACK_NAME_RULE));
+        return Err(kit::fail(pack_name_rule()));
     }
     let present = exists(&inv.client, argument)
         .await
-        .map_err(|e| kit::fail_with("查不了这个贴纸包", e))?;
+        .map_err(|e| kit::fail_with(kit::tr("Failed to check sticker pack", "查不了这个贴纸包"), e))?;
     let pack = argument.to_owned();
     kit::update_ok(saved, move |v| v.default_pack = pack)?;
     let note = if present {
-        "，要是这个包不是你建的，收藏时会失败"
+        kit::tr(
+            "; saving will fail if this pack is not yours",
+            "，要是这个包不是你建的，收藏时会失败",
+        )
     } else {
-        "，第一次收藏时新建"
+        kit::tr("; will be created on first save", "，第一次收藏时新建")
     };
-    inv.edit(&format!("✅ 默认贴纸包已设为 {}{note}", code(argument)))
-        .await
-        .map_err(Into::into)
+    inv.edit(&format!(
+        "✅ {}{note}",
+        if kit::is_zh() {
+            format!("默认贴纸包已设为 {}", code(argument))
+        } else {
+            format!("Default sticker pack set to {}", code(argument))
+        }
+    ))
+    .await
+    .map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -546,7 +637,7 @@ mod tests {
                 "",
                 vec![
                     "get cat_static_1",
-                    r#"create cat_static_1 "@cat 的收藏（静态）""#,
+                    r#"create cat_static_1 "@cat's Stickers (static)""#,
                 ],
             ),
             (
@@ -587,7 +678,7 @@ mod tests {
                 "",
                 vec![
                     "get cat_video_1",
-                    r#"create cat_video_1 "@cat 的收藏（视频）""#,
+                    r#"create cat_video_1 "@cat's Stickers (video)""#,
                 ],
             ),
             (
@@ -623,7 +714,7 @@ mod tests {
                 static_sticker(),
                 "",
                 false,
-                "贴纸包已满",
+                "Sticker pack is full",
                 vec!["get Mine", "add Mine 😺"],
             ),
             (
@@ -635,7 +726,7 @@ mod tests {
                 static_sticker(),
                 "",
                 false,
-                "不是你建的",
+                "not owned by you",
                 vec!["get Theirs", "add Theirs 😺"],
             ),
             (
@@ -647,7 +738,7 @@ mod tests {
                 static_sticker(),
                 "",
                 false,
-                "没有用户名",
+                "no username",
                 vec![],
             ),
         ];

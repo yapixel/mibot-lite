@@ -229,7 +229,11 @@ async fn relay(
         let _ = client
             .send_plain(
                 &peer,
-                &format!("⛔ {}{} 只有账号本人能用", route.prefix, route.command),
+                &if kit::is_zh() {
+                    format!("⛔ {}{} 只有账号本人能用", route.prefix, route.command)
+                } else {
+                    format!("⛔ {}{} is owner-only", route.prefix, route.command)
+                },
                 None,
                 SendOptions {
                     reply_to: Some(trigger.id),
@@ -315,7 +319,10 @@ async fn relay(
         let _ = client
             .send_plain(
                 &peer,
-                "⏳ 同时执行的命令太多或服务正在更新，这条没有执行，稍后再试",
+                kit::tr(
+                    "⏳ Too many concurrent commands or service is updating; command skipped, try again later",
+                    "⏳ 同时执行的命令太多或服务正在更新，这条没有执行，稍后再试",
+                ),
                 None,
                 SendOptions {
                     reply_to: Some(msg_id),
@@ -328,10 +335,15 @@ async fn relay(
 }
 
 async fn resolve_user(inv: &Invocation, arg: &str) -> Result<DelegateEntry, mibot_command::CmdError> {
+    let zh = kit::is_zh();
     if !arg.is_empty() {
         if let Ok(id) = arg.parse::<i64>() {
             if id <= 0 {
-                return Err(kit::fail_err(format!("{arg} 不是用户 ID")));
+                return Err(kit::fail_err(if zh {
+                    format!("{arg} 不是用户 ID")
+                } else {
+                    format!("{arg} is not a user ID")
+                }));
             }
             let p = tl::enums::Peer::User(tl::types::PeerUser { user_id: id });
             return Ok(DelegateEntry {
@@ -344,26 +356,43 @@ async fn resolve_user(inv: &Invocation, arg: &str) -> Result<DelegateEntry, mibo
             .client
             .resolve_username(clean)
             .await
-            .map_err(|_| kit::fail_err(format!("找不到 {arg}")))?;
+            .map_err(|_| {
+                kit::fail_err(if zh {
+                    format!("找不到 {arg}")
+                } else {
+                    format!("Cannot find {arg}")
+                })
+            })?;
         let tl::enums::InputPeer::User(u) = peer else {
-            return Err(kit::fail_err(format!("{arg} 不是用户")));
+            return Err(kit::fail_err(if zh {
+                format!("{arg} 不是用户")
+            } else {
+                format!("{arg} is not a user")
+            }));
         };
         return Ok(DelegateEntry {
             id: u.user_id.to_string(),
             name: format!("@{clean}"),
         });
     }
+    let hint = || {
+        kit::tr(
+            "Reply to a message, or provide a numeric ID or @username",
+            "回复对方的消息，或者带上数字 ID、@用户名",
+        )
+    };
     if inv.message.reply_to_id == 0 {
-        return Err(kit::fail_err("回复对方的消息，或者带上数字 ID、@用户名"));
+        return Err(kit::fail_err(hint()));
     }
     let Some(reply) = kit::reply_msg(inv).await? else {
-        return Err(kit::fail_err("回复对方的消息，或者带上数字 ID、@用户名"));
+        return Err(kit::fail_err(hint()));
     };
     let id = sender_user_id(&reply);
     if id.is_empty() {
-        return Err(kit::fail_err(
+        return Err(kit::fail_err(kit::tr(
+            "Replied message is not from a user (channels or anonymous admins cannot be authorized)",
             "被回复的消息不是用户发的（频道身份或匿名管理员不能授权）",
-        ));
+        )));
     }
     Ok(DelegateEntry {
         id,
@@ -384,11 +413,18 @@ async fn resolve_chat(inv: &Invocation, arg: &str) -> Result<DelegateEntry, mibo
             name: inv.client.peers().title(&peer),
         });
     }
+    let not_found = || {
+        kit::fail_err(if kit::is_zh() {
+            format!("找不到 {arg}")
+        } else {
+            format!("Cannot find {arg}")
+        })
+    };
     let peer = inv
         .client
         .resolve_target(arg)
         .await
-        .map_err(|_| kit::fail_err(format!("找不到 {arg}")))?;
+        .map_err(|_| not_found())?;
     let id = match peer {
         tl::enums::InputPeer::Channel(c) => {
             peer_id(&tl::enums::Peer::Channel(tl::types::PeerChannel {
@@ -401,7 +437,7 @@ async fn resolve_chat(inv: &Invocation, arg: &str) -> Result<DelegateEntry, mibo
         tl::enums::InputPeer::User(u) => peer_id(&tl::enums::Peer::User(tl::types::PeerUser {
             user_id: u.user_id,
         })),
-        _ => return Err(kit::fail_err(format!("找不到 {arg}"))),
+        _ => return Err(not_found()),
     };
     Ok(DelegateEntry {
         id,
@@ -416,7 +452,7 @@ fn render_entries(title: &str, entries: &[DelegateEntry], empty: &str) -> String
     let mut lines = vec![format!("<b>{}</b>", escape(title))];
     for e in entries {
         let name = if e.name.is_empty() || e.name == e.id {
-            "（未知名称）"
+            kit::tr("(unknown name)", "（未知名称）")
         } else {
             &e.name
         };
@@ -454,21 +490,40 @@ async fn manage_lists(
         }
         target = inv.arg(2).to_owned();
     }
+    let zh = kit::is_zh();
     let (title, empty, missing_fmt, added, removed) = if is_chat {
-        (
-            "对话名单".to_owned(),
-            "⚠️ 没有设对话名单，所有对话里都能用".to_owned(),
-            "对话名单里没有 {id}".to_owned(),
-            format!("已加入 {name} 对话名单"),
-            format!("已移出 {name} 对话名单"),
-        )
-    } else {
+        if zh {
+            (
+                "对话名单".to_owned(),
+                "⚠️ 没有设对话名单，所有对话里都能用".to_owned(),
+                "对话名单里没有 {id}".to_owned(),
+                format!("已加入 {name} 对话名单"),
+                format!("已移出 {name} 对话名单"),
+            )
+        } else {
+            (
+                "Chat Allowlist".to_owned(),
+                "⚠️ No chat allowlist set; usable in all chats".to_owned(),
+                "{id} is not in the chat allowlist".to_owned(),
+                format!("Added to {name} chat allowlist"),
+                format!("Removed from {name} chat allowlist"),
+            )
+        }
+    } else if zh {
         (
             format!("{name} 用户名单"),
             "当前没有任何用户".to_owned(),
             format!("{name} 名单里没有 {{id}}"),
             "已授权".to_owned(),
             "已取消授权".to_owned(),
+        )
+    } else {
+        (
+            format!("{name} User Allowlist"),
+            "No users authorized".to_owned(),
+            format!("{{id}} is not in the {name} allowlist"),
+            "Authorized".to_owned(),
+            "Revoked".to_owned(),
         )
     };
 
@@ -486,7 +541,10 @@ async fn manage_lists(
                 resolve_user(inv, &target).await?
             };
             if !is_chat && entry.id == inv.client.self_id().to_string() {
-                return Err(kit::fail_err("不能把账号自己加进名单"));
+                return Err(kit::fail_err(kit::tr(
+                    "Cannot add yourself to the allowlist",
+                    "不能把账号自己加进名单",
+                )));
             }
             let mut changed = false;
             let entry_clone = entry.clone();
@@ -508,11 +566,11 @@ async fn manage_lists(
             } else {
                 added
             };
-            inv.edit(&format!(
-                "✅ {verb}：{} {}",
-                escape(&entry.name),
-                code(&entry.id)
-            ))
+            inv.edit(&if zh {
+                format!("✅ {verb}：{} {}", escape(&entry.name), code(&entry.id))
+            } else {
+                format!("✅ {verb}: {} {}", escape(&entry.name), code(&entry.id))
+            })
             .await?;
             Ok(true)
         }
@@ -524,6 +582,7 @@ async fn manage_rules(
     inv: &Invocation,
     saved: &Store<DelegateDocument>,
 ) -> mibot_command::CmdResult {
+    let zh = kit::is_zh();
     let action = inv.arg(1).to_ascii_lowercase();
     let raw = |skip: usize| -> String {
         inv.raw_after(skip)
@@ -537,15 +596,17 @@ async fn manage_rules(
         "ls" | "list" | "" => {
             let current = saved.read()?;
             if current.messages.is_empty() {
+                let cmd_ex = code(&format!("{}sure msg add _command:/sb", inv.prefix()));
                 return inv
-                    .edit(&format!(
-                        "⚠️ 还没有消息规则，sure 不会生效。\n{} 添加一条",
-                        code(&format!("{}sure msg add _command:/sb", inv.prefix()))
-                    ))
+                    .edit(&if zh {
+                        format!("⚠️ 还没有消息规则，sure 不会生效。\n{cmd_ex} 添加一条")
+                    } else {
+                        format!("⚠️ No message rules yet; sure is inactive.\n{cmd_ex} to add one")
+                    })
                     .await
                     .map_err(Into::into);
             }
-            let mut lines = vec!["🎯 <b>消息规则</b>".to_owned()];
+            let mut lines = vec![kit::tr("🎯 <b>Message Rules</b>", "🎯 <b>消息规则</b>").to_owned()];
             for rule in &current.messages {
                 let mut line = format!("{} {}", code(&rule.id.to_string()), code(&rule.msg));
                 if !rule.redirect.is_empty() {
@@ -558,7 +619,10 @@ async fn manage_rules(
         "add" => {
             let text = raw(2);
             if text.is_empty() {
-                return Err(kit::usage(inv.prefix(), "sure msg add 消息原文"));
+                return Err(kit::usage(
+                    inv.prefix(),
+                    kit::tr("sure msg add <exact message>", "sure msg add 消息原文"),
+                ));
             }
             let mut id = 0i32;
             saved.update(|doc| {
@@ -571,17 +635,21 @@ async fn manage_rules(
                 });
                 Ok::<(), std::convert::Infallible>(())
             })?;
-            inv.edit(&format!(
-                "✅ 已添加规则 {}：{}",
-                code(&id.to_string()),
-                code(&text)
-            ))
+            inv.edit(&if zh {
+                format!("✅ 已添加规则 {}：{}", code(&id.to_string()), code(&text))
+            } else {
+                format!("✅ Added rule {}: {}", code(&id.to_string()), code(&text))
+            })
             .await
             .map_err(Into::into)
         }
         "redirect" | "del" => {
             let id: i32 = inv.arg(2).parse().map_err(|_| {
-                kit::fail_err(format!("请给出规则编号，{}sure msg ls 可以看", inv.prefix()))
+                kit::fail_err(if zh {
+                    format!("请给出规则编号，{}sure msg ls 可以看", inv.prefix())
+                } else {
+                    format!("Provide a rule ID; see {}sure msg ls", inv.prefix())
+                })
             })?;
             let target = raw(3);
             let mut found = false;
@@ -597,25 +665,45 @@ async fn manage_rules(
                 Ok::<(), std::convert::Infallible>(())
             })?;
             if !found {
-                return Err(kit::fail_err(format!("没有编号为 {id} 的规则")));
+                return Err(kit::fail_err(if zh {
+                    format!("没有编号为 {id} 的规则")
+                } else {
+                    format!("No rule with ID {id}")
+                }));
             }
             if action == "del" {
                 return inv
-                    .edit(&format!("✅ 已删除规则 {}", code(&id.to_string())))
+                    .edit(&if zh {
+                        format!("✅ 已删除规则 {}", code(&id.to_string()))
+                    } else {
+                        format!("✅ Deleted rule {}", code(&id.to_string()))
+                    })
                     .await
                     .map_err(Into::into);
             }
             if target.is_empty() {
                 return inv
-                    .edit(&format!("✅ 已清除规则 {} 的重定向", code(&id.to_string())))
+                    .edit(&if zh {
+                        format!("✅ 已清除规则 {} 的重定向", code(&id.to_string()))
+                    } else {
+                        format!("✅ Cleared redirect for rule {}", code(&id.to_string()))
+                    })
                     .await
                     .map_err(Into::into);
             }
-            inv.edit(&format!(
-                "✅ 规则 {} 重定向到 {}",
-                code(&id.to_string()),
-                code(&target)
-            ))
+            inv.edit(&if zh {
+                format!(
+                    "✅ 规则 {} 重定向到 {}",
+                    code(&id.to_string()),
+                    code(&target)
+                )
+            } else {
+                format!(
+                    "✅ Redirected rule {} to {}",
+                    code(&id.to_string()),
+                    code(&target)
+                )
+            })
             .await
             .map_err(Into::into)
         }
@@ -625,40 +713,74 @@ async fn manage_rules(
 
 fn sudo_help(prefix: &str) -> String {
     let p = escape(prefix);
-    format!(
-        "🔐 <b>sudo：让别人用你的账号执行命令</b>\n\n\
-         名单里的人发一条命令（用你的前缀），账号就以你的身份在同一个对话里发出这条命令并执行，回复同一个目标。\n\n\
-         • <code>{p}sudo add</code> 回复对方的消息，或带上数字 ID、@用户名\n\
-         • <code>{p}sudo del</code> 同上\n\
-         • <code>{p}sudo ls</code> 用户名单\n\
-         • <code>{p}sudo chat add</code> 把当前对话（或带上 ID、@名称）加进对话名单\n\
-         • <code>{p}sudo chat del</code> / <code>chat ls</code>\n\n\
-         ⚠️ 没设对话名单时，名单里的人在所有有你的对话里都能用。\n\n\
-         <b>能借出去的命令</b>\n{}\n\
-         其中改设置的子命令（如 ai config、tr set、speedtest set）只限本人；sum 只能借「摘要当前群组」，定时任务和配置都不行。\n\n\
-         <b>只限你本人</b>\n授权管理、删消息、改昵称或前缀别名、备份与日志、转存消息、重启更新、跨所有群的封禁、看主机信息。\
-         名单里的人发这些命令，账号只会回一句没有权限。",
-        escape(&delegable_list(prefix)),
-    )
+    let list = escape(&delegable_list(prefix));
+    if kit::is_zh() {
+        format!(
+            "🔐 <b>sudo：让别人用你的账号执行命令</b>\n\n\
+             名单里的人发一条命令（用你的前缀），账号就以你的身份在同一个对话里发出这条命令并执行，回复同一个目标。\n\n\
+             • <code>{p}sudo add</code> 回复对方的消息，或带上数字 ID、@用户名\n\
+             • <code>{p}sudo del</code> 同上\n\
+             • <code>{p}sudo ls</code> 用户名单\n\
+             • <code>{p}sudo chat add</code> 把当前对话（或带上 ID、@名称）加进对话名单\n\
+             • <code>{p}sudo chat del</code> / <code>chat ls</code>\n\n\
+             ⚠️ 没设对话名单时，名单里的人在所有有你的对话里都能用。\n\n\
+             <b>能借出去的命令</b>\n{list}\n\
+             其中改设置的子命令（如 ai config、tr set、speedtest set）只限本人；sum 只能借「摘要当前群组」，定时任务和配置都不行。\n\n\
+             <b>只限你本人</b>\n授权管理、删消息、改昵称或前缀别名、备份与日志、转存消息、重启更新、跨所有群的封禁、看主机信息。\
+             名单里的人发这些命令，账号只会回一句没有权限。"
+        )
+    } else {
+        format!(
+            "🔐 <b>sudo: Lend Commands to Others</b>\n\n\
+             When an allowlisted user sends a command with your prefix, your account sends and runs it in the same chat, replying to the same target.\n\n\
+             • <code>{p}sudo add</code> Reply to their message, or pass numeric ID / @username\n\
+             • <code>{p}sudo del</code> Same as above\n\
+             • <code>{p}sudo ls</code> List allowed users\n\
+             • <code>{p}sudo chat add</code> Add current chat (or pass ID / @username) to chat allowlist\n\
+             • <code>{p}sudo chat del</code> / <code>chat ls</code>\n\n\
+             ⚠️ Without a chat allowlist, allowed users can use commands in any shared chat.\n\n\
+             <b>Delegable Commands</b>\n{list}\n\
+             Settings subcommands (like ai config, tr set, speedtest set) remain owner-only; sum only allows summarizing the current chat (no schedules or config).\n\n\
+             <b>Owner-Only</b>\nAuth management, deleting messages, nickname/prefix/alias/language changes, backup &amp; logs, saving messages, restart/update, global bans, and host info. \
+             Allowed users get a permission denied reply."
+        )
+    }
 }
 
 fn sure_help(prefix: &str) -> String {
     let p = escape(prefix);
-    format!(
-        "🎯 <b>sure：让别人触发指定的消息或命令</b>\n\n\
-         比 sudo 窄：名单里的人发的消息要和规则对上，账号才会以你的身份发出去；规则可以重定向成别的命令。\n\n\
-         <b>用户和对话</b>\n\
-         • <code>{p}sure add</code> / <code>del</code> / <code>ls</code> 和 sudo 一样\n\
-         • <code>{p}sure chat add</code> / <code>del</code> / <code>ls</code> 对话名单，没设就处处可用\n\n\
-         <b>消息规则（至少要有一条才会生效）</b>\n\
-         • <code>{p}sure msg add 消息原文</code> 整条消息一致才算\n\
-         • <code>{p}sure msg add _command:/sb</code> 以 /sb 开头的都算，如 /sb 和 /sb 123\n\
-         • <code>{p}sure msg redirect 编号 {p}ban</code> 重定向：/sb 123 会变成 {p}ban 123；不写目标就是清除重定向\n\
-         • <code>{p}sure msg del 编号</code> / <code>msg ls</code>\n\n\
-         <b>典型用法</b>\n规则 <code>_command:/sb</code> 重定向到 <code>{p}ban</code>，再把群成员加进用户名单。他们回复某人发 /sb，就会以你的身份执行 <code>{p}ban</code>。\
-         触发的那条消息 5 秒后删掉（需要管理员权限）。\n\n\
-         ⚠️ 重定向出来的命令和 sudo 一样受限，只限本人的命令不会被执行。"
-    )
+    if kit::is_zh() {
+        format!(
+            "🎯 <b>sure：让别人触发指定的消息或命令</b>\n\n\
+             比 sudo 窄：名单里的人发的消息要和规则对上，账号才会以你的身份发出去；规则可以重定向成别的命令。\n\n\
+             <b>用户和对话</b>\n\
+             • <code>{p}sure add</code> / <code>del</code> / <code>ls</code> 和 sudo 一样\n\
+             • <code>{p}sure chat add</code> / <code>del</code> / <code>ls</code> 对话名单，没设就处处可用\n\n\
+             <b>消息规则（至少要有一条才会生效）</b>\n\
+             • <code>{p}sure msg add 消息原文</code> 整条消息一致才算\n\
+             • <code>{p}sure msg add _command:/sb</code> 以 /sb 开头的都算，如 /sb 和 /sb 123\n\
+             • <code>{p}sure msg redirect 编号 {p}ban</code> 重定向：/sb 123 会变成 {p}ban 123；不写目标就是清除重定向\n\
+             • <code>{p}sure msg del 编号</code> / <code>msg ls</code>\n\n\
+             <b>典型用法</b>\n规则 <code>_command:/sb</code> 重定向到 <code>{p}ban</code>，再把群成员加进用户名单。他们回复某人发 /sb，就会以你的身份执行 <code>{p}ban</code>。\
+             触发的那条消息 5 秒后删掉（需要管理员权限）。\n\n\
+             ⚠️ 重定向出来的命令和 sudo 一样受限，只限本人的命令不会被执行。"
+        )
+    } else {
+        format!(
+            "🎯 <b>sure: Rule-Based Message Triggering</b>\n\n\
+             Stricter than sudo: messages from allowlisted users must match a rule to be relayed, and rules can redirect to another command.\n\n\
+             <b>Users &amp; Chats</b>\n\
+             • <code>{p}sure add</code> / <code>del</code> / <code>ls</code> Same as sudo\n\
+             • <code>{p}sure chat add</code> / <code>del</code> / <code>ls</code> Chat allowlist (all chats if empty)\n\n\
+             <b>Message Rules (at least one required)</b>\n\
+             • <code>{p}sure msg add &lt;exact text&gt;</code> Matches exact message text\n\
+             • <code>{p}sure msg add _command:/sb</code> Matches commands starting with /sb (e.g. /sb or /sb 123)\n\
+             • <code>{p}sure msg redirect &lt;id&gt; {p}ban</code> Redirects /sb 123 to {p}ban 123; omit target to clear\n\
+             • <code>{p}sure msg del &lt;id&gt;</code> / <code>msg ls</code>\n\n\
+             <b>Example</b>\nRedirect <code>_command:/sb</code> to <code>{p}ban</code> and add group members. When they reply with /sb, your account runs <code>{p}ban</code> and deletes the trigger message after 5s (requires admin).\n\n\
+             ⚠️ Redirected commands obey the same sudo restrictions; owner-only commands will not run."
+        )
+    }
 }
 
 pub fn register(a: &Arc<App>) {
@@ -730,45 +852,51 @@ pub fn register(a: &Arc<App>) {
     }));
 
     let sudo_cmd = Arc::clone(&sudo_list);
-    a.registry.register(kit::make_cmd(
-        "sudo",
-        &[],
-        group::ACCOUNT,
-        "把命令借给名单里的人",
-        "[add|del|ls|chat]",
-        sudo_help,
-        move |inv: Invocation| {
-            let saved = Arc::clone(&sudo_cmd);
-            Box::pin(async move {
-                if manage_lists(&inv, &saved, "sudo").await? {
-                    return Ok(());
-                }
-                inv.edit(&sudo_help(inv.prefix())).await.map_err(Into::into)
-            })
-        },
-    ));
+    a.registry.register(
+        kit::make_cmd(
+            "sudo",
+            &[],
+            group::ACCOUNT,
+            "Lend commands to allowed users",
+            "[add|del|ls|chat]",
+            sudo_help,
+            move |inv: Invocation| {
+                let saved = Arc::clone(&sudo_cmd);
+                Box::pin(async move {
+                    if manage_lists(&inv, &saved, "sudo").await? {
+                        return Ok(());
+                    }
+                    inv.edit(&sudo_help(inv.prefix())).await.map_err(Into::into)
+                })
+            },
+        )
+        .zh("把命令借给名单里的人", "[add|del|ls|chat]"),
+    );
 
     let sure_cmd = Arc::clone(&sure_list);
-    a.registry.register(kit::make_cmd(
-        "sure",
-        &[],
-        group::ACCOUNT,
-        "让名单里的人触发指定消息",
-        "[add|del|ls|chat|msg]",
-        sure_help,
-        move |inv: Invocation| {
-            let saved = Arc::clone(&sure_cmd);
-            Box::pin(async move {
-                if inv.arg(0).eq_ignore_ascii_case("msg") {
-                    return manage_rules(&inv, &saved).await;
-                }
-                if manage_lists(&inv, &saved, "sure").await? {
-                    return Ok(());
-                }
-                inv.edit(&sure_help(inv.prefix())).await.map_err(Into::into)
-            })
-        },
-    ));
+    a.registry.register(
+        kit::make_cmd(
+            "sure",
+            &[],
+            group::ACCOUNT,
+            "Trigger rules for allowed users",
+            "[add|del|ls|chat|msg]",
+            sure_help,
+            move |inv: Invocation| {
+                let saved = Arc::clone(&sure_cmd);
+                Box::pin(async move {
+                    if inv.arg(0).eq_ignore_ascii_case("msg") {
+                        return manage_rules(&inv, &saved).await;
+                    }
+                    if manage_lists(&inv, &saved, "sure").await? {
+                        return Ok(());
+                    }
+                    inv.edit(&sure_help(inv.prefix())).await.map_err(Into::into)
+                })
+            },
+        )
+        .zh("让名单里的人触发指定消息", "[add|del|ls|chat|msg]"),
+    );
 }
 
 #[cfg(test)]

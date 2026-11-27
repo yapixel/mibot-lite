@@ -274,20 +274,42 @@ fn reserved_asn(asn: u32) -> bool {
 }
 
 fn reserved_reason(t: &Target) -> Option<String> {
+    let zh = kit::is_zh();
     match t.kind {
-        Kind::Asn => reserved_asn(t.asn).then(|| format!("{} 是私有或保留的 AS 号，公网上没有它的路由", t.label())),
+        Kind::Asn => reserved_asn(t.asn).then(|| {
+            if zh {
+                format!("{} 是私有或保留的 AS 号，公网上没有它的路由", t.label())
+            } else {
+                format!("{} is a private or reserved ASN with no public routing", t.label())
+            }
+        }),
         Kind::Prefix => {
             if (t.prefix.addr.is_ipv4() && t.prefix.bits < 8) || (t.prefix.addr.is_ipv6() && t.prefix.bits < 16) {
-                return Some("前缀太大，IPv4 最短写到 /8，IPv6 最短写到 /16".into());
+                return Some(kit::tr(
+                    "Prefix too broad; minimum /8 for IPv4 and /16 for IPv6",
+                    "前缀太大，IPv4 最短写到 /8，IPv6 最短写到 /16",
+                ).into());
             }
-            reserved_prefix(&t.prefix).then(|| format!("{} 是内网或保留地址段，公网上没有它的路由", t.label()))
+            reserved_prefix(&t.prefix).then(|| {
+                if zh {
+                    format!("{} 是内网或保留地址段，公网上没有它的路由", t.label())
+                } else {
+                    format!("{} is a private or reserved prefix with no public routing", t.label())
+                }
+            })
         }
         Kind::Ip => {
             let p = Prefix {
                 addr: t.addr,
                 bits: if t.addr.is_ipv4() { 32 } else { 128 },
             };
-            reserved_prefix(&p).then(|| format!("{} 是内网或保留地址，公网上没有它的路由", t.label()))
+            reserved_prefix(&p).then(|| {
+                if zh {
+                    format!("{} 是内网或保留地址，公网上没有它的路由", t.label())
+                } else {
+                    format!("{} is a private or reserved IP with no public routing", t.label())
+                }
+            })
         }
     }
 }
@@ -444,7 +466,7 @@ async fn call_ripe<T: for<'de> Deserialize<'de>>(
     };
     let url = format!("{api_base}/{name}/data.json?{query_str}");
     let resp = tokio::select! {
-        _ = cancel.cancelled() => return Err(kit::fail("操作已取消")),
+        _ = cancel.cancelled() => return Err(kit::fail(kit::tr("Cancelled", "操作已取消"))),
         r = do_request(Request {
             url,
             timeout: Some(CALL_TIMEOUT),
@@ -551,10 +573,10 @@ async fn lookup(
         r.upstream = up_res.as_ref().ok().cloned();
         r.counts = count_res.as_ref().ok().cloned();
         vec![
-            ("AS 信息", as_res.err()),
+            (kit::tr("AS info", "AS 信息"), as_res.err()),
             ("RIR", rir_res.err()),
-            ("宣告前缀", count_res.err()),
-            ("上游", up_res.err()),
+            (kit::tr("Announced prefixes", "宣告前缀"), count_res.err()),
+            (kit::tr("Upstreams", "上游"), up_res.err()),
         ]
     } else {
         let route_fut = async {
@@ -604,11 +626,11 @@ async fn lookup(
             None => None,
         };
         vec![
-            ("路由", prefix_res.err()),
-            ("地区", geo_res.err()),
+            (kit::tr("Routing", "路由"), prefix_res.err()),
+            (kit::tr("Location", "地区"), geo_res.err()),
             ("RIR", rir_res.err()),
-            ("反向解析", ptr_err),
-            ("上游", up_err),
+            (kit::tr("Reverse DNS", "反向解析"), ptr_err),
+            (kit::tr("Upstreams", "上游"), up_err),
         ]
     };
 
@@ -709,9 +731,13 @@ fn as_with_name(asn: u32, name: &str) -> String {
 
 fn list_codes(values: &[String], total: usize) -> String {
     let shown = &values[..values.len().min(MAX_LISTED)];
-    let mut text = shown.iter().map(|v| code(v)).collect::<Vec<_>>().join("、");
+    let mut text = shown.iter().map(|v| code(v)).collect::<Vec<_>>().join(kit::tr(", ", "、"));
     if total > shown.len() {
-        text.push_str(&format!(" 等 {total} 个"));
+        if kit::is_zh() {
+            text.push_str(&format!(" 等 {total} 个"));
+        } else {
+            text.push_str(&format!(" ({total} total)"));
+        }
     }
     text
 }
@@ -771,8 +797,10 @@ fn rir_line(list: Option<&RirList>) -> Option<String> {
     }
     if names.is_empty() {
         None
-    } else {
+    } else if kit::is_zh() {
         Some(format!("RIR：{}", escape(&names.join("、"))))
+    } else {
+        Some(format!("RIR: {}", escape(&names.join(", "))))
     }
 }
 
@@ -787,9 +815,9 @@ fn ptr_text(ptr: &ReverseDns) -> String {
         .iter()
         .any(|w| lower.contains(w))
     {
-        "无法解析".into()
+        kit::tr("Resolution failed", "无法解析").into()
     } else {
-        "无".into()
+        kit::tr("None", "无").into()
     }
 }
 
@@ -825,14 +853,19 @@ fn links(r: &Report) -> Vec<String> {
 }
 
 fn render(r: &Report) -> String {
+    let zh = kit::is_zh();
     let mut lines = vec![
-        "🛰 <b>BGP 路由信息</b>".to_owned(),
+        kit::tr("🛰 <b>BGP Routing Info</b>", "🛰 <b>BGP 路由信息</b>").to_owned(),
         String::new(),
-        format!("查询：{}", code(&r.target.label())),
+        format!("{}{}", kit::tr("Query: ", "查询："), code(&r.target.label())),
     ];
     if r.target.kind == Kind::Asn {
         if let Some(a) = &r.as_overview {
-            lines.push(format!("名称：{}", escape(kit::or_dash(&truncate(&a.holder, HOLDER_WIDTH)))));
+            lines.push(format!(
+                "{}{}",
+                kit::tr("Name: ", "名称："),
+                escape(kit::or_dash(&truncate(&a.holder, HOLDER_WIDTH)))
+            ));
         }
         if let Some(rl) = rir_line(r.rir.as_ref()) {
             lines.push(rl);
@@ -841,88 +874,126 @@ fn render(r: &Report) -> String {
             let v4 = c.counts.v4.originating;
             let v6 = c.counts.v6.originating;
             if v4 + v6 == 0 {
-                lines.push("宣告前缀：无".into());
-            } else {
+                lines.push(kit::tr("Announced: None", "宣告前缀：无").into());
+            } else if zh {
                 lines.push(format!("宣告前缀：IPv4 {v4} 个 · IPv6 {v6} 个"));
+            } else {
+                lines.push(format!("Announced: {v4} IPv4 · {v6} IPv6"));
             }
         }
     } else {
         if let Some(p) = &r.prefix {
             if p.announced {
-                lines.push(format!("前缀：{}", code(&p.resource)));
+                lines.push(format!("{}{}", kit::tr("Prefix: ", "前缀："), code(&p.resource)));
             } else if !p.related_prefixes.is_empty() {
-                lines.push("前缀：没有整段宣告".into());
+                lines.push(kit::tr("Prefix: Not announced as aggregate", "前缀：没有整段宣告").into());
             } else {
-                lines.push("前缀：未在公网宣告".into());
+                lines.push(kit::tr("Prefix: Not announced publicly", "前缀：未在公网宣告").into());
             }
             for o in &p.asns {
-                lines.push(format!("起源 AS：{}", as_with_name(o.asn, &o.holder)));
+                lines.push(format!(
+                    "{}{}",
+                    kit::tr("Origin AS: ", "起源 AS："),
+                    as_with_name(o.asn, &o.holder)
+                ));
             }
             if !p.related_prefixes.is_empty() {
                 let total = p.actual_num_related.max(p.related_prefixes.len());
-                lines.push(format!("相关前缀：{}", list_codes(&p.related_prefixes, total)));
+                lines.push(format!(
+                    "{}{}",
+                    kit::tr("Related prefixes: ", "相关前缀："),
+                    list_codes(&p.related_prefixes, total)
+                ));
             }
         }
         if let Some(g) = &r.geo {
-            lines.push(format!("地区：{}", places(g)));
+            lines.push(format!("{}{}", kit::tr("Location: ", "地区："), places(g)));
         }
         if let Some(rl) = rir_line(r.rir.as_ref()) {
             lines.push(rl);
         }
         if let Some(ptr) = &r.ptr {
-            lines.push(format!("反向解析：{}", ptr_text(ptr)));
+            lines.push(format!("{}{}", kit::tr("Reverse DNS: ", "反向解析："), ptr_text(ptr)));
         }
     }
     if let Some(up) = &r.upstream {
         lines.push(String::new());
-        let mut head = format!("<b>{} 的上游</b>", as_label(up.of));
+        let mut head = if zh {
+            format!("<b>{} 的上游</b>", as_label(up.of))
+        } else {
+            format!("<b>Upstreams of {}</b>", as_label(up.of))
+        };
         if up.total > up.top.len() {
-            head.push_str(&format!("（共 {} 个，按可见度列前 {} 个）", up.total, up.top.len()));
+            if zh {
+                head.push_str(&format!("（共 {} 个，按可见度列前 {} 个）", up.total, up.top.len()));
+            } else {
+                head.push_str(&format!(" ({} total, top {} by visibility)", up.total, up.top.len()));
+            }
         }
         lines.push(head);
         if up.top.is_empty() {
-            lines.push("无".into());
+            lines.push(kit::tr("None", "无").into());
         }
         for p in &up.top {
             lines.push(format!("• {}", as_with_name(p.asn, &p.name)));
         }
     }
     lines.push(String::new());
-    lines.push(format!("在 bgp.he.net 查看：{}", links(r).join(" · ")));
+    lines.push(format!(
+        "{}{}",
+        kit::tr("View on bgp.he.net: ", "在 bgp.he.net 查看："),
+        links(r).join(" · ")
+    ));
     if !r.failed.is_empty() {
         lines.push(String::new());
-        lines.push(format!("⚠️ 部分数据没查到（{}），稍后再试", r.failed.join("、")));
+        lines.push(if zh {
+            format!("⚠️ 部分数据没查到（{}），稍后再试", r.failed.join("、"))
+        } else {
+            format!("⚠️ Partial data unavailable ({}); try again later", r.failed.join(", "))
+        });
     }
     lines.join("\n")
 }
 
 fn render_ptr(ip: &str, ptr: &ReverseDns) -> String {
+    let sep = kit::tr(": ", "：");
     let mut lines = vec![
-        "🛰 <b>反向解析</b>".to_owned(),
+        kit::tr("🛰 <b>Reverse DNS</b>", "🛰 <b>反向解析</b>").to_owned(),
         String::new(),
-        format!("地址：{}", code(ip)),
+        format!("{}{}", kit::tr("Address: ", "地址："), code(ip)),
     ];
     let list = ptr.result.as_deref().unwrap_or(&[]);
     if list.is_empty() {
-        lines.push(format!("PTR：{}", ptr_text(ptr)));
+        lines.push(format!("PTR{sep}{}", ptr_text(ptr)));
         return lines.join("\n");
     }
     for name in list.iter().take(20) {
-        lines.push(format!("PTR：{}", code(name)));
+        lines.push(format!("PTR{sep}{}", code(name)));
     }
     lines.join("\n")
 }
 
 fn help(prefix: &str) -> String {
     let p = escape(prefix);
-    format!(
-        "🛰 <b>BGP 路由信息</b>\n\n查 IP、前缀或 AS 号在公网上的路由：所在前缀、起源 AS、上游 AS、地区和反向解析。\n\n\
-         • <code>{p}bgp 1.1.1.1</code>\n\
-         • <code>{p}bgp 2606:4700::/32</code>\n\
-         • <code>{p}bgp AS13335</code>\n\
-         • 回复一条含 IP 的消息发 <code>{p}bgp</code>\n\
-         • <code>{p}bgp dns 8.8.8.8</code> 只查反向解析（PTR）\n\n数据来自 RIPEstat，只有文字，没有路由图。"
-    )
+    if kit::is_zh() {
+        format!(
+            "🛰 <b>BGP 路由信息</b>\n\n查 IP、前缀或 AS 号在公网上的路由：所在前缀、起源 AS、上游 AS、地区和反向解析。\n\n\
+             • <code>{p}bgp 1.1.1.1</code>\n\
+             • <code>{p}bgp 2606:4700::/32</code>\n\
+             • <code>{p}bgp AS13335</code>\n\
+             • 回复一条含 IP 的消息发 <code>{p}bgp</code>\n\
+             • <code>{p}bgp dns 8.8.8.8</code> 只查反向解析（PTR）\n\n数据来自 RIPEstat，只有文字，没有路由图。"
+        )
+    } else {
+        format!(
+            "🛰 <b>BGP Routing Info</b>\n\nLook up public BGP routing for an IP, prefix, or ASN: covering prefix, origin AS, upstreams, location, and reverse DNS.\n\n\
+             • <code>{p}bgp 1.1.1.1</code>\n\
+             • <code>{p}bgp 2606:4700::/32</code>\n\
+             • <code>{p}bgp AS13335</code>\n\
+             • Reply to a message containing an IP with <code>{p}bgp</code>\n\
+             • <code>{p}bgp dns 8.8.8.8</code> Reverse DNS (PTR) only\n\nPowered by RIPEstat (text only, no graphs)."
+        )
+    }
 }
 
 async fn handle(inv: &Invocation, app: &App) -> CmdResult {
@@ -936,14 +1007,21 @@ async fn handle(inv: &Invocation, app: &App) -> CmdResult {
         let trimmed = joined.trim();
         if !trimmed.is_empty() {
             parse_target(trimmed).ok_or_else(|| {
-                kit::fail("看不出要查什么，写 IP、前缀或 AS 号，例如 1.1.1.1、1.1.1.0/24、AS13335")
+                kit::fail(kit::tr(
+                    "Unable to parse target; enter an IP, prefix, or ASN, e.g. 1.1.1.1, 1.1.1.0/24, AS13335",
+                    "看不出要查什么，写 IP、前缀或 AS 号，例如 1.1.1.1、1.1.1.0/24、AS13335",
+                ))
             })?
         } else {
             let Some(reply) = kit::reply_msg(inv).await? else {
                 return inv.edit(&help(inv.prefix())).await.map_err(Into::into);
             };
-            find_target(&reply.content())
-                .ok_or_else(|| kit::fail("被回复的消息里没有 IP、前缀或 AS 号"))?
+            find_target(&reply.content()).ok_or_else(|| {
+                kit::fail(kit::tr(
+                    "No IP, prefix, or ASN found in replied message",
+                    "被回复的消息里没有 IP、前缀或 AS 号",
+                ))
+            })?
         }
     };
     if let Some(reason) = reserved_reason(&t) {
@@ -952,26 +1030,42 @@ async fn handle(inv: &Invocation, app: &App) -> CmdResult {
     let sub = inv.cancel.child_token();
     if dns {
         if t.kind != Kind::Ip {
-            return Err(kit::fail("反向解析只能查单个 IP"));
+            return Err(kit::fail(kit::tr(
+                "Reverse DNS lookup only supports a single IP",
+                "反向解析只能查单个 IP",
+            )));
         }
         let label = t.label();
-        inv.edit_text(&kit::working(&format!("正在查询 {label} 的反向解析"))).await?;
+        inv.edit_text(&kit::working(&if kit::is_zh() {
+            format!("正在查询 {label} 的反向解析")
+        } else {
+            format!("Looking up reverse DNS for {label}")
+        }))
+        .await?;
+        let ptr_fail = || kit::tr("Reverse DNS lookup failed", "反向解析查询失败");
         let ptr = tokio::time::timeout(LOOKUP_BUDGET, fetch_ptr(&sub, DEFAULT_API_BASE, &label))
             .await
-            .map_err(|_| kit::fail_with("反向解析查询失败", std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout")))?
-            .map_err(|e| kit::fail_with("反向解析查询失败", mibot_command::UserError::new(e.to_string())))?;
+            .map_err(|_| kit::fail_with(ptr_fail(), std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout")))?
+            .map_err(|e| kit::fail_with(ptr_fail(), mibot_command::UserError::new(e.to_string())))?;
         inv.edit(&render_ptr(&label, &ptr)).await?;
         return Ok(());
     }
-    inv.edit_text(&kit::working(&format!("正在查询 {}", t.label()))).await?;
+    inv.edit_text(&kit::working(&if kit::is_zh() {
+        format!("正在查询 {}", t.label())
+    } else {
+        format!("Looking up {}", t.label())
+    }))
+    .await?;
     let report = tokio::time::timeout(LOOKUP_BUDGET, lookup(&sub, Some(&app.logs), DEFAULT_API_BASE, t))
         .await
-        .map_err(|_| kit::fail("BGP 数据查询失败"))?
+        .map_err(|_| kit::fail(kit::tr("BGP lookup failed", "BGP 数据查询失败")))?
         .map_err(|e| {
             if kit::is_user_error(e.as_ref()) {
                 e
-            } else {
+            } else if kit::is_zh() {
                 kit::fail(format!("BGP 数据查询失败（{}）", mibot_command::brief(e.as_ref())))
+            } else {
+                kit::fail(format!("BGP lookup failed ({})", mibot_command::brief(e.as_ref())))
             }
         })?;
     inv.edit(&render(&report)).await?;
@@ -980,19 +1074,22 @@ async fn handle(inv: &Invocation, app: &App) -> CmdResult {
 
 pub fn register(app: &Arc<App>) {
     let app_ref = Arc::clone(app);
-    app.registry.register(Command {
-        name: "bgp".into(),
-        group: group::TOOLS.into(),
-        description: "查询 IP 的 BGP 路由".into(),
-        usage: "[dns] [IP|前缀|AS]".into(),
-        help_fn: Some(Arc::new(help)),
-        timeout: Some(Duration::from_secs(30)),
-        handle: Arc::new(move |inv| {
-            let a = Arc::clone(&app_ref);
-            Box::pin(async move { handle(&inv, &a).await })
-        }),
-        ..Default::default()
-    });
+    app.registry.register(
+        Command {
+            name: "bgp".into(),
+            group: group::TOOLS.into(),
+            description: "Query BGP routing info".into(),
+            usage: "[dns] [IP|prefix|AS]".into(),
+            help_fn: Some(Arc::new(help)),
+            timeout: Some(Duration::from_secs(30)),
+            handle: Arc::new(move |inv| {
+                let a = Arc::clone(&app_ref);
+                Box::pin(async move { handle(&inv, &a).await })
+            }),
+            ..Default::default()
+        }
+        .zh("查询 IP 的 BGP 路由", "[dns] [IP|前缀|AS]"),
+    );
 }
 
 #[cfg(test)]
@@ -1110,7 +1207,7 @@ mod tests {
         }
         assert_eq!(
             reserved_reason(&parse_target("192.168.1.1").unwrap()).unwrap(),
-            "192.168.1.1 是内网或保留地址，公网上没有它的路由"
+            "192.168.1.1 is a private or reserved IP with no public routing"
         );
     }
 
@@ -1142,8 +1239,8 @@ mod tests {
             .unwrap();
         let text = render(&r);
         check_html(&text);
-        assert!(text.contains("起源 AS：<code>AS13335</code> CLOUDFLARENET - Cloudflare, Inc."));
-        assert!(text.contains("地区：—") && text.contains("RIR：APNIC") && text.contains("RETN-AS &lt;RETN&gt; &amp; co"));
+        assert!(text.contains("Origin AS: <code>AS13335</code> CLOUDFLARENET - Cloudflare, Inc."));
+        assert!(text.contains("Location: —") && text.contains("RIR: APNIC") && text.contains("RETN-AS &lt;RETN&gt; &amp; co"));
         assert!(!text.contains("AS64000") && !text.contains("AS34549") && !text.contains("⚠️"));
         assert_eq!(calls.lock().unwrap().len(), 6);
 
@@ -1154,6 +1251,6 @@ mod tests {
         };
         let ptr_text = render_ptr("8.8.8.8", &ptr);
         check_html(&ptr_text);
-        assert!(ptr_text.contains("PTR：<code>a.example</code>\nPTR：<code>b.example</code>"));
+        assert!(ptr_text.contains("PTR: <code>a.example</code>\nPTR: <code>b.example</code>"));
     }
 }

@@ -12,28 +12,39 @@ pub const PREVIEW_RUNES: usize = 200;
 pub struct Operation {
     pub name: &'static str,
     pub title: &'static str,
+    pub title_zh: &'static str,
     pub transform: fn(&str) -> Result<String, &'static str>,
+}
+
+impl Operation {
+    pub fn title_text(&self) -> &'static str {
+        kit::tr(self.title, self.title_zh)
+    }
 }
 
 pub static OPERATIONS: &[Operation] = &[
     Operation {
         name: "b64encode",
-        title: "Base64 编码",
+        title: "Base64 Encode",
+        title_zh: "Base64 编码",
         transform: |s| Ok(STANDARD.encode(s.as_bytes())),
     },
     Operation {
         name: "b64decode",
-        title: "Base64 解码",
+        title: "Base64 Decode",
+        title_zh: "Base64 解码",
         transform: decode_base64,
     },
     Operation {
         name: "urlencode",
-        title: "URL 编码",
+        title: "URL Encode",
+        title_zh: "URL 编码",
         transform: |s| Ok(encode_uri_component(s)),
     },
     Operation {
         name: "urldecode",
-        title: "URL 解码",
+        title: "URL Decode",
+        title_zh: "URL 解码",
         transform: decode_uri_component,
     },
 ];
@@ -41,49 +52,79 @@ pub static OPERATIONS: &[Operation] = &[
 fn help(prefix: &str) -> String {
     let p = escape(prefix);
     let c = |t: &str| format!("<code>{p}{t}</code>");
-    format!(
-        "🔣 <b>编码解码</b>\n\n\
-         • {} Base64 编码\n\
-         • {} Base64 解码\n\
-         • {} URL 编码\n\
-         • {} URL 解码\n\n\
-         不写文本时处理所回复的那条消息。\n\n<b>示例</b>\n\
-         • {}\n\
-         • {}\n\
-         • {}\n\
-         • {}\n\n\
-         Base64 解码也认 URL 安全的写法（- 和 _）；URL 编码的规则同 JavaScript 的 encodeURIComponent，空格编成 %20。",
-        c("b64encode 文本"),
-        c("b64decode 文本"),
-        c("urlencode 文本"),
-        c("urldecode 文本"),
-        c("b64encode Hello World"),
-        c("b64decode SGVsbG8gV29ybGQ="),
-        c("urlencode 你好世界"),
-        c("urldecode %E4%BD%A0%E5%A5%BD"),
-    )
+    if kit::is_zh() {
+        format!(
+            "🔣 <b>编码解码</b>\n\n\
+             • {} Base64 编码\n\
+             • {} Base64 解码\n\
+             • {} URL 编码\n\
+             • {} URL 解码\n\n\
+             不写文本时处理所回复的那条消息。\n\n<b>示例</b>\n\
+             • {}\n\
+             • {}\n\
+             • {}\n\
+             • {}\n\n\
+             Base64 解码也认 URL 安全的写法（- 和 _）；URL 编码的规则同 JavaScript 的 encodeURIComponent，空格编成 %20。",
+            c("b64encode 文本"),
+            c("b64decode 文本"),
+            c("urlencode 文本"),
+            c("urldecode 文本"),
+            c("b64encode Hello World"),
+            c("b64decode SGVsbG8gV29ybGQ="),
+            c("urlencode 你好世界"),
+            c("urldecode %E4%BD%A0%E5%A5%BD"),
+        )
+    } else {
+        format!(
+            "🔣 <b>Encode &amp; Decode</b>\n\n\
+             • {} Base64 encode\n\
+             • {} Base64 decode\n\
+             • {} URL encode\n\
+             • {} URL decode\n\n\
+             Processes the replied message when no text is given.\n\n<b>Examples</b>\n\
+             • {}\n\
+             • {}\n\
+             • {}\n\
+             • {}\n\n\
+             Base64 decode also accepts URL-safe (- and _); URL encoding follows JavaScript encodeURIComponent (spaces as %20).",
+            c("b64encode text"),
+            c("b64decode text"),
+            c("urlencode text"),
+            c("urldecode text"),
+            c("b64encode Hello World"),
+            c("b64decode SGVsbG8gV29ybGQ="),
+            c("urlencode hello world"),
+            c("urldecode %E4%BD%A0%E5%A5%BD"),
+        )
+    }
 }
 
 pub fn register(a: &Arc<App>) {
-    a.registry.register(kit::make_cmd(
-        "encode",
-        &[],
-        group::TOOLS,
-        "查看编码解码命令",
-        "",
-        help,
-        move |inv: Invocation| Box::pin(async move { inv.edit(&help(inv.prefix())).await.map_err(Into::into) }),
-    ));
+    a.registry.register(
+        kit::make_cmd(
+            "encode",
+            &[],
+            group::TOOLS,
+            "Encode or decode",
+            "",
+            help,
+            move |inv: Invocation| {
+                Box::pin(async move { inv.edit(&help(inv.prefix())).await.map_err(Into::into) })
+            },
+        )
+        .zh("查看编码解码命令", ""),
+    );
     for &op in OPERATIONS {
         let mut cmd: Command = kit::make_cmd(
             op.name,
             &[],
             group::TOOLS,
-            &format!("{}文本", op.title),
-            "[文本]",
+            op.title,
+            "[text]",
             help,
             move |inv: Invocation| Box::pin(async move { run(inv, op).await }),
-        );
+        )
+        .zh(format!("{}文本", op.title_zh), "[文本]");
         cmd.free_text = true;
         a.registry.register(cmd);
     }
@@ -98,15 +139,27 @@ async fn run(inv: Invocation, op: Operation) -> mibot_command::CmdResult {
     }
     if input.is_empty() {
         if inv.message.reply_to_id != 0 {
-            return Err(kit::fail_err("被回复的消息没有文字"));
+            return Err(kit::fail_err(kit::tr(
+                "Replied message has no text",
+                "被回复的消息没有文字",
+            )));
         }
         return inv.edit(&help(inv.prefix())).await.map_err(Into::into);
     }
     if kit::utf16_len_usize(&input) > MAX_INPUT {
-        return Err(kit::fail_err(format!("文本太长，最多 {MAX_INPUT} 字")));
+        return Err(kit::fail_err(if kit::is_zh() {
+            format!("文本太长，最多 {MAX_INPUT} 字")
+        } else {
+            format!("Text too long (max {MAX_INPUT} chars)")
+        }));
     }
-    let output = (op.transform)(&input)
-        .map_err(|msg| kit::fail_err(format!("{}失败：{msg}", op.title)))?;
+    let output = (op.transform)(&input).map_err(|msg| {
+        kit::fail_err(if kit::is_zh() {
+            format!("{}失败：{msg}", op.title_zh)
+        } else {
+            format!("{} failed: {msg}", op.title)
+        })
+    })?;
     let pages = html_pages(&render(op, &input, &output), PAGE_LIMIT);
     inv.respond_pages(&pages).await.map_err(Into::into)
 }
@@ -118,13 +171,18 @@ pub fn render(op: Operation, input: &str, output: &str) -> String {
         input.to_owned()
     };
     let result = if output.is_empty() {
-        "（空）".to_owned()
+        kit::tr("(empty)", "（空）").to_owned()
     } else {
         code(output)
     };
+    let (in_label, out_label) = if kit::is_zh() {
+        ("原文", "结果")
+    } else {
+        ("Input", "Output")
+    };
     format!(
-        "🔣 <b>{}</b>\n\n<b>原文</b>\n{}\n\n<b>结果</b>\n{}",
-        escape(op.title),
+        "🔣 <b>{}</b>\n\n<b>{in_label}</b>\n{}\n\n<b>{out_label}</b>\n{}",
+        escape(op.title_text()),
         code(&preview),
         result
     )
@@ -133,7 +191,7 @@ pub fn render(op: Operation, input: &str, output: &str) -> String {
 pub fn decode_base64(input: &str) -> Result<String, &'static str> {
     let compact: String = input.split_whitespace().collect();
     if compact.is_empty() {
-        return Err("不是有效的 Base64 字符串");
+        return Err(kit::tr("Not a valid Base64 string", "不是有效的 Base64 字符串"));
     }
     let url_safe = compact.contains(['-', '_']);
     let padded = compact.ends_with('=');
@@ -143,8 +201,13 @@ pub fn decode_base64(input: &str) -> Result<String, &'static str> {
         (false, true) => STANDARD.decode(&compact),
         (false, false) => STANDARD_NO_PAD.decode(&compact),
     }
-    .map_err(|_| "不是有效的 Base64 字符串")?;
-    String::from_utf8(decoded).map_err(|_| "解出来的内容不是 UTF-8 文本")
+    .map_err(|_| kit::tr("Not a valid Base64 string", "不是有效的 Base64 字符串"))?;
+    String::from_utf8(decoded).map_err(|_| {
+        kit::tr(
+            "Decoded bytes are not valid UTF-8",
+            "解出来的内容不是 UTF-8 文本",
+        )
+    })
 }
 
 fn uri_unreserved(b: u8) -> bool {
@@ -177,14 +240,19 @@ pub fn decode_uri_component(input: &str) -> Result<String, &'static str> {
             continue;
         }
         if i + 2 >= bytes.len() {
-            return Err("不是有效的 URL 编码");
+            return Err(kit::tr("Not valid URL encoding", "不是有效的 URL 编码"));
         }
-        let hi = from_hex(bytes[i + 1]).ok_or("不是有效的 URL 编码")?;
-        let lo = from_hex(bytes[i + 2]).ok_or("不是有效的 URL 编码")?;
+        let hi = from_hex(bytes[i + 1]).ok_or_else(|| kit::tr("Not valid URL encoding", "不是有效的 URL 编码"))?;
+        let lo = from_hex(bytes[i + 2]).ok_or_else(|| kit::tr("Not valid URL encoding", "不是有效的 URL 编码"))?;
         out.push((hi << 4) | lo);
         i += 3;
     }
-    String::from_utf8(out).map_err(|_| "解出来的内容不是 UTF-8 文本")
+    String::from_utf8(out).map_err(|_| {
+        kit::tr(
+            "Decoded bytes are not valid UTF-8",
+            "解出来的内容不是 UTF-8 文本",
+        )
+    })
 }
 
 fn from_hex(b: u8) -> Option<u8> {
@@ -286,7 +354,7 @@ mod tests {
                 && !text.contains(&"字".repeat(PREVIEW_RUNES + 1))
         );
         assert!(text.contains("<code>&lt;&amp;&gt;</code>"));
-        assert!(text.starts_with("🔣 <b>Base64 编码</b>"));
+        assert!(text.starts_with("🔣 <b>Base64 Encode</b>"));
         let output = (find("b64encode").transform)(&"长文本".repeat(4000)).unwrap();
         let pages = html_pages(&render(find("b64encode"), "x", &output), PAGE_LIMIT);
         assert!(pages.len() >= 2);
@@ -324,7 +392,7 @@ mod tests {
             assert!(h.starts_with("🔣 <b>"), "{name}: {h}");
             assert_eq!(cmd.free_text, name != "encode");
             let len = cmd.description.chars().count();
-            assert!((4..=16).contains(&len), "{name}: {:?}", cmd.description);
+            assert!((4..=24).contains(&len), "{name}: {:?}", cmd.description);
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

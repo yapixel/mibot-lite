@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/delivery",
+    "crates/i18n",
     "crates/fsutil",
     "crates/mibox",
     "crates/sysinfo",
@@ -26,7 +27,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.2"
+version = "0.5.0"
 edition = "2024"
 license = "LGPL-2.1-only"
 
@@ -69,6 +70,7 @@ grammers-tl-types = { version = "=0.12.0", features = ["impl-debug", "impl-from-
 grammers-mtproto = "=0.12.0"
 grammers-crypto = "=0.12.0"
 mibot-fsutil = { path = "crates/fsutil" }
+mibot-i18n = { path = "crates/i18n" }
 mibot-sysinfo = { path = "crates/sysinfo" }
 mibot-config = { path = "crates/config" }
 mibot-delivery = { path = "crates/delivery" }

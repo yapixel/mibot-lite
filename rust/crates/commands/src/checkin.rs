@@ -30,9 +30,9 @@ struct SignTarget {
 impl SignTarget {
     fn matcher(&self) -> String {
         if !self.callback_data.is_empty() {
-            format!("回调数据 {}", code(&self.callback_data))
+            format!("{} {}", kit::tr("callback data", "回调数据"), code(&self.callback_data))
         } else if !self.button_text.is_empty() {
-            format!("按钮文字 {}", code(&self.button_text))
+            format!("{} {}", kit::tr("button text", "按钮文字"), code(&self.button_text))
         } else {
             String::new()
         }
@@ -221,9 +221,9 @@ fn button_data(message: &tl::types::Message, target: &SignTarget) -> Option<Vec<
 
 fn button_label(target: &SignTarget) -> String {
     if !target.callback_data.is_empty() {
-        format!("回调数据 {}", target.callback_data)
+        format!("{} {}", kit::tr("callback data", "回调数据"), target.callback_data)
     } else {
-        format!("按钮文字 {}", target.button_text)
+        format!("{} {}", kit::tr("button text", "按钮文字"), target.button_text)
     }
 }
 
@@ -238,7 +238,7 @@ fn mask(secret: &str) -> String {
 fn brief_reply(reply: &str) -> String {
     let collapsed = reply.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.is_empty() {
-        "（回复里没有文字）".into()
+        kit::tr("(no text in reply)", "（回复里没有文字）").into()
     } else {
         truncate(&collapsed, 80)
     }
@@ -246,7 +246,7 @@ fn brief_reply(reply: &str) -> String {
 
 fn reason(err: &(dyn std::error::Error + 'static), cancelled: bool) -> String {
     if cancelled {
-        return "服务停了，没签完".into();
+        return kit::tr("Stopped before completion", "服务停了，没签完").into();
     }
     if kit::is_user_error(err) {
         return err.to_string();
@@ -260,20 +260,36 @@ fn remaining(pages: &[String], sent: usize, uncertain: bool) -> Vec<String> {
     }
     let mut rest = pages[sent.min(pages.len())..].to_vec();
     let mut note = String::new();
-    if sent > 0 {
-        note.push_str(&format!("签到汇总的前 {sent} 页已经发出。"));
+    if kit::is_zh() {
+        if sent > 0 {
+            note.push_str(&format!("签到汇总的前 {sent} 页已经发出。"));
+        }
+        if uncertain && !rest.is_empty() {
+            note.push_str(&format!(
+                "第 {} 页不确定是否送达，为免重复没有在这里重发。",
+                sent + 1
+            ));
+            rest.remove(0);
+        }
+        if !rest.is_empty() {
+            note.push_str(&format!("以下是其余 {} 页。", rest.len()));
+        }
+    } else {
+        if sent > 0 {
+            note.push_str(&format!("First {sent} page(s) of check-in summary already sent. "));
+        }
+        if uncertain && !rest.is_empty() {
+            note.push_str(&format!(
+                "Page {} delivery uncertain, skipped to avoid duplicates. ",
+                sent + 1
+            ));
+            rest.remove(0);
+        }
+        if !rest.is_empty() {
+            note.push_str(&format!("Remaining {} page(s) below.", rest.len()));
+        }
     }
-    if uncertain && !rest.is_empty() {
-        note.push_str(&format!(
-            "第 {} 页不确定是否送达，为免重复没有在这里重发。",
-            sent + 1
-        ));
-        rest.remove(0);
-    }
-    if !rest.is_empty() {
-        note.push_str(&format!("以下是其余 {} 页。", rest.len()));
-    }
-    let mut out = vec![format!("ℹ️ {note}")];
+    let mut out = vec![format!("ℹ️ {}", note.trim_end())];
     out.extend(rest);
     out
 }
@@ -374,7 +390,10 @@ impl Service {
             }
         }
         if cancel.is_cancelled() {
-            return Err(kit::fail("服务停了，没签完"));
+            return Err(kit::fail(kit::tr(
+                "Stopped before completion",
+                "服务停了，没签完",
+            )));
         }
         Ok(None)
     }
@@ -403,7 +422,7 @@ impl Service {
                 }
             }
             Err(err) if err.is_rpc("BOT_RESPONSE_TIMEOUT") => {}
-            Err(err) => return Err(kit::fail_with("点按钮失败", err)),
+            Err(err) => return Err(kit::fail_with(kit::tr("Failed to click button", "点按钮失败"), err)),
         }
         let edited = message.edit_date.unwrap_or(0);
         let msg_id = message.id;
@@ -415,7 +434,7 @@ impl Service {
             })
             .await?;
         Ok(match reply {
-            None => "已点按钮，没收到回复".into(),
+            None => kit::tr("Button clicked, no reply received", "已点按钮，没收到回复").into(),
             Some(m) => m.message,
         })
     }
@@ -433,9 +452,21 @@ impl Service {
         let peer = client
             .resolve_target(&target.target)
             .await
-            .map_err(|e| kit::fail_with(format!("找不到目标 {}", target.target), e))?;
+            .map_err(|e| {
+                kit::fail_with(
+                    if kit::is_zh() {
+                        format!("找不到目标 {}", target.target)
+                    } else {
+                        format!("Target not found: {}", target.target)
+                    },
+                    e,
+                )
+            })?;
         if cancel.is_cancelled() {
-            return Err(kit::fail("服务停了，没签完"));
+            return Err(kit::fail(kit::tr(
+                "Stopped before completion",
+                "服务停了，没签完",
+            )));
         }
         if let Some(f) = begin {
             f()?;
@@ -444,7 +475,7 @@ impl Service {
             client.send_text(&peer, &target.command, SendOptions::default())
         })
         .await
-        .map_err(|e| kit::fail_with("签到命令发送失败", e))?;
+        .map_err(|e| kit::fail_with(kit::tr("Failed to send check-in command", "签到命令发送失败"), e))?;
         let sent = first_sent_message_id(&sent_updates).unwrap_or(0);
         let wants_button = !target.callback_data.is_empty() || !target.button_text.is_empty();
         let reply = self
@@ -458,12 +489,20 @@ impl Service {
         let Some(reply) = reply else {
             let secs = self.rt.reply_wait.as_secs();
             if wants_button {
-                return Err(kit::fail(format!(
-                    "{secs} 秒内没收到带这个按钮的回复（{}）",
-                    button_label(target)
-                )));
+                return Err(kit::fail(if kit::is_zh() {
+                    format!("{secs} 秒内没收到带这个按钮的回复（{}）", button_label(target))
+                } else {
+                    format!(
+                        "No reply with matching button within {secs}s ({})",
+                        button_label(target)
+                    )
+                }));
             }
-            return Err(kit::fail(format!("{secs} 秒内没收到回复")));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("{secs} 秒内没收到回复")
+            } else {
+                format!("No reply within {secs}s")
+            }));
         };
         if !wants_button {
             return Ok(reply.message);
@@ -484,21 +523,29 @@ impl Service {
         let mut lines = Vec::new();
         let mut succeeded = 0usize;
         let mut skipped = 0usize;
+        let stopped = || kit::tr("Stopped before completion", "服务停了，没签完");
 
         for (index, target) in targets.iter().enumerate() {
             if cancel.is_cancelled() {
-                return Err(kit::fail("服务停了，没签完"));
+                return Err(kit::fail(stopped()));
             }
             if index > 0 && !kit::sleep(cancel, self.rt.gap).await {
-                return Err(kit::fail("服务停了，没签完"));
+                return Err(kit::fail(stopped()));
             }
             let cfg = self.store.read()?;
             if cfg.attempt_date == date && cfg.attempted.iter().any(|id| id == &target.id) {
                 skipped += 1;
-                lines.push(format!(
-                    "ℹ️ {}：上次已开始，结果可能未确认，没有重复发送",
-                    escape(&target.name)
-                ));
+                lines.push(if kit::is_zh() {
+                    format!(
+                        "ℹ️ {}：上次已开始，结果可能未确认，没有重复发送",
+                        escape(&target.name)
+                    )
+                } else {
+                    format!(
+                        "ℹ️ {}: already attempted earlier, skipped to avoid duplicate",
+                        escape(&target.name)
+                    )
+                });
                 continue;
             }
             let store_ref = Arc::clone(&self.store);
@@ -519,13 +566,16 @@ impl Service {
                             c.attempted.retain(|x| x != &tid);
                         }
                     });
-                    return Err(kit::fail("服务停了，没签完"));
+                    return Err(kit::fail(kit::tr(
+                        "Stopped before completion",
+                        "服务停了，没签完",
+                    )));
                 }
                 Ok(())
             };
             let res = self.sign_with_attempt(cancel, client, target, Some(begin)).await;
             if cancel.is_cancelled() {
-                return Err(kit::fail("服务停了，没签完"));
+                return Err(kit::fail(stopped()));
             }
             match res {
                 Err(err) => {
@@ -535,24 +585,40 @@ impl Service {
                         "checkin.failed",
                         &[("target", &target.id), ("error", &err.to_string())],
                     );
-                    lines.push(format!(
-                        "❌ {}：{}",
-                        escape(&target.name),
-                        escape(&reason(err.as_ref(), cancel.is_cancelled()))
-                    ));
+                    lines.push(if kit::is_zh() {
+                        format!(
+                            "❌ {}：{}",
+                            escape(&target.name),
+                            escape(&reason(err.as_ref(), cancel.is_cancelled()))
+                        )
+                    } else {
+                        format!(
+                            "❌ {}: {}",
+                            escape(&target.name),
+                            escape(&reason(err.as_ref(), cancel.is_cancelled()))
+                        )
+                    });
                 }
                 Ok(reply) => {
                     succeeded += 1;
-                    lines.push(format!(
-                        "✅ {}：{}",
-                        escape(&target.name),
-                        escape(&brief_reply(&reply))
-                    ));
+                    lines.push(if kit::is_zh() {
+                        format!(
+                            "✅ {}：{}",
+                            escape(&target.name),
+                            escape(&brief_reply(&reply))
+                        )
+                    } else {
+                        format!(
+                            "✅ {}: {}",
+                            escape(&target.name),
+                            escape(&brief_reply(&reply))
+                        )
+                    });
                 }
             }
         }
         if cancel.is_cancelled() {
-            return Err(kit::fail("服务停了，没签完"));
+            return Err(kit::fail(stopped()));
         }
         kit::update_ok(&self.store, |c| {
             c.last_run_date = date.to_owned();
@@ -561,19 +627,29 @@ impl Service {
         })?;
         let dt = to_shanghai(started);
         let failed = targets.len().saturating_sub(succeeded + skipped);
-        let mut count_line = format!("成功 {succeeded} 个，失败 {failed} 个");
-        if skipped > 0 {
-            count_line.push_str(&format!("，跳过上次已开始的 {skipped} 个"));
-        }
-        let mut out = vec![
-            "📅 <b>签到汇总</b>".to_owned(),
-            format!(
-                "{source} · {}（北京时间）",
-                dt.format("%Y-%m-%d %H:%M")
-            ),
-            count_line,
-            String::new(),
-        ];
+        let mut out = if kit::is_zh() {
+            let mut count_line = format!("成功 {succeeded} 个，失败 {failed} 个");
+            if skipped > 0 {
+                count_line.push_str(&format!("，跳过上次已开始的 {skipped} 个"));
+            }
+            vec![
+                "📅 <b>签到汇总</b>".to_owned(),
+                format!("{source} · {}（北京时间）", dt.format("%Y-%m-%d %H:%M")),
+                count_line,
+                String::new(),
+            ]
+        } else {
+            let mut count_line = format!("{succeeded} succeeded, {failed} failed");
+            if skipped > 0 {
+                count_line.push_str(&format!(", {skipped} skipped"));
+            }
+            vec![
+                "📅 <b>Check-in Summary</b>".to_owned(),
+                format!("{source} · {} (UTC+8)", dt.format("%Y-%m-%d %H:%M")),
+                count_line,
+                String::new(),
+            ]
+        };
         out.extend(lines);
         Ok(out.join("\n"))
     }
@@ -746,7 +822,7 @@ impl Service {
             "checkin.start",
             &[("targets", &targets.len().to_string()), ("planned", &cfg.current_run_time)],
         );
-        match self.run_all(cancel, client, &targets, "定时", &today).await {
+        match self.run_all(cancel, client, &targets, kit::tr("Scheduled", "定时"), &today).await {
             Err(err) => kit::opt_log(
                 self.app.as_ref().map(|a| &a.logs),
                 mibot_logtail::Level::Warn,
@@ -790,14 +866,22 @@ impl Service {
                     c.attempt_date.clear();
                     c.attempted.clear();
                 })?;
-                inv.edit_text("✅ 已清掉今天的执行记录，到时间会再签一次").await?;
+                inv.edit_text(kit::tr(
+                    "✅ Cleared today's run record; scheduled check-in will run again",
+                    "✅ 已清掉今天的执行记录，到时间会再签一次",
+                ))
+                .await?;
                 Ok(())
             }
-            _ => Err(kit::fail(format!(
-                "没有这个子命令：{}，{}help checkin 看用法",
-                inv.arg(0),
-                inv.prefix()
-            ))),
+            _ => Err(kit::fail(if kit::is_zh() {
+                format!("没有这个子命令：{}，{}help checkin 看用法", inv.arg(0), inv.prefix())
+            } else {
+                format!(
+                    "Unknown subcommand: {}; run {}help checkin for usage",
+                    inv.arg(0),
+                    inv.prefix()
+                )
+            })),
         }
     }
 
@@ -808,18 +892,30 @@ impl Service {
         }
         let targets = cfg.enabled();
         if targets.is_empty() {
-            return Err(kit::fail(format!(
-                "签到目标都关着，{}checkin toggle ID 可以打开",
-                inv.prefix()
-            )));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("签到目标都关着，{}checkin toggle ID 可以打开", inv.prefix())
+            } else {
+                format!(
+                    "All targets are disabled; enable one with {}checkin toggle ID",
+                    inv.prefix()
+                )
+            }));
         }
         let Ok(_guard) = self.running.try_lock() else {
-            return Err(kit::fail("正在签到，请稍候"));
+            return Err(kit::fail(kit::tr(
+                "Check-in is already running; please wait",
+                "正在签到，请稍候",
+            )));
         };
-        inv.edit_text(&kit::working(&format!("正在签到 {} 个目标", targets.len()))).await?;
+        inv.edit_text(&kit::working(&if kit::is_zh() {
+            format!("正在签到 {} 个目标", targets.len())
+        } else {
+            format!("Checking in {} target(s)", targets.len())
+        }))
+        .await?;
         let today = schedule_date(&cfg, SystemTime::now());
         let summary = self
-            .run_all(&inv.cancel, &inv.client, &targets, "手动", &today)
+            .run_all(&inv.cancel, &inv.client, &targets, kit::tr("Manual", "手动"), &today)
             .await?;
         self.deliver(&inv.client, &cfg, &summary, Some(inv)).await
     }
@@ -829,10 +925,17 @@ impl Service {
         let fields: Vec<&str> = head.split_whitespace().collect();
         let sign = sign.trim();
         if fields.len() < 4 || sign.is_empty() {
-            return Err(kit::fail(format!(
-                "用法：{}checkin add ID 名称 目标 [data:回调数据|text:按钮文字]，签到命令写在第二行",
-                inv.prefix()
-            )));
+            return Err(kit::fail(if kit::is_zh() {
+                format!(
+                    "用法：{}checkin add ID 名称 目标 [data:回调数据|text:按钮文字]，签到命令写在第二行",
+                    inv.prefix()
+                )
+            } else {
+                format!(
+                    "Usage: {}checkin add ID name target [data:callback|text:button], put the command on the second line",
+                    inv.prefix()
+                )
+            }));
         }
         let (callback_data, button_text) = parse_matcher(&fields[4..].join(" "));
         let next = SignTarget {
@@ -844,23 +947,37 @@ impl Service {
             button_text,
             enabled: true,
         };
-        let mut verb = "添加";
+        let mut updated = false;
         kit::update_ok(&self.store, |cfg| {
             if let Some(idx) = cfg.find(&next.id) {
                 cfg.targets[idx] = next.clone();
-                verb = "更新";
+                updated = true;
             } else {
                 cfg.targets.push(next.clone());
             }
         })?;
-        let mut lines = vec![
-            format!("✅ 已{verb}签到目标 {}（{}）", bold(&next.name), code(&next.id)),
-            format!("目标：{}", code(&next.target)),
-            format!("命令：{}", code(&next.command)),
-        ];
+        let mut lines = if kit::is_zh() {
+            let verb = if updated { "更新" } else { "添加" };
+            vec![
+                format!("✅ 已{verb}签到目标 {}（{}）", bold(&next.name), code(&next.id)),
+                format!("目标：{}", code(&next.target)),
+                format!("命令：{}", code(&next.command)),
+            ]
+        } else {
+            let verb = if updated { "Updated" } else { "Added" };
+            vec![
+                format!("✅ {verb} check-in target {} ({})", bold(&next.name), code(&next.id)),
+                format!("Target: {}", code(&next.target)),
+                format!("Command: {}", code(&next.command)),
+            ]
+        };
         let matcher = next.matcher();
         if !matcher.is_empty() {
-            lines.push(format!("然后点：{matcher}"));
+            lines.push(if kit::is_zh() {
+                format!("然后点：{matcher}")
+            } else {
+                format!("Then click: {matcher}")
+            });
         }
         inv.edit(&lines.join("\n")).await?;
         Ok(())
@@ -881,7 +998,12 @@ impl Service {
         if !found {
             return Err(not_found(inv, id));
         }
-        inv.edit(&format!("✅ 已删除签到目标 {}", code(id))).await?;
+        inv.edit(&if kit::is_zh() {
+            format!("✅ 已删除签到目标 {}", code(id))
+        } else {
+            format!("✅ Deleted check-in target {}", code(id))
+        })
+        .await?;
         Ok(())
     }
 
@@ -900,37 +1022,66 @@ impl Service {
         let Some(t) = found else {
             return Err(not_found(inv, id));
         };
-        inv.edit(&format!("✅ {} 已{}", bold(&t.name), kit::on_off_text(t.enabled))).await?;
+        inv.edit(&if kit::is_zh() {
+            format!("✅ {} 已{}", bold(&t.name), kit::on_off_text(t.enabled))
+        } else {
+            format!("✅ {} turned {}", bold(&t.name), kit::on_off_text(t.enabled))
+        })
+        .await?;
         Ok(())
     }
 
     async fn list(&self, inv: &Invocation) -> CmdResult {
         let cfg = self.store.read()?;
         if cfg.targets.is_empty() {
-            inv.edit(&format!(
-                "📅 <b>签到目标</b>\n\n还没有，{} 添加",
-                code(&format!("{}checkin add", inv.prefix()))
-            ))
+            inv.edit(&if kit::is_zh() {
+                format!(
+                    "📅 <b>签到目标</b>\n\n还没有，{} 添加",
+                    code(&format!("{}checkin add", inv.prefix()))
+                )
+            } else {
+                format!(
+                    "📅 <b>Check-in Targets</b>\n\nNone yet; add with {}",
+                    code(&format!("{}checkin add", inv.prefix()))
+                )
+            })
             .await?;
             return Ok(());
         }
-        let mut lines = vec![format!(
-            "📅 <b>签到目标</b>（{}/{} 个开启）",
-            cfg.enabled().len(),
-            cfg.targets.len()
-        )];
+        let mut lines = vec![if kit::is_zh() {
+            format!(
+                "📅 <b>签到目标</b>（{}/{} 个开启）",
+                cfg.enabled().len(),
+                cfg.targets.len()
+            )
+        } else {
+            format!(
+                "📅 <b>Check-in Targets</b> ({}/{} enabled)",
+                cfg.enabled().len(),
+                cfg.targets.len()
+            )
+        }];
         for (idx, t) in cfg.targets.iter().enumerate() {
             let mut title = format!("<b>{}. {}</b>", idx + 1, escape(&t.name));
             if !t.enabled {
-                title.push_str("（关闭）");
+                title.push_str(kit::tr(" (disabled)", "（关闭）"));
             }
             lines.push(String::new());
             lines.push(title);
-            lines.push(format!("ID：{} · 目标：{}", code(&t.id), code(&t.target)));
-            lines.push(format!("命令：{}", code(&t.command)));
+            if kit::is_zh() {
+                lines.push(format!("ID：{} · 目标：{}", code(&t.id), code(&t.target)));
+                lines.push(format!("命令：{}", code(&t.command)));
+            } else {
+                lines.push(format!("ID: {} · Target: {}", code(&t.id), code(&t.target)));
+                lines.push(format!("Command: {}", code(&t.command)));
+            }
             let matcher = t.matcher();
             if !matcher.is_empty() {
-                lines.push(format!("然后点：{matcher}"));
+                lines.push(if kit::is_zh() {
+                    format!("然后点：{matcher}")
+                } else {
+                    format!("Then click: {matcher}")
+                });
             }
         }
         inv.respond_pages(&html_pages(&lines.join("\n"), PAGE_LIMIT)).await?;
@@ -948,19 +1099,40 @@ impl Service {
         };
         let target = cfg.targets[idx].clone();
         let Ok(_guard) = self.running.try_lock() else {
-            return Err(kit::fail("正在签到，请稍候"));
+            return Err(kit::fail(kit::tr(
+                "Check-in is already running; please wait",
+                "正在签到，请稍候",
+            )));
         };
-        inv.edit_text(&kit::working(&format!("正在试签 {}", target.name))).await?;
+        inv.edit_text(&kit::working(&if kit::is_zh() {
+            format!("正在试签 {}", target.name)
+        } else {
+            format!("Testing check-in for {}", target.name)
+        }))
+        .await?;
         match self.sign_with_attempt::<fn() -> Result<(), CmdError>>(&inv.cancel, &inv.client, &target, None).await {
             Ok(reply) => {
-                inv.edit(&format!("✅ 已签到 {}\n回复：{}", bold(&target.name), escape(&brief_reply(&reply)))).await?;
+                inv.edit(&if kit::is_zh() {
+                    format!("✅ 已签到 {}\n回复：{}", bold(&target.name), escape(&brief_reply(&reply)))
+                } else {
+                    format!("✅ Checked in {}\nReply: {}", bold(&target.name), escape(&brief_reply(&reply)))
+                })
+                .await?;
                 Ok(())
             }
-            Err(err) => Err(kit::fail(format!(
-                "{} 签到失败：{}",
-                target.name,
-                reason(err.as_ref(), inv.cancel.is_cancelled())
-            ))),
+            Err(err) => Err(kit::fail(if kit::is_zh() {
+                format!(
+                    "{} 签到失败：{}",
+                    target.name,
+                    reason(err.as_ref(), inv.cancel.is_cancelled())
+                )
+            } else {
+                format!(
+                    "{} check-in failed: {}",
+                    target.name,
+                    reason(err.as_ref(), inv.cancel.is_cancelled())
+                )
+            })),
         }
     }
 
@@ -969,79 +1141,129 @@ impl Service {
         match inv.arg(1).to_ascii_lowercase().as_str() {
             "time" | "t" => {
                 let Some(at) = parse_clock(value) else {
-                    return Err(kit::fail("时间要写成 HH:MM，例如 10:30"));
+                    return Err(kit::fail(kit::tr(
+                        "Time must be HH:MM, e.g. 10:30",
+                        "时间要写成 HH:MM，例如 10:30",
+                    )));
                 };
                 let fc = format_clock(at);
-                self.update_setting(inv, |c| c.run_time = fc.clone(), &format!("开始时间已设为 {fc}")).await
+                let msg = if kit::is_zh() {
+                    format!("开始时间已设为 {fc}")
+                } else {
+                    format!("Start time set to {fc}")
+                };
+                self.update_setting(inv, |c| c.run_time = fc.clone(), &msg).await
             }
             "range" | "r" => {
                 if value.is_empty() {
-                    return self.update_setting(inv, |c| c.run_time_end.clear(), "已改回固定时间签到").await;
+                    return self
+                        .update_setting(
+                            inv,
+                            |c| c.run_time_end.clear(),
+                            kit::tr("Switched back to fixed-time check-in", "已改回固定时间签到"),
+                        )
+                        .await;
                 }
                 let Some(end) = parse_clock(value) else {
-                    return Err(kit::fail("时间要写成 HH:MM，例如 11:30"));
+                    return Err(kit::fail(kit::tr(
+                        "Time must be HH:MM, e.g. 11:30",
+                        "时间要写成 HH:MM，例如 11:30",
+                    )));
                 };
                 let fc = format_clock(end);
-                self.update_setting(
-                    inv,
-                    |c| c.run_time_end = fc.clone(),
-                    &format!("结束时间已设为 {fc}，每天在这段时间里随机挑一分钟签"),
-                )
-                .await
+                let msg = if kit::is_zh() {
+                    format!("结束时间已设为 {fc}，每天在这段时间里随机挑一分钟签")
+                } else {
+                    format!("End time set to {fc}; a random minute in this window is picked daily")
+                };
+                self.update_setting(inv, |c| c.run_time_end = fc.clone(), &msg).await
             }
             "delay" | "d" => {
                 let Some(minutes) = value.parse::<usize>().ok().filter(|&m| m <= 60) else {
-                    return Err(kit::fail("随机延迟要写 0 到 60 之间的分钟数"));
+                    return Err(kit::fail(kit::tr(
+                        "Random delay must be 0 to 60 minutes",
+                        "随机延迟要写 0 到 60 之间的分钟数",
+                    )));
                 };
-                self.update_setting(inv, |c| c.random_delay = minutes, &format!("随机延迟已设为 {minutes} 分钟")).await
+                let msg = if kit::is_zh() {
+                    format!("随机延迟已设为 {minutes} 分钟")
+                } else {
+                    format!("Random delay set to {minutes} min")
+                };
+                self.update_setting(inv, |c| c.random_delay = minutes, &msg).await
             }
             "bot" | "b" => {
                 if value.eq_ignore_ascii_case("off") {
-                    return self.update_setting(
-                        inv,
-                        |c| {
-                            c.bot_token.clear();
-                            c.push_chat_id.clear();
-                        },
-                        "已关闭机器人推送",
-                    ).await;
+                    return self
+                        .update_setting(
+                            inv,
+                            |c| {
+                                c.bot_token.clear();
+                                c.push_chat_id.clear();
+                            },
+                            kit::tr("Bot push disabled", "已关闭机器人推送"),
+                        )
+                        .await;
                 }
                 let chat = inv.arg(3);
                 if value.is_empty() || chat.is_empty() {
-                    return Err(kit::usage(inv.prefix(), "checkin set bot Token 对话 ID|off"));
+                    return Err(kit::usage(
+                        inv.prefix(),
+                        kit::tr(
+                            "checkin set bot token chat_id|off",
+                            "checkin set bot Token 对话 ID|off",
+                        ),
+                    ));
                 }
                 if !inv.message.saved {
-                    return Err(kit::fail("Bot Token 只能在收藏夹中配置"));
+                    return Err(kit::fail(kit::tr(
+                        "Bot Token can only be configured in Saved Messages",
+                        "Bot Token 只能在收藏夹中配置",
+                    )));
                 }
                 let v = value.to_owned();
                 let ch = chat.to_owned();
+                let msg = if kit::is_zh() {
+                    format!("机器人推送已设置：Token {}，发到 {chat}", mask(value))
+                } else {
+                    format!("Bot push enabled: token {}, chat {chat}", mask(value))
+                };
                 self.update_setting(
                     inv,
                     move |c| {
                         c.bot_token = v;
                         c.push_chat_id = ch;
                     },
-                    &format!("机器人推送已设置：Token {}，发到 {chat}", mask(value)),
+                    &msg,
                 )
                 .await
             }
             "log" | "l" => {
                 if value.is_empty() {
-                    return Err(kit::usage(inv.prefix(), "checkin set log 对话|off"));
+                    return Err(kit::usage(
+                        inv.prefix(),
+                        kit::tr("checkin set log chat|off", "checkin set log 对话|off"),
+                    ));
                 }
                 let next = if value.eq_ignore_ascii_case("off") { "" } else { value };
                 let note = if next.is_empty() {
-                    "已取消汇总对话".to_owned()
-                } else {
+                    kit::tr("Summary chat cleared", "已取消汇总对话").to_owned()
+                } else if kit::is_zh() {
                     format!("汇总对话已设为 {next}")
+                } else {
+                    format!("Summary chat set to {next}")
                 };
                 let n = next.to_owned();
                 self.update_setting(inv, move |c| c.log_chat = n, &note).await
             }
-            _ => Err(kit::fail(format!(
-                "能设的有 time、range、delay、bot、log，{}help checkin 看用法",
-                inv.prefix()
-            ))),
+            _ => Err(kit::fail(if kit::is_zh() {
+                format!("能设的有 time、range、delay、bot、log，{}help checkin 看用法", inv.prefix())
+            } else {
+                format!(
+                    "Available settings: time, range, delay, bot, log; run {}help checkin for usage",
+                    inv.prefix()
+                )
+            })),
         }
     }
 
@@ -1060,34 +1282,79 @@ impl Service {
 
     async fn show(&self, inv: &Invocation) -> CmdResult {
         let cfg = self.store.read()?;
-        let schedule = if cfg.run_time_end.is_empty() {
-            format!("每天 {}（北京时间）", code(&cfg.run_time))
-        } else {
-            format!("每天 {} 之间随机挑一分钟（北京时间）", code(&format!("{} ~ {}", cfg.run_time, cfg.run_time_end)))
-        };
         let today = schedule_date(&cfg, SystemTime::now());
-        let status = if cfg.last_run_date == today {
-            "今天已经签过".into()
-        } else if cfg.planned_date == today && !cfg.current_run_time.is_empty() {
-            format!("今天在 {} 签", code(&cfg.current_run_time))
+        let unset = kit::tr("Unset", "未设置");
+        let lines = if kit::is_zh() {
+            let schedule = if cfg.run_time_end.is_empty() {
+                format!("每天 {}（北京时间）", code(&cfg.run_time))
+            } else {
+                format!(
+                    "每天 {} 之间随机挑一分钟（北京时间）",
+                    code(&format!("{} ~ {}", cfg.run_time, cfg.run_time_end))
+                )
+            };
+            let status = if cfg.last_run_date == today {
+                "今天已经签过".into()
+            } else if cfg.planned_date == today && !cfg.current_run_time.is_empty() {
+                format!("今天在 {} 签", code(&cfg.current_run_time))
+            } else {
+                "今天还没签".into()
+            };
+            let push = if !cfg.bot_token.is_empty() && !cfg.push_chat_id.is_empty() {
+                format!(
+                    "Token {}，发到 {}",
+                    code(&mask(&cfg.bot_token)),
+                    code(&cfg.push_chat_id)
+                )
+            } else {
+                unset.into()
+            };
+            [
+                "📅 <b>签到设置</b>".to_owned(),
+                String::new(),
+                format!("时间：{schedule}"),
+                format!("状态：{status}"),
+                format!("随机延迟：{}", code(&format!("{} 分钟", cfg.random_delay))),
+                format!("机器人推送：{push}"),
+                format!("汇总对话：{}", code(kit::or_default(&cfg.log_chat, unset))),
+                format!("签到目标：{}/{} 个开启", cfg.enabled().len(), cfg.targets.len()),
+            ]
         } else {
-            "今天还没签".into()
+            let schedule = if cfg.run_time_end.is_empty() {
+                format!("Daily at {} (UTC+8)", code(&cfg.run_time))
+            } else {
+                format!(
+                    "Daily at a random minute in {} (UTC+8)",
+                    code(&format!("{} ~ {}", cfg.run_time, cfg.run_time_end))
+                )
+            };
+            let status = if cfg.last_run_date == today {
+                "Completed today".into()
+            } else if cfg.planned_date == today && !cfg.current_run_time.is_empty() {
+                format!("Scheduled at {} today", code(&cfg.current_run_time))
+            } else {
+                "Pending today".into()
+            };
+            let push = if !cfg.bot_token.is_empty() && !cfg.push_chat_id.is_empty() {
+                format!(
+                    "Token {}, chat {}",
+                    code(&mask(&cfg.bot_token)),
+                    code(&cfg.push_chat_id)
+                )
+            } else {
+                unset.into()
+            };
+            [
+                "📅 <b>Check-in Settings</b>".to_owned(),
+                String::new(),
+                format!("Schedule: {schedule}"),
+                format!("Status: {status}"),
+                format!("Random delay: {}", code(&format!("{} min", cfg.random_delay))),
+                format!("Bot push: {push}"),
+                format!("Summary chat: {}", code(kit::or_default(&cfg.log_chat, unset))),
+                format!("Targets: {}/{} enabled", cfg.enabled().len(), cfg.targets.len()),
+            ]
         };
-        let push = if !cfg.bot_token.is_empty() && !cfg.push_chat_id.is_empty() {
-            format!("Token {}，发到 {}", code(&mask(&cfg.bot_token)), code(&cfg.push_chat_id))
-        } else {
-            "未设置".into()
-        };
-        let lines = [
-            "📅 <b>签到设置</b>".to_owned(),
-            String::new(),
-            format!("时间：{schedule}"),
-            format!("状态：{status}"),
-            format!("随机延迟：{}", code(&format!("{} 分钟", cfg.random_delay))),
-            format!("机器人推送：{push}"),
-            format!("汇总对话：{}", code(kit::or_default(&cfg.log_chat, "未设置"))),
-            format!("签到目标：{}/{} 个开启", cfg.enabled().len(), cfg.targets.len()),
-        ];
         inv.edit(&lines.join("\n")).await?;
         Ok(())
     }
@@ -1136,47 +1403,86 @@ async fn push_via_bot(
 }
 
 fn not_found(inv: &Invocation, id: &str) -> CmdError {
-    kit::fail(format!(
-        "没有 ID 是 {id} 的签到目标，{}checkin list 可以看全部",
-        inv.prefix()
-    ))
+    kit::fail(if kit::is_zh() {
+        format!("没有 ID 是 {id} 的签到目标，{}checkin list 可以看全部", inv.prefix())
+    } else {
+        format!(
+            "No target with ID {id}; run {}checkin list to view all",
+            inv.prefix()
+        )
+    })
 }
 
 fn help(prefix: &str) -> String {
     let p = escape(prefix);
     let c = |text: &str| format!("<code>{p}checkin{text}</code>");
-    format!(
-        "📅 <b>定时签到</b>\n\n每天在设定的时间（北京时间）向机器人或群组发签到命令，需要时再点一下回调按钮，最后发一份汇总。\n\n\
-         <b>签到</b>\n\
-         • {} 立即签到全部开启的目标，当天不再定时签\n\
-         • {} 只试一个\n\
-         • {} 清掉今天的执行记录，到时间会再签一次\n\n\
-         <b>目标</b>\n\
-         • {}，签到命令写在第二行，可以带空格\n\
-         • {}、{}、{}（开启或关闭）\n\n\
-         <b>设置</b>\n\
-         • {} 开始时间\n\
-         • {} 在开始时间到这个时间之间随机挑一分钟签，可以跨午夜；不写时间就改回固定时间\n\
-         • {} 到点后再随机多等 0 到这么多分钟，最多 60\n\
-         • {} 汇总改用机器人推送\n\
-         • {} 汇总发到这个对话\n\
-         • {} 查看设置\n\n\
-         汇总默认发回执行命令的对话，定时签到时发到收藏夹。错过了时间（比如服务停着），当天稍后补上。涉及 Bot Token 的命令请在收藏夹里执行。\n\n\
-         <b>示例</b>\n<pre>{p}checkin add storm Storm签到 @storm_bot data:checkin\n/sign 123456</pre>",
-        c(""),
-        c(" test ID"),
-        c(" reset"),
-        c(" add ID 名称 目标 [data:回调数据|text:按钮文字]"),
-        c(" list"),
-        c(" del ID"),
-        c(" toggle ID"),
-        c(" set time 10:00"),
-        c(" set range 11:30"),
-        c(" set delay 分钟数"),
-        c(" set bot Token 对话 ID|off"),
-        c(" set log 对话|off"),
-        c(" config"),
-    )
+    if kit::is_zh() {
+        format!(
+            "📅 <b>定时签到</b>\n\n每天在设定的时间（北京时间）向机器人或群组发签到命令，需要时再点一下回调按钮，最后发一份汇总。\n\n\
+             <b>签到</b>\n\
+             • {} 立即签到全部开启的目标，当天不再定时签\n\
+             • {} 只试一个\n\
+             • {} 清掉今天的执行记录，到时间会再签一次\n\n\
+             <b>目标</b>\n\
+             • {}，签到命令写在第二行，可以带空格\n\
+             • {}、{}、{}（开启或关闭）\n\n\
+             <b>设置</b>\n\
+             • {} 开始时间\n\
+             • {} 在开始时间到这个时间之间随机挑一分钟签，可以跨午夜；不写时间就改回固定时间\n\
+             • {} 到点后再随机多等 0 到这么多分钟，最多 60\n\
+             • {} 汇总改用机器人推送\n\
+             • {} 汇总发到这个对话\n\
+             • {} 查看设置\n\n\
+             汇总默认发回执行命令的对话，定时签到时发到收藏夹。错过了时间（比如服务停着），当天稍后补上。涉及 Bot Token 的命令请在收藏夹里执行。\n\n\
+             <b>示例</b>\n<pre>{p}checkin add storm Storm签到 @storm_bot data:checkin\n/sign 123456</pre>",
+            c(""),
+            c(" test ID"),
+            c(" reset"),
+            c(" add ID 名称 目标 [data:回调数据|text:按钮文字]"),
+            c(" list"),
+            c(" del ID"),
+            c(" toggle ID"),
+            c(" set time 10:00"),
+            c(" set range 11:30"),
+            c(" set delay 分钟数"),
+            c(" set bot Token 对话 ID|off"),
+            c(" set log 对话|off"),
+            c(" config"),
+        )
+    } else {
+        format!(
+            "📅 <b>Scheduled Check-in</b>\n\nSend check-in commands to bots or groups at a scheduled time (UTC+8), optionally click an inline button, and send a summary.\n\n\
+             <b>Check-in</b>\n\
+             • {} run all enabled targets now (skips today's scheduled run)\n\
+             • {} test one target\n\
+             • {} clear today's run record so scheduled run can execute again\n\n\
+             <b>Targets</b>\n\
+             • {} (put the command on the second line; spaces allowed)\n\
+             • {}, {}, {} (enable or disable)\n\n\
+             <b>Settings</b>\n\
+             • {} start time\n\
+             • {} pick a random minute between start and end time (can cross midnight); omit time for fixed time\n\
+             • {} extra random delay (0-60 min)\n\
+             • {} push summary via Bot API\n\
+             • {} send summary to a specific chat\n\
+             • {} view settings\n\n\
+             Summary goes back to the invoking chat (or Saved Messages for scheduled runs). Missed runs are caught up later the same day. Commands involving Bot Token must run in Saved Messages.\n\n\
+             <b>Example</b>\n<pre>{p}checkin add storm Storm @storm_bot data:checkin\n/sign 123456</pre>",
+            c(""),
+            c(" test ID"),
+            c(" reset"),
+            c(" add ID name target [data:callback|text:button]"),
+            c(" list"),
+            c(" del ID"),
+            c(" toggle ID"),
+            c(" set time 10:00"),
+            c(" set range 11:30"),
+            c(" set delay minutes"),
+            c(" set bot token chat_id|off"),
+            c(" set log chat|off"),
+            c(" config"),
+        )
+    }
 }
 
 pub fn register(app: &Arc<App>) {
@@ -1187,19 +1493,22 @@ pub fn register(app: &Arc<App>) {
         rt: RuntimeConfig::default(),
     });
     let s_cmd = Arc::clone(&svc);
-    app.registry.register(Command {
-        name: "checkin".into(),
-        group: group::ACCOUNT.into(),
-        description: "每天定时向机器人签到".into(),
-        usage: "[子命令]".into(),
-        help_fn: Some(Arc::new(help)),
-        timeout: Some(Duration::from_secs(30 * 60)),
-        handle: Arc::new(move |inv| {
-            let s = Arc::clone(&s_cmd);
-            Box::pin(async move { s.handle(&inv).await })
-        }),
-        ..Default::default()
-    });
+    app.registry.register(
+        Command {
+            name: "checkin".into(),
+            group: group::ACCOUNT.into(),
+            description: "Scheduled bot check-in".into(),
+            usage: "[subcommand]".into(),
+            help_fn: Some(Arc::new(help)),
+            timeout: Some(Duration::from_secs(30 * 60)),
+            handle: Arc::new(move |inv| {
+                let s = Arc::clone(&s_cmd);
+                Box::pin(async move { s.handle(&inv).await })
+            }),
+            ..Default::default()
+        }
+        .zh("每天定时向机器人签到", "[子命令]"),
+    );
 
     let s_job = Arc::clone(&svc);
     app.on_ready(Arc::new(move |app, cancel| {
@@ -1260,9 +1569,18 @@ mod tests {
 
         let pages = vec!["一".to_owned(), "二".to_owned(), "三".to_owned()];
         assert_eq!(remaining(&pages, 0, false), pages);
-        assert_eq!(remaining(&pages, 1, false), vec!["ℹ️ 签到汇总的前 1 页已经发出。以下是其余 2 页。", "二", "三"]);
-        assert_eq!(remaining(&pages, 0, true), vec!["ℹ️ 第 1 页不确定是否送达，为免重复没有在这里重发。以下是其余 2 页。", "二", "三"]);
-        assert_eq!(remaining(&pages, 2, true), vec!["ℹ️ 签到汇总的前 2 页已经发出。第 3 页不确定是否送达，为免重复没有在这里重发。"]);
+        assert_eq!(
+            remaining(&pages, 1, false),
+            vec!["ℹ️ First 1 page(s) of check-in summary already sent. Remaining 2 page(s) below.", "二", "三"]
+        );
+        assert_eq!(
+            remaining(&pages, 0, true),
+            vec!["ℹ️ Page 1 delivery uncertain, skipped to avoid duplicates. Remaining 2 page(s) below.", "二", "三"]
+        );
+        assert_eq!(
+            remaining(&pages, 2, true),
+            vec!["ℹ️ First 2 page(s) of check-in summary already sent. Page 3 delivery uncertain, skipped to avoid duplicates."]
+        );
     }
 
     fn sign_markup(text: &str, data: &str) -> tl::enums::ReplyMarkup {
@@ -1510,7 +1828,10 @@ mod tests {
         svc3.tick(&tok, &client3, to_st(day_1007)).await;
         svc3.tick(&tok, &client3, to_st(day_1008)).await;
         let sent = fake3.sent.lock().unwrap();
-        let signs: Vec<_> = sent.iter().filter(|s| !s.contains("签到汇总")).collect();
+        let signs: Vec<_> = sent
+            .iter()
+            .filter(|s| !s.contains("Check-in Summary") && !s.contains("签到汇总"))
+            .collect();
         assert_eq!(signs.len(), 1);
         assert_eq!(svc3.store.read().unwrap().last_run_date, "2026/9/29");
         let _ = std::fs::remove_dir_all(dir);
@@ -1598,7 +1919,7 @@ mod tests {
         {
             let sent = texts.lock().unwrap();
             assert_eq!(sent.len(), 1);
-            assert!(sent[0].starts_with("ℹ️ 签到汇总的前 1 页已经发出"));
+            assert!(sent[0].starts_with("ℹ️ First 1 page(s) of check-in summary already sent"));
         }
 
         // Refuses bot token outside saved messages
@@ -1623,7 +1944,7 @@ mod tests {
             foreign: false,
         };
         let err = svc.set(&dummy_inv).await.unwrap_err();
-        assert!(kit::is_user_error(err.as_ref()) && err.to_string().contains("收藏夹"));
+        assert!(kit::is_user_error(err.as_ref()) && err.to_string().contains("Saved Messages"));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

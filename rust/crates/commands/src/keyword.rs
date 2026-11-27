@@ -264,17 +264,24 @@ fn valid_moderation_seconds(seconds: f64) -> bool {
 fn action_seconds(action: &str, name: &str) -> Result<f64, mibot_command::CmdError> {
     let digits = action.strip_prefix(name).unwrap_or("");
     let Ok(seconds) = digits.parse::<i64>() else {
-        return Err(kit::fail(format!(
-            "{name} 后面要紧跟秒数，如 {name}3600"
-        )));
+        return Err(kit::fail(if kit::is_zh() {
+            format!("{name} 后面要紧跟秒数，如 {name}3600")
+        } else {
+            format!("{name} must be followed by seconds, e.g. {name}3600")
+        }));
     };
     if !kit::is_digits(digits) || seconds <= 0 {
-        return Err(kit::fail(format!(
-            "{name} 后面要紧跟秒数，如 {name}3600"
-        )));
+        return Err(kit::fail(if kit::is_zh() {
+            format!("{name} 后面要紧跟秒数，如 {name}3600")
+        } else {
+            format!("{name} must be followed by seconds, e.g. {name}3600")
+        }));
     }
     if !valid_moderation_seconds(seconds as f64) {
-        return Err(kit::fail("封禁或禁言时长要在 30 秒到 366 天之间"));
+        return Err(kit::fail(kit::tr(
+            "Ban or mute duration must be between 30s and 366d",
+            "封禁或禁言时长要在 30 秒到 366 天之间",
+        )));
     }
     Ok(seconds as f64)
 }
@@ -282,20 +289,30 @@ fn action_seconds(action: &str, name: &str) -> Result<f64, mibot_command::CmdErr
 fn parse_task(text: &str) -> Result<Task, mibot_command::CmdError> {
     let parts = sections(text);
     if parts.len() < 2 {
-        return Err(kit::fail("任务格式不对：关键词和回复之间要有单独一行 +++"));
+        return Err(kit::fail(kit::tr(
+            "Invalid task format: separate keyword and reply with a line containing +++",
+            "任务格式不对：关键词和回复之间要有单独一行 +++",
+        )));
     }
     if parts.len() > 6 {
-        return Err(kit::fail(
+        return Err(kit::fail(kit::tr(
+            "At most 6 sections: keyword, reply, match options, actions, and two delete delays",
             "任务最多 6 段：关键词、回复、匹配选项、动作和两个删除秒数",
-        ));
+        )));
     }
     let key = parts[0].trim().to_owned();
     let response = parts[1].trim().to_owned();
     if key.is_empty() {
-        return Err(kit::fail("关键词不能为空"));
+        return Err(kit::fail(kit::tr(
+            "Keyword cannot be empty",
+            "关键词不能为空",
+        )));
     }
     if response.is_empty() {
-        return Err(kit::fail("回复内容不能为空"));
+        return Err(kit::fail(kit::tr(
+            "Reply content cannot be empty",
+            "回复内容不能为空",
+        )));
     }
     let mut t = Task {
         id: 0,
@@ -326,9 +343,15 @@ fn parse_task(text: &str) -> Result<Task, mibot_command::CmdError> {
             "case" => t.case_sensitive = true,
             "ignore_forward" => t.ignore_forward = true,
             _ => {
-                return Err(kit::fail(format!(
-                    "不认识的匹配选项 {option}，只能是 include、exact、regexp、case、ignore_forward"
-                )));
+                return Err(kit::fail(if kit::is_zh() {
+                    format!(
+                        "不认识的匹配选项 {option}，只能是 include、exact、regexp、case、ignore_forward"
+                    )
+                } else {
+                    format!(
+                        "Unknown match option {option}; expected include, exact, regexp, case, or ignore_forward"
+                    )
+                }));
             }
         }
     }
@@ -343,9 +366,15 @@ fn parse_task(text: &str) -> Result<Task, mibot_command::CmdError> {
         } else if lower.starts_with("ban") {
             t.ban_seconds = action_seconds(&lower, "ban")?;
         } else {
-            return Err(kit::fail(format!(
-                "不认识的动作 {action}，只能是 reply、delete、ban秒数、restrict秒数"
-            )));
+            return Err(kit::fail(if kit::is_zh() {
+                format!(
+                    "不认识的动作 {action}，只能是 reply、delete、ban秒数、restrict秒数"
+                )
+            } else {
+                format!(
+                    "Unknown action {action}; expected reply, delete, ban<secs>, or restrict<secs>"
+                )
+            }));
         }
     }
     for (idx, field) in [
@@ -357,27 +386,34 @@ fn parse_task(text: &str) -> Result<Task, mibot_command::CmdError> {
             continue;
         }
         let Ok(seconds) = val.parse::<f64>() else {
-            return Err(kit::fail(format!(
-                "第 {} 段要写不小于 0 的秒数，现在是 {val}",
-                idx + 1
-            )));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("第 {} 段要写不小于 0 的秒数，现在是 {val}", idx + 1)
+            } else {
+                format!("Section {} must be a number >= 0, got {val}", idx + 1)
+            }));
         };
         if seconds < 0.0 || seconds.is_nan() || seconds.is_infinite() {
-            return Err(kit::fail(format!(
-                "第 {} 段要写不小于 0 的秒数，现在是 {val}",
-                idx + 1
-            )));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("第 {} 段要写不小于 0 的秒数，现在是 {val}", idx + 1)
+            } else {
+                format!("Section {} must be a number >= 0, got {val}", idx + 1)
+            }));
         }
         *field = seconds;
     }
     if t.regexp {
         if utf16_len(&t.key) > MAX_PATTERN_LENGTH {
-            return Err(kit::fail(format!(
-                "正则表达式太长，最多 {MAX_PATTERN_LENGTH} 个字符"
-            )));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("正则表达式太长，最多 {MAX_PATTERN_LENGTH} 个字符")
+            } else {
+                format!("Regexp is too long (max {MAX_PATTERN_LENGTH} characters)")
+            }));
         }
         if compile_pattern(&t.key, t.case_sensitive).is_err() {
-            return Err(kit::fail("正则表达式无效"));
+            return Err(kit::fail(kit::tr(
+                "Invalid regular expression",
+                "正则表达式无效",
+            )));
         }
     }
     Ok(t)
@@ -531,41 +567,55 @@ fn render(t: &Task, from: &SenderInfo) -> String {
 fn summary(t: &Task) -> String {
     let mut items = Vec::new();
     if t.regexp {
-        items.push("正则".to_owned());
+        items.push(kit::tr("regexp", "正则").to_owned());
     } else if t.exact {
-        items.push("整条一致".to_owned());
+        items.push(kit::tr("exact", "整条一致").to_owned());
     } else if !t.include {
-        items.push("不匹配（旧数据）".to_owned());
+        items.push(kit::tr("no-match (legacy)", "不匹配（旧数据）").to_owned());
     }
     if t.case_sensitive {
-        items.push("区分大小写".to_owned());
+        items.push(kit::tr("case-sensitive", "区分大小写").to_owned());
     }
     if t.ignore_forward {
-        items.push("忽略转发".to_owned());
+        items.push(kit::tr("ignore forwards", "忽略转发").to_owned());
     }
     if !t.reply {
-        items.push("不引用原消息".to_owned());
+        items.push(kit::tr("no quote reply", "不引用原消息").to_owned());
     }
     if t.delete_source {
         if t.delete_source_after > 0.0 {
-            items.push(format!(
-                "{} 秒后删除原消息",
-                format_seconds(t.delete_source_after)
-            ));
+            let s = format_seconds(t.delete_source_after);
+            items.push(if kit::is_zh() {
+                format!("{s} 秒后删除原消息")
+            } else {
+                format!("delete source after {s}s")
+            });
         } else {
-            items.push("删除原消息".to_owned());
+            items.push(kit::tr("delete source", "删除原消息").to_owned());
         }
     }
     if t.ban_seconds > 0.0 {
-        items.push(format!("封禁 {} 秒", format_seconds(t.ban_seconds)));
+        let s = format_seconds(t.ban_seconds);
+        items.push(if kit::is_zh() {
+            format!("封禁 {s} 秒")
+        } else {
+            format!("ban {s}s")
+        });
     } else if t.restrict_seconds > 0.0 {
-        items.push(format!("禁言 {} 秒", format_seconds(t.restrict_seconds)));
+        let s = format_seconds(t.restrict_seconds);
+        items.push(if kit::is_zh() {
+            format!("禁言 {s} 秒")
+        } else {
+            format!("mute {s}s")
+        });
     }
     if t.delete_reply_after > 0.0 {
-        items.push(format!(
-            "回复 {} 秒后删除",
-            format_seconds(t.delete_reply_after)
-        ));
+        let s = format_seconds(t.delete_reply_after);
+        items.push(if kit::is_zh() {
+            format!("回复 {s} 秒后删除")
+        } else {
+            format!("delete reply after {s}s")
+        });
     }
     items.join(" · ")
 }
@@ -827,7 +877,11 @@ impl Service {
             return Ok(());
         }
         if !valid_moderation_seconds(seconds) {
-            return Err("封禁或禁言时长超出 30 秒到 366 天，Telegram 会当成永久".into());
+            return Err(kit::tr(
+                "Ban or mute duration out of range (30s..366d); Telegram treats it as permanent",
+                "封禁或禁言时长超出 30 秒到 366 天，Telegram 会当成永久",
+            )
+            .into());
         }
         if msg.sender_is_user(client.self_id()) {
             return Ok(());
@@ -899,10 +953,11 @@ impl Service {
             Ok(t) => t,
             Err(err) => {
                 if !has_separator(body) && mibot_command::is_user_error(err.as_ref()) {
-                    return Err(kit::fail(format!(
-                        "{err}，{}keyword help 看格式",
-                        inv.prefix()
-                    )));
+                    return Err(kit::fail(if kit::is_zh() {
+                        format!("{err}，{}keyword help 看格式", inv.prefix())
+                    } else {
+                        format!("{err}; use {}keyword help for format", inv.prefix())
+                    }));
                 }
                 return Err(err);
             }
@@ -920,8 +975,12 @@ impl Service {
             doc.tasks.push(parsed.clone());
             Ok(())
         })?;
-        inv.edit(&format!("✅ 已添加关键词任务 {}", code(&new_id.to_string())))
-            .await?;
+        let msg = if kit::is_zh() {
+            format!("✅ 已添加关键词任务 {}", code(&new_id.to_string()))
+        } else {
+            format!("✅ Added keyword task {}", code(&new_id.to_string()))
+        };
+        inv.edit(&msg).await?;
         Ok(())
     }
 
@@ -933,10 +992,18 @@ impl Service {
             let own = v.chats.get(here);
             let mut lines = Vec::new();
             match own {
-                None => lines.push("当前对话没有关键词任务".to_owned()),
-                Some(entries) if entries.is_empty() => lines.push("当前对话没有关键词任务".to_owned()),
+                None => lines.push(
+                    kit::tr("No keyword tasks in this chat", "当前对话没有关键词任务").to_owned(),
+                ),
+                Some(entries) if entries.is_empty() => lines.push(
+                    kit::tr("No keyword tasks in this chat", "当前对话没有关键词任务").to_owned(),
+                ),
                 Some(entries) => {
-                    lines.push(format!("💬 <b>当前对话的关键词任务</b>（{} 个）", entries.len()));
+                    if kit::is_zh() {
+                        lines.push(format!("💬 <b>当前对话的关键词任务</b>（{} 个）", entries.len()));
+                    } else {
+                        lines.push(format!("💬 <b>Keyword Tasks Here</b> ({})", entries.len()));
+                    }
                     for entry in entries {
                         lines.push(format_line(entry));
                     }
@@ -948,11 +1015,19 @@ impl Service {
             {
                 let count = v.chats.get(from).map(Vec::len).unwrap_or(0);
                 lines.push(String::new());
-                lines.push(format!(
-                    "另外继承 {}（{}）的 {count} 个任务",
-                    code(from),
-                    escape(&chat_title(&inv.client, from)),
-                ));
+                if kit::is_zh() {
+                    lines.push(format!(
+                        "另外继承 {}（{}）的 {count} 个任务",
+                        code(from),
+                        escape(&chat_title(&inv.client, from)),
+                    ));
+                } else {
+                    lines.push(format!(
+                        "Also inherits {count} task(s) from {} ({})",
+                        code(from),
+                        escape(&chat_title(&inv.client, from)),
+                    ));
+                }
             }
             let pages = html_pages(&lines.join("\n"), PAGE_LIMIT);
             inv.respond_pages(&pages).await?;
@@ -966,11 +1041,17 @@ impl Service {
             .collect();
         let total: usize = chats.iter().map(|(_, entries)| entries.len()).sum();
         if total == 0 {
-            inv.edit("还没有任何关键词任务").await?;
+            inv.edit(kit::tr("No keyword tasks configured yet", "还没有任何关键词任务"))
+                .await?;
             return Ok(());
         }
         chats.sort_by_key(|(_, entries)| entries[0].task.id);
-        let mut lines = vec![format!("💬 <b>全部关键词任务</b>（{total} 个）")];
+        let header = if kit::is_zh() {
+            format!("💬 <b>全部关键词任务</b>（{total} 个）")
+        } else {
+            format!("💬 <b>All Keyword Tasks</b> ({total})")
+        };
+        let mut lines = vec![header];
         for (chat, entries) in chats {
             lines.push(String::new());
             lines.push(format!(
@@ -990,7 +1071,10 @@ impl Service {
     async fn remove(&self, inv: &Invocation) -> CmdResult {
         let ids = parse_ids(&inv.args[1..])?;
         if ids.is_empty() {
-            return Err(kit::usage(inv.prefix(), "keyword rm 编号[,编号…]"));
+            return Err(kit::usage(
+                inv.prefix(),
+                kit::tr("keyword rm id[,id…]", "keyword rm 编号[,编号…]"),
+            ));
         }
         let id_set: HashSet<i32> = ids.iter().copied().collect();
         let mut removed = HashSet::new();
@@ -1011,15 +1095,31 @@ impl Service {
             .map(i32::to_string)
             .collect();
         if removed.is_empty() {
-            return Err(kit::fail(format!(
-                "没有编号为 {} 的任务，{}keyword list all 可以看全部编号",
-                missing.join("、"),
-                inv.prefix()
-            )));
+            return Err(kit::fail(if kit::is_zh() {
+                format!(
+                    "没有编号为 {} 的任务，{}keyword list all 可以看全部编号",
+                    missing.join("、"),
+                    inv.prefix()
+                )
+            } else {
+                format!(
+                    "No task(s) with ID {}; use {}keyword list all to view all",
+                    missing.join(", "),
+                    inv.prefix()
+                )
+            }));
         }
-        let mut text = format!("✅ 已删除 {} 个任务", removed.len());
+        let mut text = if kit::is_zh() {
+            format!("✅ 已删除 {} 个任务", removed.len())
+        } else {
+            format!("✅ Removed {} task(s)", removed.len())
+        };
         if !missing.is_empty() {
-            text.push_str(&format!("（没有编号 {}）", escape(&missing.join("、"))));
+            if kit::is_zh() {
+                text.push_str(&format!("（没有编号 {}）", escape(&missing.join("、"))));
+            } else {
+                text.push_str(&format!(" (not found: {})", escape(&missing.join(", "))));
+            }
         }
         inv.edit(&text).await?;
         Ok(())
@@ -1031,14 +1131,28 @@ impl Service {
         if target.is_empty() {
             let current = self.store.read()?;
             match current.aliases.get(here) {
-                None => inv.edit("当前对话没有继承别的对话").await?,
-                Some(from) => {
-                    inv.edit(&format!(
-                        "当前对话继承自 {}（{}）",
-                        code(from),
-                        escape(&chat_title(&inv.client, from))
+                None => {
+                    inv.edit(kit::tr(
+                        "This chat does not inherit from any chat",
+                        "当前对话没有继承别的对话",
                     ))
                     .await?
+                }
+                Some(from) => {
+                    let msg = if kit::is_zh() {
+                        format!(
+                            "当前对话继承自 {}（{}）",
+                            code(from),
+                            escape(&chat_title(&inv.client, from))
+                        )
+                    } else {
+                        format!(
+                            "This chat inherits from {} ({})",
+                            code(from),
+                            escape(&chat_title(&inv.client, from))
+                        )
+                    };
+                    inv.edit(&msg).await?
                 }
             }
             return Ok(());
@@ -1050,19 +1164,33 @@ impl Service {
                 Ok(())
             })?;
             if !existed {
-                return Err(kit::fail("当前对话没有继承别的对话"));
+                return Err(kit::fail(kit::tr(
+                    "This chat does not inherit from any chat",
+                    "当前对话没有继承别的对话",
+                )));
             }
-            inv.edit("✅ 已取消继承").await?;
+            inv.edit(kit::tr("✅ Removed inheritance", "✅ 已取消继承"))
+                .await?;
             return Ok(());
         }
         if !kit::is_numeric_id(target) {
-            return Err(kit::fail(format!(
-                "要写对话 ID，如 -1001234567890，{}ids 可以查",
-                inv.prefix()
-            )));
+            return Err(kit::fail(if kit::is_zh() {
+                format!(
+                    "要写对话 ID，如 -1001234567890，{}ids 可以查",
+                    inv.prefix()
+                )
+            } else {
+                format!(
+                    "Enter a numeric chat ID like -1001234567890; use {}ids to look it up",
+                    inv.prefix()
+                )
+            }));
         }
         if target == here {
-            return Err(kit::fail("不能继承当前对话自己"));
+            return Err(kit::fail(kit::tr(
+                "Cannot inherit from the current chat itself",
+                "不能继承当前对话自己",
+            )));
         }
         let mut count = 0usize;
         let here_owned = here.clone();
@@ -1076,13 +1204,24 @@ impl Service {
                 .count();
             Ok(())
         })?;
-        let mut text = format!(
-            "✅ 已继承 {}（{}）的任务",
-            code(target),
-            escape(&chat_title(&inv.client, target))
-        );
+        let mut text = if kit::is_zh() {
+            format!(
+                "✅ 已继承 {}（{}）的任务",
+                code(target),
+                escape(&chat_title(&inv.client, target))
+            )
+        } else {
+            format!(
+                "✅ Inherited tasks from {} ({})",
+                code(target),
+                escape(&chat_title(&inv.client, target))
+            )
+        };
         if count == 0 {
-            text.push_str("\n⚠️ 那个对话现在还没有任务");
+            text.push_str(kit::tr(
+                "\n⚠️ That chat has no tasks yet",
+                "\n⚠️ 那个对话现在还没有任务",
+            ));
         }
         inv.edit(&text).await?;
         Ok(())
@@ -1097,7 +1236,7 @@ fn sender_of(client: &Client, msg: &Message) -> SenderInfo {
                 .user(u.user_id)
                 .map(|i| i.first_name.trim().to_owned())
                 .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "用户".into());
+                .unwrap_or_else(|| kit::tr("User", "用户").into());
             SenderInfo {
                 id: u.user_id.to_string(),
                 name,
@@ -1128,10 +1267,11 @@ fn format_line(entry: &Compiled) -> String {
     );
     let mut extra = summary(&entry.task);
     if entry.task.regexp && entry.pattern.is_none() {
+        let bad_re = kit::tr("⚠️ Invalid regexp, will not match", "⚠️ 正则无法使用，不会命中");
         if extra.is_empty() {
-            extra = "⚠️ 正则无法使用，不会命中".into();
+            extra = bad_re.into();
         } else {
-            extra.push_str(" · ⚠️ 正则无法使用，不会命中");
+            extra.push_str(&format!(" · {bad_re}"));
         }
     }
     if !extra.is_empty() {
@@ -1148,10 +1288,18 @@ fn parse_ids(args: &[String]) -> Result<Vec<i32>, mibot_command::CmdError> {
             continue;
         }
         let Ok(id) = field.parse::<i32>() else {
-            return Err(kit::fail(format!("任务编号要是正整数，{field} 不是")));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("任务编号要是正整数，{field} 不是")
+            } else {
+                format!("Task ID must be a positive integer, got {field}")
+            }));
         };
         if id < 1 {
-            return Err(kit::fail(format!("任务编号要是正整数，{field} 不是")));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("任务编号要是正整数，{field} 不是")
+            } else {
+                format!("Task ID must be a positive integer, got {field}")
+            }));
         }
         ids.push(id);
     }
@@ -1161,54 +1309,105 @@ fn parse_ids(args: &[String]) -> Result<Vec<i32>, mibot_command::CmdError> {
 pub fn help(prefix: &str) -> String {
     let p = escape(prefix);
     let c = |text: &str| format!("<code>{p}keyword{text}</code>");
-    format!(
-        "💬 <b>关键词自动回复</b>\n\n\
-         别人在对话里发的消息命中关键词时，账号自动回复，还可以删掉原消息、封禁或禁言发送者。\
-         任务在哪个对话里添加，就只在哪个对话里生效。\n\n\
-         <b>管理</b>\n\
-         • {} 当前对话的任务\n\
-         • {} 所有对话的任务\n\
-         • {} 按编号删除任务\n\
-         • {} 查看当前对话继承了哪个对话\n\
-         • {} 当前对话也用另一个对话的任务（对话 ID 可以用 {p}ids 查）\n\
-         • {} 取消继承\n\n\
-         <b>添加任务</b>\n\
-         各段之间用单独一行 <code>+++</code> 隔开，前两段必填，后面的可以省略或留空：\n\
-         <pre>{p}keyword 关键词\n+++\n回复内容\n+++\n匹配选项\n+++\n动作\n+++\n回复几秒后删除\n+++\n原消息几秒后删除</pre>\n\n\
-         <b>匹配选项</b>（空格分隔）\n\
-         • <code>include</code> 消息里包含关键词就算（默认）\n\
-         • <code>exact</code> 整条消息和关键词一致\n\
-         • <code>regexp</code> 关键词是正则表达式（JavaScript 语法）\n\
-         • <code>case</code> 区分大小写\n\
-         • <code>ignore_forward</code> 不理会转发的消息（为兼容 MiBox 保留；目前转发来的消息本来就不触发）\n\n\
-         <b>动作</b>（空格分隔）\n\
-         • <code>reply</code> 回复时引用原消息（默认）\n\
-         • <code>delete</code> 删除原消息，第六段可以设延迟\n\
-         • <code>ban3600</code> 封禁发送者 3600 秒\n\
-         • <code>restrict600</code> 禁言发送者 600 秒\n\
-         少于 30 秒或超过 366 天的，Telegram 按永久处理。\n\n\
-         <b>回复里的变量</b>\n\
-         • <code>$mention</code> 提及发送者\n\
-         • <code>$code_id</code> 发送者 ID\n\
-         • <code>$code_name</code> 发送者名字\n\
-         • <code>$delay_delete</code> 回复几秒后删除\n\
-         回复按 HTML 发送，可以用 &lt;b&gt;、&lt;i&gt;、&lt;code&gt; 这些标签。\n\n\
-         <b>示例</b>\n\
-         <pre>{p}keyword 你好\n+++\n欢迎，$mention</pre>\n\
-         <pre>{p}keyword \\d{{11}}\n+++\n请勿发送手机号码\n+++\nregexp\n+++\ndelete\n+++\n10</pre>\n\
-         <pre>{p}keyword 广告\n+++\n检测到广告，已封禁 $code_name\n+++\n\n+++\ndelete ban3600</pre>\n\n\
-         <b>注意</b>\n\
-         • 删除别人的消息、封禁、禁言都要管理员权限\n\
-         • 只看别人发的消息，自己发的、转发来的都不会触发\n\
-         • 继承只看一层：当前对话先查继承来的任务，再查自己的\n\
-         • 任务编号在所有对话里唯一，删掉的编号不再使用",
-        c(" list"),
-        c(" list all"),
-        c(" rm 1,2,3"),
-        c(" alias"),
-        c(" alias -1001234567890"),
-        c(" alias rm"),
-    )
+    if kit::is_zh() {
+        format!(
+            "💬 <b>关键词自动回复</b>\n\n\
+             别人在对话里发的消息命中关键词时，账号自动回复，还可以删掉原消息、封禁或禁言发送者。\
+             任务在哪个对话里添加，就只在哪个对话里生效。\n\n\
+             <b>管理</b>\n\
+             • {} 当前对话的任务\n\
+             • {} 所有对话的任务\n\
+             • {} 按编号删除任务\n\
+             • {} 查看当前对话继承了哪个对话\n\
+             • {} 当前对话也用另一个对话的任务（对话 ID 可以用 {p}ids 查）\n\
+             • {} 取消继承\n\n\
+             <b>添加任务</b>\n\
+             各段之间用单独一行 <code>+++</code> 隔开，前两段必填，后面的可以省略或留空：\n\
+             <pre>{p}keyword 关键词\n+++\n回复内容\n+++\n匹配选项\n+++\n动作\n+++\n回复几秒后删除\n+++\n原消息几秒后删除</pre>\n\n\
+             <b>匹配选项</b>（空格分隔）\n\
+             • <code>include</code> 消息里包含关键词就算（默认）\n\
+             • <code>exact</code> 整条消息和关键词一致\n\
+             • <code>regexp</code> 关键词是正则表达式（JavaScript 语法）\n\
+             • <code>case</code> 区分大小写\n\
+             • <code>ignore_forward</code> 不理会转发的消息（为兼容 MiBox 保留；目前转发来的消息本来就不触发）\n\n\
+             <b>动作</b>（空格分隔）\n\
+             • <code>reply</code> 回复时引用原消息（默认）\n\
+             • <code>delete</code> 删除原消息，第六段可以设延迟\n\
+             • <code>ban3600</code> 封禁发送者 3600 秒\n\
+             • <code>restrict600</code> 禁言发送者 600 秒\n\
+             少于 30 秒或超过 366 天的，Telegram 按永久处理。\n\n\
+             <b>回复里的变量</b>\n\
+             • <code>$mention</code> 提及发送者\n\
+             • <code>$code_id</code> 发送者 ID\n\
+             • <code>$code_name</code> 发送者名字\n\
+             • <code>$delay_delete</code> 回复几秒后删除\n\
+             回复按 HTML 发送，可以用 &lt;b&gt;、&lt;i&gt;、&lt;code&gt; 这些标签。\n\n\
+             <b>示例</b>\n\
+             <pre>{p}keyword 你好\n+++\n欢迎，$mention</pre>\n\
+             <pre>{p}keyword \\d{{11}}\n+++\n请勿发送手机号码\n+++\nregexp\n+++\ndelete\n+++\n10</pre>\n\
+             <pre>{p}keyword 广告\n+++\n检测到广告，已封禁 $code_name\n+++\n\n+++\ndelete ban3600</pre>\n\n\
+             <b>注意</b>\n\
+             • 删除别人的消息、封禁、禁言都要管理员权限\n\
+             • 只看别人发的消息，自己发的、转发来的都不会触发\n\
+             • 继承只看一层：当前对话先查继承来的任务，再查自己的\n\
+             • 任务编号在所有对话里唯一，删掉的编号不再使用",
+            c(" list"),
+            c(" list all"),
+            c(" rm 1,2,3"),
+            c(" alias"),
+            c(" alias -1001234567890"),
+            c(" alias rm"),
+        )
+    } else {
+        format!(
+            "💬 <b>Keyword Auto-Reply</b>\n\n\
+             Automatically replies when someone sends a matching keyword, and can optionally delete the source message or ban/mute the sender. \
+             Tasks apply only in the chat where they are added.\n\n\
+             <b>Management</b>\n\
+             • {} Tasks in current chat\n\
+             • {} Tasks across all chats\n\
+             • {} Remove tasks by ID\n\
+             • {} Show inherited chat\n\
+             • {} Also use another chat's tasks (check ID with {p}ids)\n\
+             • {} Remove inheritance\n\n\
+             <b>Add Task</b>\n\
+             Separate sections with a line containing <code>+++</code> (first two required; others optional):\n\
+             <pre>{p}keyword keyword\n+++\nreply text\n+++\nmatch options\n+++\nactions\n+++\ndelete reply after (s)\n+++\ndelete source after (s)</pre>\n\n\
+             <b>Match Options</b> (space-separated)\n\
+             • <code>include</code> Substring match (default)\n\
+             • <code>exact</code> Exact full-message match\n\
+             • <code>regexp</code> Regular expression (JavaScript syntax)\n\
+             • <code>case</code> Case-sensitive\n\
+             • <code>ignore_forward</code> Ignore forwarded messages (kept for MiBox compat; forwards are already ignored)\n\n\
+             <b>Actions</b> (space-separated)\n\
+             • <code>reply</code> Quote the triggering message (default)\n\
+             • <code>delete</code> Delete source message (delay set in section 6)\n\
+             • <code>ban3600</code> Ban sender for 3600s\n\
+             • <code>restrict600</code> Mute sender for 600s\n\
+             Durations below 30s or above 366d are treated as permanent by Telegram.\n\n\
+             <b>Reply Variables</b>\n\
+             • <code>$mention</code> Mention sender\n\
+             • <code>$code_id</code> Sender ID\n\
+             • <code>$code_name</code> Sender name\n\
+             • <code>$delay_delete</code> Reply auto-delete delay\n\
+             Replies are sent as HTML (&lt;b&gt;, &lt;i&gt;, &lt;code&gt; supported).\n\n\
+             <b>Examples</b>\n\
+             <pre>{p}keyword hello\n+++\nWelcome, $mention</pre>\n\
+             <pre>{p}keyword \\d{{11}}\n+++\nNo phone numbers\n+++\nregexp\n+++\ndelete\n+++\n10</pre>\n\
+             <pre>{p}keyword spam\n+++\nSpam detected; banned $code_name\n+++\n\n+++\ndelete ban3600</pre>\n\n\
+             <b>Notes</b>\n\
+             • Deleting others' messages, banning, and muting require admin permissions\n\
+             • Only incoming non-forwarded messages trigger rules\n\
+             • Inheritance is one level deep: inherited tasks run before local ones\n\
+             • Task IDs are globally unique and never reused",
+            c(" list"),
+            c(" list all"),
+            c(" rm 1,2,3"),
+            c(" alias"),
+            c(" alias -1001234567890"),
+            c(" alias rm"),
+        )
+    }
 }
 
 pub fn register(app: &Arc<App>) {
@@ -1218,20 +1417,23 @@ pub fn register(app: &Arc<App>) {
         s_offer.offer(msg, cancel)
     }));
     let s_cmd = Arc::clone(&s);
-    app.registry.register(Command {
-        name: "keyword".into(),
-        group: group::ADMIN.into(),
-        description: "设置关键词自动回复".into(),
-        usage: "[任务|list|rm|alias]".into(),
-        help: help("."),
-        help_fn: Some(Arc::new(help)),
-        free_text: true,
-        handle: Arc::new(move |inv| {
-            let s = Arc::clone(&s_cmd);
-            Box::pin(async move { s.command(inv).await })
-        }),
-        ..Default::default()
-    });
+    app.registry.register(
+        Command {
+            name: "keyword".into(),
+            group: group::ADMIN.into(),
+            description: "Keyword auto-reply rules".into(),
+            usage: "[task|list|rm|alias]".into(),
+            help: help("."),
+            help_fn: Some(Arc::new(help)),
+            free_text: true,
+            handle: Arc::new(move |inv| {
+                let s = Arc::clone(&s_cmd);
+                Box::pin(async move { s.command(inv).await })
+            }),
+            ..Default::default()
+        }
+        .zh("设置关键词自动回复", "[任务|list|rm|alias]"),
+    );
 }
 
 #[cfg(test)]
@@ -1386,16 +1588,16 @@ mod tests {
         assert!(!exact.include && exact.exact);
 
         for (text, want) in [
-            ("只有关键词", "关键词和回复之间要有单独一行 +++"),
-            ("\n+++\n回复", "关键词不能为空"),
-            ("词\n+++\n ", "回复内容不能为空"),
-            ("词\n+++\n回\n+++\nfuzzy", "不认识的匹配选项 fuzzy"),
-            ("词\n+++\n回\n+++\n\n+++\nkick", "不认识的动作 kick"),
-            ("词\n+++\n回\n+++\n\n+++\nban", "ban 后面要紧跟秒数"),
-            ("词\n+++\n回\n+++\n\n+++\nban0", "ban 后面要紧跟秒数"),
-            ("词\n+++\n回\n+++\n\n+++\nban15", "封禁或禁言时长要在 30 秒到 366 天之间"),
-            ("词\n+++\n回\n+++\n\n+++\nrestrict31622401", "封禁或禁言时长要在 30 秒到 366 天之间"),
-            ("[\n+++\n回\n+++\nregexp", "正则表达式无效"),
+            ("只有关键词", "separate keyword and reply with a line containing +++"),
+            ("\n+++\n回复", "Keyword cannot be empty"),
+            ("词\n+++\n ", "Reply content cannot be empty"),
+            ("词\n+++\n回\n+++\nfuzzy", "Unknown match option fuzzy"),
+            ("词\n+++\n回\n+++\n\n+++\nkick", "Unknown action kick"),
+            ("词\n+++\n回\n+++\n\n+++\nban", "ban must be followed by seconds"),
+            ("词\n+++\n回\n+++\n\n+++\nban0", "ban must be followed by seconds"),
+            ("词\n+++\n回\n+++\n\n+++\nban15", "Ban or mute duration must be between 30s and 366d"),
+            ("词\n+++\n回\n+++\n\n+++\nrestrict31622401", "Ban or mute duration must be between 30s and 366d"),
+            ("[\n+++\n回\n+++\nregexp", "Invalid regular expression"),
         ] {
             let err = parse_task(text).unwrap_err();
             assert!(mibot_command::is_user_error(err.as_ref()));
@@ -1688,7 +1890,7 @@ mod tests {
             foreign: false,
         };
         s.command(inv).await.unwrap();
-        assert_eq!(fake.take(), vec![r#"edit 10 "✅ 已添加关键词任务 1""#]);
+        assert_eq!(fake.take(), vec![r#"edit 10 "✅ Added keyword task 1""#]);
 
         let incoming = Message {
             id: 50,

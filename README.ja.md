@@ -52,6 +52,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Yapixel/mibot-lite/rust/scri
 
 ## コマンド
 
+デフォルトの表示言語は **English**（`en`）です。`.lang zh`（または `.env` の `MIBOT_LANG=zh`）でいつでも簡体字中国語へ切り替えられます。
 デフォルトのプレフィックスは `.`、`。`、`$` で、`.prefix` で変更できます。各コマンドの詳しい使い方は
 `.help コマンド` を送るか、コマンドの後ろに `--help` を付けてください。
 
@@ -75,6 +76,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Yapixel/mibot-lite/rust/scri
 | `.log` | 実行ログを書き出す（機密情報は除去済み） | |
 | `.bf` | 設定を「保存済みメッセージ」にバックアップ | |
 | `.prefix` `.alias` | コマンドのプレフィックスを変更、コマンドに別名を付ける | |
+| `.lang` | 表示言語を確認・切り替え（既定 `en` / `zh`） | |
 | `.privacy` | 出力に含まれる IP アドレスの伏せ方を設定 | |
 
 **検索とツール**
@@ -230,13 +232,13 @@ bash ../scripts/build.sh  # バージョン番号付きでビルド
 ./mibot-lite --verify --root /デプロイ先ディレクトリ
 ```
 
-### 検証サマリー（v0.4.2）
+### 検証サマリー（v0.5.0）
 
-- **ワークスペース**：`rust/` 配下の **22 クレート**（全 45 コマンド群とランタイムを網羅）。
-- **静的解析**：`cargo clippy --locked --all-targets -- -D warnings` — **警告ゼロ**で通過。
-- **単体・挙動互換テスト**：`cargo test --locked` — **246 / 246 合格**（`mibot-commands`: 145、`mibot-bot`: 17、`mibot-imaging`: 9、`mibot-tgstate`: 8、`mibot-command`: 8、`mibot-app`: 7、`mibot-backup`: 5、`mibot-config`: 5、`mibot-logtail`: 5、`mibot-session`: 5、`mibot-botapi`: 5、`mibot-httpx`: 4、`mibot-mibox`: 4、`mibot-store`: 4、`mibot-media`: 3、`mibot-statuscard`: 3、`mibot-lite`: 2、`mibot-login`: 2、`mibot-verify`: 2、`mibot-delivery`: 1、`mibot-fsutil`: 1、`mibot-sysinfo`: 1）。
+- **ワークスペース**：`rust/` 配下の **23 クレート**（全コマンド群、`mibot-i18n`、およびランタイムを網羅）。
+- **静的解析**：`cargo clippy --workspace --all-targets --locked -- -D warnings` — **警告ゼロ**で通過。
+- **単体・挙動互換テスト**：`cargo test --workspace --locked` — **249 / 249 合格**（`mibot-commands`: 146、`mibot-bot`: 17、`mibot-imaging`: 9、`mibot-tgstate`: 8、`mibot-command`: 8、`mibot-app`: 7、`mibot-backup`: 5、`mibot-config`: 5、`mibot-logtail`: 5、`mibot-session`: 5、`mibot-botapi`: 5、`mibot-httpx`: 4、`mibot-mibox`: 4、`mibot-store`: 4、`mibot-media`: 3、`mibot-statuscard`: 3、`mibot-i18n`: 2、`mibot-lite`: 2、`mibot-login`: 2、`mibot-verify`: 2、`mibot-delivery`: 1、`mibot-fsutil`: 1、`mibot-sysinfo`: 1）。
 - **純 Rust 依存監査**：`rust/Cargo.lock` 内に `openssl-sys`、`libsqlite3-sys`、`rusqlite`、`sqlite`、`libsql`、`aws-lc-sys`、`aws-lc-fips-sys`、`libyaml`、`webp-sys`、`libwebp-sys` が含まれないことを確認済み。
-- **CLI・インストーラーテスト**：`python3 -m unittest scripts/install_test.py`（5/5 合格）、オフライン CLI スモークテスト（`--version`、引数なし終了コード `2`、存在しない `--root` で `--check` 終了コード `1`）、GitHub Actions CI Run `45984816612` 合格。
+- **CLI・インストーラーテスト**：`python3 -m unittest scripts/install_test.py`（6/6 合格）、オフライン CLI スモークテスト（`--version`、`--help`）合格。
 - **前提条件の注記**：実アカウントを使った Telegram DC 接続モード（`--serve`、`--verify`、対話型 `--login`）は認証情報とネットワーク接続を必要とするため、CI 上ではローカルのモックハーネス経由で検証しています。
 
 ### コードの構成

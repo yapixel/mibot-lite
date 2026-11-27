@@ -22,11 +22,11 @@ impl CalcParser {
         let value = self.additive()?;
         self.skip_space();
         if self.index != self.text.len() {
-            return Err("表达式格式错误");
+            return Err(kit::tr("Invalid expression format", "表达式格式错误"));
         }
         const MAX_SAFE_INT: f64 = ((1u64 << 53) - 1) as f64;
         if value.is_infinite() || value.is_nan() || value.abs() > MAX_SAFE_INT {
-            return Err("计算结果超出安全范围");
+            return Err(kit::tr("Result out of safe range", "计算结果超出安全范围"));
         }
         Ok(value)
     }
@@ -60,7 +60,7 @@ impl CalcParser {
             self.index += 1;
             let right = self.unary()?;
             if op == '/' && right == 0.0 {
-                return Err("除零错误");
+                return Err(kit::tr("Division by zero", "除零错误"));
             }
             if op == '*' {
                 value *= right;
@@ -68,7 +68,7 @@ impl CalcParser {
                 value /= right;
             }
             if value.is_infinite() || value.is_nan() {
-                return Err("计算结果无效");
+                return Err(kit::tr("Invalid calculation result", "计算结果无效"));
             }
         }
     }
@@ -91,7 +91,7 @@ impl CalcParser {
             let value = self.additive()?;
             self.skip_space();
             if self.peek() != ')' {
-                return Err("括号不匹配");
+                return Err(kit::tr("Unmatched parentheses", "括号不匹配"));
             }
             self.index += 1;
             return Ok(value);
@@ -104,11 +104,13 @@ impl CalcParser {
         }
         let token: String = self.text[start..self.index].iter().collect();
         if !number_token(&token) {
-            return Err("数字格式错误");
+            return Err(kit::tr("Invalid number format", "数字格式错误"));
         }
-        let value = token.parse::<f64>().map_err(|_| "数字超出范围")?;
+        let value = token
+            .parse::<f64>()
+            .map_err(|_| kit::tr("Number out of range", "数字超出范围"))?;
         if value.is_infinite() {
-            return Err("数字超出范围");
+            return Err(kit::tr("Number out of range", "数字超出范围"));
         }
         Ok(value)
     }
@@ -198,8 +200,13 @@ fn js_number(value: f64) -> String {
 }
 
 fn help(prefix: &str) -> String {
+    let note = kit::tr(
+        "Supports parentheses, decimals, and negative numbers.",
+        "支持括号、小数和负数。",
+    );
     format!(
-        "🧮 <b>计算器</b>\n\n• {}\n• {}\n• {}\n支持括号、小数和负数。",
+        "🧮 <b>{}</b>\n\n• {}\n• {}\n• {}\n{note}",
+        kit::tr("Calculator", "计算器"),
         code(&format!("{prefix}calc 2+2*5")),
         code(&format!("{prefix}calc (10-3)*4")),
         code(&format!("{prefix}calc -(2-5)/3")),
@@ -211,8 +218,8 @@ pub fn register(a: &Arc<App>) {
         "calc",
         &[],
         group::TOOLS,
-        "计算四则运算表达式",
-        "表达式",
+        "Arithmetic calculator",
+        "expression",
         help,
         move |inv: Invocation| {
             Box::pin(async move {
@@ -222,16 +229,24 @@ pub fn register(a: &Arc<App>) {
                     return inv.edit(&help(inv.prefix())).await.map_err(Into::into);
                 }
                 if expression.chars().count() > MAX_EXPRESSION_LENGTH {
-                    return Err(kit::fail_err(format!(
-                        "计算失败：表达式不能超过 {MAX_EXPRESSION_LENGTH} 个字符"
-                    )));
+                    return Err(kit::fail_err(if kit::is_zh() {
+                        format!("计算失败：表达式不能超过 {MAX_EXPRESSION_LENGTH} 个字符")
+                    } else {
+                        format!(
+                            "Calculation failed: expression cannot exceed {MAX_EXPRESSION_LENGTH} characters"
+                        )
+                    }));
                 }
                 let mut parser = CalcParser::new(expression);
-                let result = parser
-                    .parse()
-                    .map_err(|msg| kit::fail_err(format!("计算失败：{msg}")))?;
+                let result = parser.parse().map_err(|msg| {
+                    kit::fail_err(format!(
+                        "{}{msg}",
+                        kit::tr("Calculation failed: ", "计算失败：")
+                    ))
+                })?;
                 inv.edit(&format!(
-                    "🧮 <b>计算结果</b>\n{} = {}",
+                    "🧮 <b>{}</b>\n{} = {}",
+                    kit::tr("Result", "计算结果"),
                     code(expression),
                     code(&format_calc(result))
                 ))
@@ -239,7 +254,8 @@ pub fn register(a: &Arc<App>) {
                 .map_err(Into::into)
             })
         },
-    );
+    )
+    .zh("计算四则运算表达式", "表达式");
     cmd.free_text = true;
     a.registry.register(cmd);
 }

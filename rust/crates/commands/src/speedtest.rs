@@ -202,34 +202,40 @@ impl CliFailure {
 
 struct CliReason {
     markers: &'static [&'static str],
-    text: &'static str,
+    en: &'static str,
+    zh: &'static str,
     retry: bool,
 }
 
 const CLI_REASONS: &[CliReason] = &[
     CliReason {
         markers: &["Limit reached", "Too many requests"],
-        text: "测得太频繁，被 Speedtest 限流了，稍后再试",
+        en: "Too many requests; rate-limited by Speedtest, try again later",
+        zh: "测得太频繁，被 Speedtest 限流了，稍后再试",
         retry: false,
     },
     CliReason {
         markers: &["NoServersException", "No servers defined"],
-        text: "找不到指定的测速服务器，ID 可能不对或已经下线",
+        en: "Specified server not found; ID may be invalid or offline",
+        zh: "找不到指定的测速服务器，ID 可能不对或已经下线",
         retry: true,
     },
     CliReason {
         markers: &["Configuration"],
-        text: "Speedtest 暂时拒绝了这台主机的请求，通常是短时间内测得太频繁，稍后再试",
+        en: "Speedtest temporarily rejected requests from this host (usually rate-limiting); try again later",
+        zh: "Speedtest 暂时拒绝了这台主机的请求，通常是短时间内测得太频繁，稍后再试",
         retry: false,
     },
     CliReason {
         markers: &["Cannot read from socket", "Latency test failed"],
-        text: "这台测速服务器现在连不上，换一个 ID 或用自动挑选",
+        en: "Cannot reach this server right now; try another ID or auto-select",
+        zh: "这台测速服务器现在连不上，换一个 ID 或用自动挑选",
         retry: true,
     },
     CliReason {
         markers: &["Cannot read:", "Cannot write:", "Connection reset", "Broken pipe"],
-        text: "测速服务器测到一半断开了连接，稍后再试，或换一台测速服务器固定下来",
+        en: "Connection dropped mid-test; try again later or pin a different server",
+        zh: "测速服务器测到一半断开了连接，稍后再试，或换一台测速服务器固定下来",
         retry: true,
     },
 ];
@@ -241,9 +247,10 @@ fn reason_for(detail: &str) -> Option<&'static CliReason> {
 }
 
 fn explain_cli(detail: &str) -> &'static str {
-    reason_for(detail)
-        .map(|r| r.text)
-        .unwrap_or("测速工具报错了，详情见日志")
+    match reason_for(detail) {
+        Some(r) => kit::tr(r.en, r.zh),
+        None => kit::tr("Speedtest tool failed; see logs for details", "测速工具报错了，详情见日志"),
+    }
 }
 
 fn log_stamp_re() -> &'static Regex {
@@ -432,21 +439,26 @@ fn extract_ookla(archive: &[u8], target: &Path) -> Result<PathBuf, CmdError> {
         std::fs::rename(&part, &dest)?;
         return Ok(dest);
     }
-    Err(kit::fail("Ookla CLI 压缩包里没有可执行文件"))
+    Err(kit::fail(kit::tr(
+        "No executable found in Ookla CLI archive",
+        "Ookla CLI 压缩包里没有可执行文件",
+    )))
 }
 
 async fn install_ookla(cancel: &CancellationToken, data_dir: &Path) -> Result<PathBuf, CmdError> {
     let Some((arch, digest)) = ookla_spec() else {
-        return Err(kit::fail(format!(
-            "没有 {} 架构的 Ookla CLI 构件",
-            std::env::consts::ARCH
-        )));
+        let msg = if kit::is_zh() {
+            format!("没有 {} 架构的 Ookla CLI 构件", std::env::consts::ARCH)
+        } else {
+            format!("No Ookla CLI binary for architecture {}", std::env::consts::ARCH)
+        };
+        return Err(kit::fail(msg));
     };
     let url = format!(
         "https://install.speedtest.net/app/cli/ookla-speedtest-{OOKLA_VERSION}-linux-{arch}.tgz"
     );
     let resp = tokio::select! {
-        _ = cancel.cancelled() => return Err(kit::fail("操作已取消")),
+        _ = cancel.cancelled() => return Err(kit::fail(kit::tr("Operation cancelled", "操作已取消"))),
         r = do_request(Request {
             url,
             timeout: Some(Duration::from_secs(90)),
@@ -455,11 +467,19 @@ async fn install_ookla(cancel: &CancellationToken, data_dir: &Path) -> Result<Pa
         }) => r?,
     };
     if !resp.ok() {
-        return Err(kit::fail(format!("下载 Ookla CLI 失败：HTTP {}", resp.status)));
+        let msg = if kit::is_zh() {
+            format!("下载 Ookla CLI 失败：HTTP {}", resp.status)
+        } else {
+            format!("Failed to download Ookla CLI: HTTP {}", resp.status)
+        };
+        return Err(kit::fail(msg));
     }
     let sum = hex::encode(Sha256::digest(&resp.body));
     if sum != digest {
-        return Err(kit::fail("Ookla CLI 的 SHA-256 与预期不符，已丢弃"));
+        return Err(kit::fail(kit::tr(
+            "Ookla CLI SHA-256 mismatch, discarded",
+            "Ookla CLI 的 SHA-256 与预期不符，已丢弃",
+        )));
     }
     let target = data_dir.join("speedtest");
     std::fs::create_dir_all(&target)?;
@@ -515,8 +535,12 @@ fn parse_result(kind: &ToolKind, output: &[u8]) -> Result<Reading, CmdError> {
     }
     match kind {
         ToolKind::Ookla => {
-            let parsed: OoklaResult = serde_json::from_str(chosen)
-                .map_err(|_| kit::fail("无法解析 speedtest 的输出"))?;
+            let parsed: OoklaResult = serde_json::from_str(chosen).map_err(|_| {
+                kit::fail(kit::tr(
+                    "Failed to parse speedtest output",
+                    "无法解析 speedtest 的输出",
+                ))
+            })?;
             let where_s = format!("{} {}", parsed.server.name, parsed.server.location)
                 .trim()
                 .to_owned();
@@ -539,8 +563,12 @@ fn parse_result(kind: &ToolKind, output: &[u8]) -> Result<Reading, CmdError> {
             })
         }
         ToolKind::Python => {
-            let parsed: PythonResult = serde_json::from_str(chosen)
-                .map_err(|_| kit::fail("无法解析 speedtest-cli 的输出"))?;
+            let parsed: PythonResult = serde_json::from_str(chosen).map_err(|_| {
+                kit::fail(kit::tr(
+                    "Failed to parse speedtest-cli output",
+                    "无法解析 speedtest-cli 的输出",
+                ))
+            })?;
             let where_s = format!("{} {}", parsed.server.sponsor, parsed.server.name)
                 .trim()
                 .to_owned();
@@ -619,7 +647,7 @@ async fn run_external(
                 tested: 0,
                 tested_name: String::new(),
                 timed_out: false,
-                explained: "操作已取消".into(),
+                explained: kit::tr("Operation cancelled", "操作已取消").into(),
             }));
         }
         r = tokio::time::timeout(Duration::from_secs(120), cmd.output()) => {
@@ -644,7 +672,11 @@ async fn run_external(
                         tested: 0,
                         tested_name: String::new(),
                         timed_out: true,
-                        explained: "测速两分钟还没测完，已经中止，稍后再试或换一台测速服务器".into(),
+                        explained: kit::tr(
+                            "Speedtest timed out after 2 minutes; try again later or choose another server",
+                            "测速两分钟还没测完，已经中止，稍后再试或换一台测速服务器",
+                        )
+                        .into(),
                     }));
                 }
             }
@@ -701,9 +733,9 @@ async fn list_servers(
         .stdin(Stdio::null())
         .kill_on_drop(true);
     let out = tokio::select! {
-        _ = cancel.cancelled() => return Err(kit::fail("操作已取消")),
+        _ = cancel.cancelled() => return Err(kit::fail(kit::tr("Operation cancelled", "操作已取消"))),
         r = tokio::time::timeout(Duration::from_secs(45), cmd.output()) => {
-            r.map_err(|_| kit::fail("读取测速服务器列表超时"))??
+            r.map_err(|_| kit::fail(kit::tr("Timed out fetching server list", "读取测速服务器列表超时")))??
         }
     };
     if !out.status.success() {
@@ -712,10 +744,12 @@ async fn list_servers(
             &String::from_utf8_lossy(&out.stderr),
         );
         if !detail.is_empty() {
-            return Err(kit::fail(format!(
-                "读取测速服务器列表失败：{}",
-                explain_cli(&detail)
-            )));
+            let msg = if kit::is_zh() {
+                format!("读取测速服务器列表失败：{}", explain_cli(&detail))
+            } else {
+                format!("Failed to list servers: {}", explain_cli(&detail))
+            };
+            return Err(kit::fail(msg));
         }
         return Err(format!("speedtest -L failed: {}", out.status).into());
     }
@@ -724,10 +758,17 @@ async fn list_servers(
     struct ServerList {
         servers: Vec<SpeedServer>,
     }
-    let parsed: ServerList =
-        serde_json::from_slice(&out.stdout).map_err(|_| kit::fail("无法解析测速服务器列表"))?;
+    let parsed: ServerList = serde_json::from_slice(&out.stdout).map_err(|_| {
+        kit::fail(kit::tr(
+            "Failed to parse server list",
+            "无法解析测速服务器列表",
+        ))
+    })?;
     if parsed.servers.is_empty() {
-        return Err(kit::fail("没有可用的测速服务器"));
+        return Err(kit::fail(kit::tr(
+            "No available speedtest servers",
+            "没有可用的测速服务器",
+        )));
     }
     Ok(parsed.servers)
 }
@@ -744,7 +785,11 @@ fn render_servers(servers: &[SpeedServer], pinned: i32, prefix: &str) -> String 
             break;
         }
     }
-    let mut header = "🌐 <b>可用测速服务器</b>".to_owned();
+    let mut header = kit::tr(
+        "🌐 <b>Available Speedtest Servers</b>",
+        "🌐 <b>可用测速服务器</b>",
+    )
+    .to_owned();
     if !common.is_empty() {
         header.push_str(&format!(" · {}", escape(common)));
     }
@@ -770,11 +815,19 @@ fn render_servers(servers: &[SpeedServer], pinned: i32, prefix: &str) -> String 
         shown[0].id.to_string()
     };
     lines.push(String::new());
-    lines.push(format!(
-        "<i>{} 测这一台，{} 设为默认</i>",
-        escape(&format!("{prefix}speedtest {sample}")),
-        escape(&format!("{prefix}speedtest set {sample}")),
-    ));
+    if kit::is_zh() {
+        lines.push(format!(
+            "<i>{} 测这一台，{} 设为默认</i>",
+            escape(&format!("{prefix}speedtest {sample}")),
+            escape(&format!("{prefix}speedtest set {sample}")),
+        ));
+    } else {
+        lines.push(format!(
+            "<i>{} to test this server, {} to set as default</i>",
+            escape(&format!("{prefix}speedtest {sample}")),
+            escape(&format!("{prefix}speedtest set {sample}")),
+        ));
+    }
     lines.join("\n")
 }
 
@@ -804,7 +857,7 @@ fn duration_from_millis(ms: f64) -> Duration {
 
 fn mask_address(address: &str) -> String {
     if address.is_empty() {
-        return "未知".into();
+        return kit::tr("unknown", "未知").into();
     }
     if address.contains(':') {
         let parts: Vec<&str> = address.split(':').collect();
@@ -906,43 +959,92 @@ async fn lookup_egress(cancel: &CancellationToken, address: &str) -> Egress {
     Egress { asn, country: cc }
 }
 
-async fn speedtest_help(data_dir: &Path, prefix: &str, pinned: i32) -> String {
+fn format_speedtest_help(prefix: &str, tool_line: &str, server_line: &str) -> String {
     let p = escape(prefix);
-    let source = match external_tool_with_path(data_dir, None).await {
-        Some((tool, kind)) => format!("使用 {}：{}", kind.as_str(), tool.display()),
-        None => "未安装，首次运行会自动下载 Ookla 官方 CLI".into(),
-    };
-    let server = if pinned > 0 {
-        format!("固定用 {pinned}")
-    } else {
-        "自动挑选最近的测速服务器".into()
-    };
+    if kit::is_zh() {
+        return format!(
+            "🚀 <b>网络测速</b>\n\n测量主机的出口带宽。\n\n\
+             • <code>{p}speedtest</code> 完整测速\n\
+             • <code>{p}st</code> 同上，简写\n\
+             • <code>{p}speedtest list</code> 列出可用测速服务器\n\
+             • <code>{p}speedtest ID</code> 只这一次用指定的测速服务器\n\
+             • <code>{p}speedtest set ID</code> 设为默认测速服务器\n\
+             • <code>{p}speedtest clear</code> 恢复自动挑选\n\
+             • <code>{p}speedtest config</code> 看当前设置\n\
+             • <code>{p}speedtest diagnose</code> 检查 CLI 能否运行\n\
+             • <code>{p}speedtest fix</code> / <code>update</code> 重新下载官方 CLI（版本固定为 {OOKLA_VERSION}）\n\n\
+             <b>当前来源</b>\n{}\n\n\
+             <b>当前测速服务器</b>\n{}\n\n\
+             用 Ookla 官方 CLI 测：它自己挑就近的测速服务器，报得出 ISP，还会给一张结果图。没装的话首次\
+             运行会把官方静态构件下载到部署目录（校验 SHA-256，不写系统目录），之后直接复用。\n\n\
+             指定的测速服务器测不通时会自动退回自动挑选；自动挑到的测速服务器测到一半断开时，会换最近的另一台重测，\
+             两种情况都会在结果里说明。被 Speedtest 限流时不重试。输出里的出口地址会打码。",
+            escape(tool_line),
+            escape(server_line),
+        );
+    }
     format!(
-        "🚀 <b>网络测速</b>\n\n测量主机的出口带宽。\n\n\
-         • <code>{p}speedtest</code> 完整测速\n\
-         • <code>{p}st</code> 同上，简写\n\
-         • <code>{p}speedtest list</code> 列出可用测速服务器\n\
-         • <code>{p}speedtest ID</code> 只这一次用指定的测速服务器\n\
-         • <code>{p}speedtest set ID</code> 设为默认测速服务器\n\
-         • <code>{p}speedtest clear</code> 恢复自动挑选\n\
-         • <code>{p}speedtest config</code> 看当前设置\n\
-         • <code>{p}speedtest diagnose</code> 检查 CLI 能否运行\n\
-         • <code>{p}speedtest fix</code> / <code>update</code> 重新下载官方 CLI（版本固定为 {OOKLA_VERSION}）\n\n\
-         <b>当前来源</b>\n{}\n\n\
-         <b>当前测速服务器</b>\n{}\n\n\
-         用 Ookla 官方 CLI 测：它自己挑就近的测速服务器，报得出 ISP，还会给一张结果图。没装的话首次\
-         运行会把官方静态构件下载到部署目录（校验 SHA-256，不写系统目录），之后直接复用。\n\n\
-         指定的测速服务器测不通时会自动退回自动挑选；自动挑到的测速服务器测到一半断开时，会换最近的另一台重测，\
-         两种情况都会在结果里说明。被 Speedtest 限流时不重试。输出里的出口地址会打码。",
-        escape(&source),
-        escape(&server),
+        "🚀 <b>Speedtest</b>\n\nMeasure host outbound bandwidth.\n\n\
+         • <code>{p}speedtest</code> Run full speedtest\n\
+         • <code>{p}st</code> Alias for speedtest\n\
+         • <code>{p}speedtest list</code> List available servers\n\
+         • <code>{p}speedtest ID</code> Test a specific server once\n\
+         • <code>{p}speedtest set ID</code> Pin default server\n\
+         • <code>{p}speedtest clear</code> Restore auto-selection\n\
+         • <code>{p}speedtest config</code> Show current settings\n\
+         • <code>{p}speedtest diagnose</code> Check CLI status\n\
+         • <code>{p}speedtest fix</code> / <code>update</code> Re-download official CLI (pinned to {OOKLA_VERSION})\n\n\
+         <b>Current CLI</b>\n{}\n\n\
+         <b>Current Server</b>\n{}\n\n\
+         Uses the official Ookla CLI to pick a nearby server, report ISP, and attach a result image. If missing, the static binary is downloaded into the data directory on first run (SHA-256 verified) without touching system paths.\n\n\
+         If a pinned server fails, it falls back to auto-select; if an auto-selected server drops mid-test, it retries with the next nearest server (noted in output). Rate-limit errors are not retried. Egress IP is masked in output.",
+        escape(tool_line),
+        escape(server_line),
     )
 }
 
+fn help_server_line(pinned: i32) -> String {
+    if pinned > 0 {
+        if kit::is_zh() {
+            format!("固定用 {pinned}")
+        } else {
+            format!("Pinned to {pinned}")
+        }
+    } else {
+        kit::tr("Auto-select nearest server", "自动挑选最近的测速服务器").into()
+    }
+}
+
+async fn speedtest_help(data_dir: &Path, prefix: &str, pinned: i32) -> String {
+    let source = match external_tool_with_path(data_dir, None).await {
+        Some((tool, kind)) => {
+            if kit::is_zh() {
+                format!("使用 {}：{}", kind.as_str(), tool.display())
+            } else {
+                format!("Using {}: {}", kind.as_str(), tool.display())
+            }
+        }
+        None => kit::tr(
+            "Not installed; first run auto-downloads Ookla CLI",
+            "未安装，首次运行会自动下载 Ookla 官方 CLI",
+        )
+        .into(),
+    };
+    format_speedtest_help(prefix, &source, &help_server_line(pinned))
+}
+
 fn render(result: &Reading, elapsed: Duration, note: &str) -> String {
-    let mut lines = vec!["🚀 <b>网络测速</b>".to_owned(), String::new()];
+    let zh = kit::is_zh();
+    let mut lines = vec![
+        kit::tr("🚀 <b>Speedtest</b>", "🚀 <b>网络测速</b>").to_owned(),
+        String::new(),
+    ];
     if !result.server.is_empty() {
-        let mut s = format!("📍 节点：{}", code(&result.server));
+        let mut s = if zh {
+            format!("📍 节点：{}", code(&result.server))
+        } else {
+            format!("📍 Server: {}", code(&result.server))
+        };
         if result.server_id > 0 {
             s.push_str(&format!(" · ID {}", code(&result.server_id.to_string())));
         }
@@ -950,10 +1052,18 @@ fn render(result: &Reading, elapsed: Duration, note: &str) -> String {
     }
     let isp = format!("{} {}", result.isp, result.asn).trim().to_owned();
     if !isp.is_empty() {
-        lines.push(format!("🏢 运营商：{}", code(&isp)));
+        lines.push(format!(
+            "{}{}",
+            kit::tr("🏢 ISP: ", "🏢 运营商："),
+            code(&isp)
+        ));
     }
     if !result.external_ip.is_empty() {
-        let mut addr = format!("🌐 出口：{}", code(&mask_address(&result.external_ip)));
+        let mut addr = format!(
+            "{}{}",
+            kit::tr("🌐 Egress: ", "🌐 出口："),
+            code(&mask_address(&result.external_ip))
+        );
         let flag = country_flag(&result.country);
         if !flag.is_empty() {
             addr.push_str(&format!(" {flag} {}", result.country));
@@ -961,35 +1071,71 @@ fn render(result: &Reading, elapsed: Duration, note: &str) -> String {
         lines.push(addr);
     }
     lines.push(String::new());
-    let mut lat = format!("⏱ 延迟：{}", code(&format_latency(result.latency)));
+    let mut lat = format!(
+        "{}{}",
+        kit::tr("⏱ Ping: ", "⏱ 延迟："),
+        code(&format_latency(result.latency))
+    );
     if !result.jitter.is_zero() {
-        lat.push_str(&format!("（抖动 {}）", escape(&format_latency(result.jitter))));
+        if zh {
+            lat.push_str(&format!("（抖动 {}）", escape(&format_latency(result.jitter))));
+        } else {
+            lat.push_str(&format!(" (jitter {})", escape(&format_latency(result.jitter))));
+        }
     }
     let transfer = |label: &str, bits: f64, bytes: f64| {
         let mut line = format!("{label}{}", code(&format_speed(bits)));
         if bytes > 0.0 {
-            line.push_str(&format!("（共 {}）", escape(&kit::format_bytes(bytes as i64))));
+            if zh {
+                line.push_str(&format!("（共 {}）", escape(&kit::format_bytes(bytes as i64))));
+            } else {
+                line.push_str(&format!(" ({})", escape(&kit::format_bytes(bytes as i64))));
+            }
         }
         line
     };
     lines.push(lat);
-    lines.push(transfer("⬇️ 下载：", result.download, result.download_bytes));
-    lines.push(transfer("⬆️ 上传：", result.upload, result.upload_bytes));
+    lines.push(transfer(
+        kit::tr("⬇️ Download: ", "⬇️ 下载："),
+        result.download,
+        result.download_bytes,
+    ));
+    lines.push(transfer(
+        kit::tr("⬆️ Upload: ", "⬆️ 上传："),
+        result.upload,
+        result.upload_bytes,
+    ));
     if !result.timestamp.is_empty() {
-        lines.push(format!("🕒 时间：{}", code(&format_timestamp(&result.timestamp))));
+        lines.push(format!(
+            "{}{}",
+            kit::tr("🕒 Time: ", "🕒 时间："),
+            code(&format_timestamp(&result.timestamp))
+        ));
     }
     lines.push(String::new());
     if !note.is_empty() {
         lines.push(format!("<i>{}</i>", escape(note)));
     }
     if !result.link.is_empty() {
-        lines.push(format!("🔗 <a href=\"{}\">详细结果</a>", escape(&result.link)));
+        lines.push(format!(
+            "🔗 <a href=\"{}\">{}</a>",
+            escape(&result.link),
+            kit::tr("Details", "详细结果")
+        ));
     }
-    lines.push(format!(
-        "<i>来源 {} · 用时 {}</i>",
-        escape(&result.source),
-        escape(&format!("{:.1} 秒", elapsed.as_secs_f64()))
-    ));
+    if zh {
+        lines.push(format!(
+            "<i>来源 {} · 用时 {}</i>",
+            escape(&result.source),
+            escape(&format!("{:.1} 秒", elapsed.as_secs_f64()))
+        ));
+    } else {
+        lines.push(format!(
+            "<i>Source: {} · {:.1}s</i>",
+            escape(&result.source),
+            elapsed.as_secs_f64()
+        ));
+    }
     lines.join("\n")
 }
 
@@ -1025,8 +1171,11 @@ impl Speedtester {
         if let Some(pair) = external_tool_with_path(&self.data_dir, None).await {
             return Ok(pair);
         }
-        inv.edit("🚀 <b>网络测速</b>\n\n首次运行，正在下载 Ookla 官方 CLI…")
-            .await?;
+        inv.edit(kit::tr(
+            "🚀 <b>Speedtest</b>\n\nFirst run, downloading official Ookla CLI…",
+            "🚀 <b>网络测速</b>\n\n首次运行，正在下载 Ookla 官方 CLI…",
+        ))
+        .await?;
         match install_ookla(&inv.cancel, &self.data_dir).await {
             Ok(p) => Ok((p, ToolKind::Ookla)),
             Err(err) => {
@@ -1053,31 +1202,55 @@ impl Speedtester {
                     doc.server = 0;
                     Ok::<(), mibot_store::StoreError>(())
                 })?;
-                inv.edit(&format!(
-                    "✅ 已恢复自动挑选测速服务器\n<i>想再固定一台，{} 看有哪些</i>",
-                    escape(&format!("{}speedtest list", inv.prefix()))
-                ))
-                .await?;
+                let msg = if kit::is_zh() {
+                    format!(
+                        "✅ 已恢复自动挑选测速服务器\n<i>想再固定一台，{} 看有哪些</i>",
+                        escape(&format!("{}speedtest list", inv.prefix()))
+                    )
+                } else {
+                    format!(
+                        "✅ Restored automatic server selection\n<i>Run {} to see available servers</i>",
+                        escape(&format!("{}speedtest list", inv.prefix()))
+                    )
+                };
+                inv.edit(&msg).await?;
                 Ok(true)
             }
             "set" => {
                 let Ok(id) = inv.arg(1).parse::<i32>().into_iter().find(|&n| n > 0).ok_or(()) else {
-                    return Err(kit::fail(format!(
-                        "用法：{}speedtest set ID，ID 用 {}speedtest list 查",
-                        inv.prefix(),
-                        inv.prefix()
-                    )));
+                    let msg = if kit::is_zh() {
+                        format!(
+                            "用法：{}speedtest set ID，ID 用 {}speedtest list 查",
+                            inv.prefix(),
+                            inv.prefix()
+                        )
+                    } else {
+                        format!(
+                            "Usage: {}speedtest set ID (find IDs with {}speedtest list)",
+                            inv.prefix(),
+                            inv.prefix()
+                        )
+                    };
+                    return Err(kit::fail(msg));
                 };
                 self.settings.update(|doc| {
                     doc.server = id;
                     Ok::<(), mibot_store::StoreError>(())
                 })?;
-                inv.edit(&format!(
-                    "✅ 默认测速服务器已设为 {}\n<i>测不通会自动退回自动挑选；取消固定用 {}</i>",
-                    code(&id.to_string()),
-                    escape(&format!("{}speedtest clear", inv.prefix()))
-                ))
-                .await?;
+                let msg = if kit::is_zh() {
+                    format!(
+                        "✅ 默认测速服务器已设为 {}\n<i>测不通会自动退回自动挑选；取消固定用 {}</i>",
+                        code(&id.to_string()),
+                        escape(&format!("{}speedtest clear", inv.prefix()))
+                    )
+                } else {
+                    format!(
+                        "✅ Default server set to {}\n<i>Falls back to auto-select if unreachable; clear with {}</i>",
+                        code(&id.to_string()),
+                        escape(&format!("{}speedtest clear", inv.prefix()))
+                    )
+                };
+                inv.edit(&msg).await?;
                 Ok(true)
             }
             _ => Ok(false),
@@ -1085,10 +1258,17 @@ impl Speedtester {
     }
 
     async fn list(&self, inv: &Invocation) -> CmdResult {
-        inv.edit_text(&kit::working("正在读取测速服务器列表")).await?;
+        inv.edit_text(&kit::working(kit::tr(
+            "Fetching server list",
+            "正在读取测速服务器列表",
+        )))
+        .await?;
         let (tool, kind) = self.ensure_tool(inv).await.map_err(|e| install_problem(&e))?;
         if kind != ToolKind::Ookla {
-            return Err(kit::fail("只有 Ookla 官方 CLI 能列出测速服务器，当前用的是 speedtest-cli"));
+            return Err(kit::fail(kit::tr(
+                "Only the official Ookla CLI supports listing servers (currently using speedtest-cli)",
+                "只有 Ookla 官方 CLI 能列出测速服务器，当前用的是 speedtest-cli",
+            )));
         }
         let servers = list_servers(&inv.cancel, &tool, &self.home()).await?;
         inv.edit(&render_servers(&servers, self.pinned(), inv.prefix()))
@@ -1113,11 +1293,19 @@ impl Speedtester {
         let mut next = 0i32;
         let mut note = String::new();
         if server > 0 {
-            note = format!(
-                "测速服务器 {server} 没测通，已改用自动挑选。换一台用 {}speedtest list，取消固定用 {}speedtest clear",
-                inv.prefix(),
-                inv.prefix()
-            );
+            note = if kit::is_zh() {
+                format!(
+                    "测速服务器 {server} 没测通，已改用自动挑选。换一台用 {}speedtest list，取消固定用 {}speedtest clear",
+                    inv.prefix(),
+                    inv.prefix()
+                )
+            } else {
+                format!(
+                    "Server {server} failed; fell back to auto-select. Pick another with {}speedtest list or clear with {}speedtest clear",
+                    inv.prefix(),
+                    inv.prefix()
+                )
+            };
         } else if failure.tested > 0
             && *kind == ToolKind::Ookla
             && let Ok(servers) = list_servers(&inv.cancel, tool, &self.home()).await
@@ -1127,14 +1315,21 @@ impl Speedtester {
             }
             if next > 0 {
                 let dropped = if failure.tested_name.is_empty() {
-                    "测速服务器".to_owned()
+                    kit::tr("server", "测速服务器").to_owned()
                 } else {
                     failure.tested_name.clone()
                 };
-                note = format!(
-                    "自动挑到的 {dropped}（{}）没测完，已换一台重测",
-                    failure.tested
-                );
+                note = if kit::is_zh() {
+                    format!(
+                        "自动挑到的 {dropped}（{}）没测完，已换一台重测",
+                        failure.tested
+                    )
+                } else {
+                    format!(
+                        "Auto-selected {dropped} ({}) dropped mid-test; retried with another server",
+                        failure.tested
+                    )
+                };
             }
         }
         kit::opt_log(
@@ -1153,19 +1348,34 @@ impl Speedtester {
     }
 
     async fn diagnose(&self, inv: &Invocation) -> CmdResult {
-        let mut lines = vec!["🩺 <b>Speedtest 诊断</b>".to_owned(), String::new()];
+        let zh = kit::is_zh();
+        let mut lines = vec![
+            kit::tr("🩺 <b>Speedtest Diagnostics</b>", "🩺 <b>Speedtest 诊断</b>").to_owned(),
+            String::new(),
+        ];
         let home = self.home();
         if let Some(p) = find_in_path("speedtest", None) {
-            describe_binary(&mut lines, "系统 speedtest", &p, &home).await;
+            describe_binary(&mut lines, kit::tr("System speedtest", "系统 speedtest"), &p, &home).await;
         } else {
-            lines.push("系统 speedtest: 未安装".into());
+            lines.push(
+                kit::tr(
+                    "System speedtest: not installed",
+                    "系统 speedtest: 未安装",
+                )
+                .into(),
+            );
         }
         let local = home.join("speedtest");
         if std::fs::metadata(&local).is_ok() {
-            describe_binary(&mut lines, "本地 CLI", &local, &home).await;
-        } else {
+            describe_binary(&mut lines, kit::tr("Local CLI", "本地 CLI"), &local, &home).await;
+        } else if zh {
             lines.push(format!(
                 "本地 CLI: 未安装，首次测速或 {} 时下载",
+                code(&format!("{}speedtest fix", inv.prefix()))
+            ));
+        } else {
+            lines.push(format!(
+                "Local CLI: not installed (downloaded on first run or {})",
                 code(&format!("{}speedtest fix", inv.prefix()))
             ));
         }
@@ -1174,26 +1384,48 @@ impl Speedtester {
         }
         lines.push(String::new());
         if let Some((tool, kind)) = external_tool_with_path(&self.data_dir, None).await {
+            if zh {
+                lines.push(format!(
+                    "测速时使用 {}：{}",
+                    escape(kind.as_str()),
+                    code(&tool.display().to_string())
+                ));
+            } else {
+                lines.push(format!(
+                    "Active tool {}: {}",
+                    escape(kind.as_str()),
+                    code(&tool.display().to_string())
+                ));
+            }
+        } else if zh {
+            lines.push(format!("测速时会先下载 Ookla 官方 CLI {OOKLA_VERSION}"));
+        } else {
             lines.push(format!(
-                "测速时使用 {}：{}",
-                escape(kind.as_str()),
-                code(&tool.display().to_string())
+                "First run will download Ookla CLI {OOKLA_VERSION}"
+            ));
+        }
+        if zh {
+            lines.push(format!(
+                "<i>本地 CLI 无法运行时用 {} 重新下载</i>",
+                escape(&format!("{}speedtest fix", inv.prefix()))
             ));
         } else {
-            lines.push(format!("测速时会先下载 Ookla 官方 CLI {OOKLA_VERSION}"));
+            lines.push(format!(
+                "<i>If local CLI fails to run, re-download with {}</i>",
+                escape(&format!("{}speedtest fix", inv.prefix()))
+            ));
         }
-        lines.push(format!(
-            "<i>本地 CLI 无法运行时用 {} 重新下载</i>",
-            escape(&format!("{}speedtest fix", inv.prefix()))
-        ));
         inv.edit(&lines.join("\n")).await.map_err(Into::into)
     }
 
     async fn reinstall(&self, inv: &Invocation, done: &str) -> CmdResult {
-        inv.edit(&format!(
-            "🚀 <b>网络测速</b>\n\n正在重新下载 Ookla 官方 CLI {OOKLA_VERSION}…"
-        ))
-        .await?;
+        let zh = kit::is_zh();
+        let progress = if zh {
+            format!("🚀 <b>网络测速</b>\n\n正在重新下载 Ookla 官方 CLI {OOKLA_VERSION}…")
+        } else {
+            format!("🚀 <b>Speedtest</b>\n\nRe-downloading official Ookla CLI {OOKLA_VERSION}…")
+        };
+        inv.edit(&progress).await?;
         let path = install_ookla(&inv.cancel, &self.data_dir)
             .await
             .map_err(|e| {
@@ -1210,15 +1442,27 @@ impl Speedtester {
                 ProbeErr::NotOokla(v) => v,
                 ProbeErr::Exec(s) => s,
             };
-            kit::fail(format!("下载好的 CLI 无法运行：{}", mibot_command::truncate(&msg, 160)))
+            let trunc = mibot_command::truncate(&msg, 160);
+            if zh {
+                kit::fail(format!("下载好的 CLI 无法运行：{trunc}"))
+            } else {
+                kit::fail(format!("Downloaded CLI failed to run: {trunc}"))
+            }
         })?;
-        inv.edit(&format!(
-            "✅ Ookla CLI {done}\n路径：{}\n{}",
-            code(&path.display().to_string()),
-            escape(&version)
-        ))
-        .await
-        .map_err(Into::into)
+        let out = if zh {
+            format!(
+                "✅ Ookla CLI {done}\n路径：{}\n{}",
+                code(&path.display().to_string()),
+                escape(&version)
+            )
+        } else {
+            format!(
+                "✅ Ookla CLI {done}\nPath: {}\n{}",
+                code(&path.display().to_string()),
+                escape(&version)
+            )
+        };
+        inv.edit(&out).await.map_err(Into::into)
     }
 
     async fn handle(&self, inv: &Invocation) -> CmdResult {
@@ -1230,12 +1474,22 @@ impl Speedtester {
             return self.diagnose(inv).await;
         }
         let Ok(_guard) = self.running.try_lock() else {
-            return Err(kit::fail("已有一个测速在进行，请稍候"));
+            return Err(kit::fail(kit::tr(
+                "Another speedtest is already in progress, please wait",
+                "已有一个测速在进行，请稍候",
+            )));
         };
         match first.as_str() {
             "list" | "servers" | "列表" => return self.list(inv).await,
-            "fix" => return self.reinstall(inv, "已重新下载").await,
-            "update" => return self.reinstall(inv, &format!("已更新到 {OOKLA_VERSION}")).await,
+            "fix" => return self.reinstall(inv, kit::tr("re-downloaded", "已重新下载")).await,
+            "update" => {
+                let done = if kit::is_zh() {
+                    format!("已更新到 {OOKLA_VERSION}")
+                } else {
+                    format!("updated to {OOKLA_VERSION}")
+                };
+                return self.reinstall(inv, &done).await;
+            }
             _ => {}
         }
         let (mut server, mut once) = (self.pinned(), false);
@@ -1249,17 +1503,30 @@ impl Speedtester {
         }
         let started = Instant::now();
         let (tool, kind) = self.ensure_tool(inv).await.map_err(|e| install_problem(&e))?;
-        let where_s = if server > 0 {
-            format!("（测速服务器 {server}），约需一分钟…")
+        let running_msg = if kit::is_zh() {
+            let where_s = if server > 0 {
+                format!("（测速服务器 {server}），约需一分钟…")
+            } else {
+                "，约需一分钟…".into()
+            };
+            format!(
+                "🚀 <b>网络测速</b>\n\n正在通过 {} 测速{}",
+                escape(kind.as_str()),
+                escape(&where_s)
+            )
         } else {
-            "，约需一分钟…".into()
+            let where_s = if server > 0 {
+                format!(" (server {server}), may take ~1 min…")
+            } else {
+                ", may take ~1 min…".into()
+            };
+            format!(
+                "🚀 <b>Speedtest</b>\n\nRunning via {}{}",
+                escape(kind.as_str()),
+                escape(&where_s)
+            )
         };
-        inv.edit(&format!(
-            "🚀 <b>网络测速</b>\n\n正在通过 {} 测速{}",
-            escape(kind.as_str()),
-            escape(&where_s)
-        ))
-        .await?;
+        inv.edit(&running_msg).await?;
         let (mut result, mut note) = match self.measure(inv, &tool, &kind, server).await {
             Ok(v) => v,
             Err(failure) => {
@@ -1270,15 +1537,21 @@ impl Speedtester {
                     &[("tool", kind.as_str()), ("error", &failure.to_string())],
                 );
                 let msg = if failure.explained.is_empty() {
-                    "测速失败".into()
-                } else {
+                    kit::tr("Speedtest failed", "测速失败").into()
+                } else if kit::is_zh() {
                     format!("测速失败：{}", failure.explained)
+                } else {
+                    format!("Speedtest failed: {}", failure.explained)
                 };
                 return Err(kit::fail(&msg));
             }
         };
         if once && note.is_empty() {
-            note = "本次指定了测速服务器，未改动默认设置".into();
+            note = kit::tr(
+                "Tested specified server for this run only; default unchanged",
+                "本次指定了测速服务器，未改动默认设置",
+            )
+            .into();
         }
         if self.with_egress && !result.external_ip.is_empty() {
             let eg = lookup_egress(&inv.cancel, &result.external_ip).await;
@@ -1300,12 +1573,20 @@ async fn describe_binary(lines: &mut Vec<String>, label: &str, path: &Path, home
     match probe_version(path, home).await {
         Ok(ver) => lines.push(format!("{label}: {p_code}\n  {}", escape(&ver))),
         Err(ProbeErr::NotOokla(_)) => lines.push(format!(
-            "{label}: {p_code}\n  不是 Ookla 官方 CLI（可能是 Python 版 speedtest-cli），不会当官方 CLI 用"
+            "{label}: {p_code}\n  {}",
+            kit::tr(
+                "Not official Ookla CLI (possibly Python speedtest-cli); skipped",
+                "不是 Ookla 官方 CLI（可能是 Python 版 speedtest-cli），不会当官方 CLI 用",
+            )
         )),
-        Err(ProbeErr::Exec(err)) => lines.push(format!(
-            "{label}: {p_code}\n  无法运行：{}",
-            escape(&mibot_command::truncate(&err, 160))
-        )),
+        Err(ProbeErr::Exec(err)) => {
+            let trunc = escape(&mibot_command::truncate(&err, 160));
+            if kit::is_zh() {
+                lines.push(format!("{label}: {p_code}\n  无法运行：{trunc}"));
+            } else {
+                lines.push(format!("{label}: {p_code}\n  Failed to execute: {trunc}"));
+            }
+        }
     }
 }
 
@@ -1313,9 +1594,19 @@ fn install_problem(err: &CmdError) -> CmdError {
     let detail = if kit::is_user_error(err.as_ref()) {
         err.to_string()
     } else {
-        "网络不通或构件无法校验".into()
+        kit::tr(
+            "Network error or checksum verification failed",
+            "网络不通或构件无法校验",
+        )
+        .into()
     };
-    kit::fail(format!("无法安装 Speedtest CLI：{detail}。手动装好 speedtest 后再试"))
+    if kit::is_zh() {
+        kit::fail(format!("无法安装 Speedtest CLI：{detail}。手动装好 speedtest 后再试"))
+    } else {
+        kit::fail(format!(
+            "Failed to install Speedtest CLI: {detail}. Install speedtest manually and retry"
+        ))
+    }
 }
 
 async fn deliver(
@@ -1365,8 +1656,13 @@ async fn deliver(
 }
 
 pub fn convert_mibox(raw: &[u8]) -> Result<Vec<u8>, String> {
-    let source: HashMap<String, serde_json::Value> = serde_json::from_slice(raw)
-        .map_err(|e| format!("MiBox 测速设置不是 JSON 对象：{e}"))?;
+    let source: HashMap<String, serde_json::Value> = serde_json::from_slice(raw).map_err(|e| {
+        if kit::is_zh() {
+            format!("MiBox 测速设置不是 JSON 对象：{e}")
+        } else {
+            format!("MiBox speedtest config is not a JSON object: {e}")
+        }
+    })?;
     let mut doc = SpeedtestDocument::default();
     if let Some(val) = source.get("default_server_id") {
         let parsed = match val {
@@ -1400,52 +1696,39 @@ pub fn register(app: &Arc<App>) {
     let help_dir = tester.data_dir.clone();
     let help_settings = Store::new(tester.settings.path(), SpeedtestDocument::default);
     let h_fn = move |prefix: &str| {
-        let p = escape(prefix);
         let pinned = help_settings.read().map(|d| d.server).unwrap_or(0);
         let home = help_dir.join("speedtest");
         let tool_line = if is_executable(&home.join("speedtest")) {
-            format!("使用 ookla：{}", home.join("speedtest").display())
+            if kit::is_zh() {
+                format!("使用 ookla：{}", home.join("speedtest").display())
+            } else {
+                format!("Using ookla: {}", home.join("speedtest").display())
+            }
         } else {
-            "未安装，首次运行会自动下载 Ookla 官方 CLI".into()
+            kit::tr(
+                "Not installed; first run auto-downloads Ookla CLI",
+                "未安装，首次运行会自动下载 Ookla 官方 CLI",
+            )
+            .into()
         };
-        let server_line = if pinned > 0 {
-            format!("固定用 {pinned}")
-        } else {
-            "自动挑选最近的测速服务器".into()
-        };
-        format!(
-            "🚀 <b>网络测速</b>\n\n测量主机的出口带宽。\n\n\
-             • <code>{p}speedtest</code> 完整测速\n\
-             • <code>{p}st</code> 同上，简写\n\
-             • <code>{p}speedtest list</code> 列出可用测速服务器\n\
-             • <code>{p}speedtest ID</code> 只这一次用指定的测速服务器\n\
-             • <code>{p}speedtest set ID</code> 设为默认测速服务器\n\
-             • <code>{p}speedtest clear</code> 恢复自动挑选\n\
-             • <code>{p}speedtest config</code> 看当前设置\n\
-             • <code>{p}speedtest diagnose</code> 检查 CLI 能否运行\n\
-             • <code>{p}speedtest fix</code> / <code>update</code> 重新下载官方 CLI（版本固定为 {OOKLA_VERSION}）\n\n\
-             <b>当前来源</b>\n{}\n\n\
-             <b>当前测速服务器</b>\n{}\n\n\
-             用 Ookla 官方 CLI 测：它自己挑就近的测速服务器，报得出 ISP，还会给一张结果图。没装的话首次\
-             运行会把官方静态构件下载到部署目录（校验 SHA-256，不写系统目录），之后直接复用。\n\n\
-             指定的测速服务器测不通时会自动退回自动挑选；自动挑到的测速服务器测到一半断开时，会换最近的另一台重测，\
-             两种情况都会在结果里说明。被 Speedtest 限流时不重试。输出里的出口地址会打码。",
-            escape(&tool_line),
-            escape(&server_line),
-        )
+        format_speedtest_help(prefix, &tool_line, &help_server_line(pinned))
     };
 
     let mut cmd = kit::make_cmd(
         "speedtest",
         &["st"],
         group::TOOLS,
-        "测量主机网络速度",
+        "Measure host network speed",
         "[ID|list|set ID|clear|config|diagnose|fix|update]",
         h_fn,
         move |inv| {
             let t = Arc::clone(&tester);
             Box::pin(async move { t.handle(&inv).await })
         },
+    )
+    .zh(
+        "测量主机网络速度",
+        "[ID|list|set ID|clear|config|diagnose|fix|update]",
     );
     cmd.timeout = Some(Duration::from_secs(300));
     app.registry.register(cmd);
@@ -1484,7 +1767,7 @@ mod tests {
         assert_eq!(mask_address("43.153.150.179"), "43.153.x.x");
         let v6 = mask_address("2400:cb00:1234:5678::1");
         assert!(v6.ends_with('…') && !v6.contains("5678"));
-        assert_eq!(mask_address(""), "未知");
+        assert_eq!(mask_address(""), "unknown");
         assert_eq!(mask_address("nonsense"), "…");
 
         assert_eq!(format_speed(2.5e9), "2.50 Gbps");
@@ -1549,7 +1832,7 @@ mod tests {
         assert!(got_lim.starts_with("Limit reached: Speedtest CLI") && got_lim.ends_with("requests."));
         assert_eq!(
             explain_cli("Configuration - No servers defined (NoServersException)"),
-            "找不到指定的测速服务器，ID 可能不对或已经下线"
+            "Specified server not found; ID may be invalid or offline"
         );
         assert!(!explain_cli("signal: aborted").contains("signal"));
 
@@ -1679,7 +1962,7 @@ exit 2
 
         std::fs::write(home.join("limited"), b"").unwrap();
         let err = tester.measure(&inv, &flaky, &ToolKind::Ookla, 0).await.unwrap_err();
-        assert!(err.explained.contains("限流"));
+        assert!(err.explained.contains("rate-limited"));
         let help_txt = speedtest_help(&data_dir, ".", 48463).await;
         for w in [".speedtest list", ".speedtest set", ".speedtest clear", ".speedtest config", ".speedtest diagnose", ".speedtest fix", "update", ".st", "48463"] {
             assert!(help_txt.contains(w), "missing {w}");

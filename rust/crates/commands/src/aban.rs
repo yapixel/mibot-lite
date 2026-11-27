@@ -227,7 +227,8 @@ impl AbanService {
     }
 
     async fn fail(&self, inv: &Invocation, err: CmdError) -> CmdResult {
-        self.show_failure(inv, "操作失败", err).await
+        self.show_failure(inv, kit::tr("Operation failed", "操作失败"), err)
+            .await
     }
 
     async fn show_failure(&self, inv: &Invocation, label: &str, err: CmdError) -> CmdResult {
@@ -265,7 +266,10 @@ impl AbanService {
         }
         let reply = kit::reply_msg(inv).await?;
         let Some(reply) = reply else {
-            return Err(kit::fail("请回复一条消息，或者指定 @用户名、用户 ID"));
+            return Err(kit::fail(kit::tr(
+                "Reply to a message, or specify @username or user ID",
+                "请回复一条消息，或者指定 @用户名、用户 ID",
+            )));
         };
         let sender = reply.sender;
         match sender {
@@ -276,7 +280,10 @@ impl AbanService {
                 user_target(&inv.client, peer, u.user_id)
             }
             tl::enums::Peer::Channel(c) => channel_target(&inv.client, c.channel_id).await,
-            _ => Err(kit::fail("无法识别该消息的发送者")),
+            _ => Err(kit::fail(kit::tr(
+                "Unable to identify the sender of that message",
+                "无法识别该消息的发送者",
+            ))),
         }
     }
 
@@ -290,7 +297,10 @@ impl AbanService {
         if !kit::is_numeric_id(arg) {
             let clean = arg.trim_start_matches('@');
             let Ok(peer) = client.resolve_username(clean).await else {
-                return Err(kit::fail("无法解析该目标，可先回复其一则消息，或确认用户名和 ID 正确"));
+                return Err(kit::fail(kit::tr(
+                    "Unable to resolve target; reply to a message or verify username/ID",
+                    "无法解析该目标，可先回复其一则消息，或确认用户名和 ID 正确",
+                )));
             };
             return match &peer {
                 tl::enums::InputPeer::User(u) => {
@@ -299,11 +309,14 @@ impl AbanService {
                 }
                 tl::enums::InputPeer::Channel(c) => channel_target(client, c.channel_id).await,
                 tl::enums::InputPeer::PeerSelf => user_target(client, peer, client.self_id()),
-                _ => Err(kit::fail("目标必须是用户或频道")),
+                _ => Err(kit::fail(kit::tr(
+                    "Target must be a user or channel",
+                    "目标必须是用户或频道",
+                ))),
             };
         }
         let Some(parsed) = peer_from_id(arg) else {
-            return Err(kit::fail("获取用户失败"));
+            return Err(kit::fail(kit::tr("Failed to parse target user ID", "获取用户失败")));
         };
         match parsed {
             tl::enums::Peer::User(u) => {
@@ -311,7 +324,10 @@ impl AbanService {
                 user_target(client, peer, u.user_id)
             }
             tl::enums::Peer::Channel(c) => channel_target(client, c.channel_id).await,
-            _ => Err(kit::fail("目标必须是用户或频道")),
+            _ => Err(kit::fail(kit::tr(
+                "Target must be a user or channel",
+                "目标必须是用户或频道",
+            ))),
         }
     }
 
@@ -329,7 +345,7 @@ impl AbanService {
             return Ok(peer);
         }
         if cancel.is_cancelled() {
-            return Err(kit::fail("操作已取消"));
+            return Err(kit::fail(kit::tr("Operation cancelled", "操作已取消")));
         }
         if kit::input_channel(here).is_some() {
             return Ok(tl::types::InputPeerUser {
@@ -399,7 +415,8 @@ impl AbanService {
         found.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 
-    async fn basic(&self, inv: &Invocation, action: &str, label: &str) -> CmdResult {
+    async fn basic(&self, inv: &Invocation, action: &str, _label: &str) -> CmdResult {
+        let (progress_label, fail_label) = action_labels(action);
         let duration = if action == "mute" {
             match mute_duration(&target_args(&inv.args)) {
                 Ok(d) => d,
@@ -416,21 +433,23 @@ impl AbanService {
                     .fail_target(
                         inv,
                         err,
-                        "找不到这个用户 ID：账号没见过对方，对方也不在管理群组里。可以先回复对方的一条消息，或者确认 ID 没写错",
+                        kit::tr(
+                            "User ID not found: never seen and not in any managed group. Reply to a message from them or verify the ID",
+                            "找不到这个用户 ID：账号没见过对方，对方也不在管理群组里。可以先回复对方的一条消息，或者确认 ID 没写错",
+                        ),
                     )
                     .await;
             }
         };
         if !confirmed(&inv.args) && target_is_admin(&inv.client, &chat, &who.peer).await {
-            return self
-                .show(
-                    inv,
-                    &format!("⚠️ 目标是管理员，请在命令后加上 {} 确认执行", code("true")),
-                    RESULT_LIFETIME,
-                )
-                .await;
+            let warn_msg = if kit::is_zh() {
+                format!("⚠️ 目标是管理员，请在命令后加上 {} 确认执行", code("true"))
+            } else {
+                format!("⚠️ Target is an admin; append {} to confirm", code("true"))
+            };
+            return self.show(inv, &warn_msg, RESULT_LIFETIME).await;
         }
-        inv.edit(&format!("⏳ {} {}…", escape(label), escape(&who.display)))
+        inv.edit(&format!("⏳ {} {}…", escape(progress_label), escape(&who.display)))
             .await?;
 
         let is_channel = kit::input_channel(&chat).is_some();
@@ -445,40 +464,60 @@ impl AbanService {
                 )
                 .await
                 {
-                    return self.action_failed(inv, label, err).await;
+                    return self.action_failed(inv, fail_label, err).await;
                 }
                 if is_channel
                     && let Err(err) =
                         apply_rights(&inv.client, &chat, &who.peer, kit::default_banned_rights(), false).await
                 {
-                    return self.action_failed(inv, label, err).await;
+                    return self.action_failed(inv, fail_label, err).await;
                 }
-                format!("✅ 已踢出 {}", escape(&who.display))
+                if kit::is_zh() {
+                    format!("✅ 已踢出 {}", escape(&who.display))
+                } else {
+                    format!("✅ Kicked {}", escape(&who.display))
+                }
             }
             "ban" => {
                 let cleaned = delete_history(&inv.client, &chat, &who.peer).await;
                 if let Err(err) =
                     apply_rights(&inv.client, &chat, &who.peer, kit::ban_rights(0), true).await
                 {
-                    return self.action_failed(inv, label, err).await;
+                    return self.action_failed(inv, fail_label, err).await;
                 }
-                let suffix = if cleaned { " (已清理消息)" } else { "" };
-                if is_channel {
-                    format!("✅ 已封禁 {}{}", escape(&who.display), suffix)
+                let suffix = if cleaned {
+                    kit::tr(" (messages cleaned)", " (已清理消息)")
                 } else {
+                    ""
+                };
+                if is_channel {
+                    if kit::is_zh() {
+                        format!("✅ 已封禁 {}{}", escape(&who.display), suffix)
+                    } else {
+                        format!("✅ Banned {}{}", escape(&who.display), suffix)
+                    }
+                } else if kit::is_zh() {
                     format!("✅ 已移出 {}{}", escape(&who.display), suffix)
+                } else {
+                    format!("✅ Removed {}{}", escape(&who.display), suffix)
                 }
             }
             "unban" | "unmute" => {
                 if let Err(err) =
                     apply_rights(&inv.client, &chat, &who.peer, kit::default_banned_rights(), false).await
                 {
-                    return self.action_failed(inv, label, err).await;
+                    return self.action_failed(inv, fail_label, err).await;
                 }
                 if action == "unban" {
-                    format!("✅ 已解封 {}", escape(&who.display))
-                } else {
+                    if kit::is_zh() {
+                        format!("✅ 已解封 {}", escape(&who.display))
+                    } else {
+                        format!("✅ Unbanned {}", escape(&who.display))
+                    }
+                } else if kit::is_zh() {
                     format!("✅ 已解除禁言 {}", escape(&who.display))
+                } else {
+                    format!("✅ Unmuted {}", escape(&who.display))
                 }
             }
             "mute" => {
@@ -491,9 +530,13 @@ impl AbanService {
                 )
                 .await
                 {
-                    return self.action_failed(inv, label, err).await;
+                    return self.action_failed(inv, fail_label, err).await;
                 }
-                format!("✅ 已禁言 {} {}", escape(&who.display), format_duration(duration))
+                if kit::is_zh() {
+                    format!("✅ 已禁言 {} {}", escape(&who.display), format_duration(duration))
+                } else {
+                    format!("✅ Muted {} {}", escape(&who.display), format_duration(duration))
+                }
             }
             _ => String::new(),
         };
@@ -511,36 +554,53 @@ impl AbanService {
     }
 
     async fn action_failed(&self, inv: &Invocation, label: &str, err: CmdError) -> CmdResult {
-        self.show_failure(inv, &format!("{label}失败"), err).await
+        let msg = if kit::is_zh() {
+            format!("{label}失败")
+        } else {
+            format!("{label} failed")
+        };
+        self.show_failure(inv, &msg, err).await
     }
 
     async fn batch(&self, inv: &Invocation, ban: bool) -> CmdResult {
-        let label = if ban { "封禁" } else { "解封" };
+        let label_zh = if ban { "封禁" } else { "解封" };
         let here = inv.client.input_peer(&inv.message.peer)?;
         let who = match self.resolve_target(inv, &here).await {
             Ok(w) => w,
             Err(err) => {
-                return self
-                    .fail_target(
-                        inv,
-                        err,
-                        &format!(
-                            "找不到这个用户 ID：账号没见过对方，对方也不在任何一个管理群组里。可以先 {}refresh 再试，或者回复对方的一条消息",
-                            inv.prefix
-                        ),
+                let unresolved = if kit::is_zh() {
+                    format!(
+                        "找不到这个用户 ID：账号没见过对方，对方也不在任何一个管理群组里。可以先 {}refresh 再试，或者回复对方的一条消息",
+                        inv.prefix()
                     )
-                    .await;
+                } else {
+                    format!(
+                        "User ID not found: never seen and not in any managed group. Try {}refresh first or reply to a message from them",
+                        inv.prefix()
+                    )
+                };
+                return self.fail_target(inv, err, &unresolved).await;
             }
         };
         if !self.fresh() {
-            inv.edit_text(&kit::working("正在读取管理群组列表（每天一次）")).await?;
+            inv.edit_text(&kit::working(kit::tr(
+                "Loading managed groups (once per day)",
+                "正在读取管理群组列表（每天一次）",
+            )))
+            .await?;
         }
         let groups = match self.managed_groups(&inv.client, false).await {
             Ok(g) => g,
             Err(err) => return self.fail(inv, err).await,
         };
         if groups.is_empty() {
-            return self.show(inv, "❌ 无管理群组", RESULT_LIFETIME).await;
+            return self
+                .show(
+                    inv,
+                    kit::tr("❌ No managed groups found", "❌ 无管理群组"),
+                    RESULT_LIFETIME,
+                )
+                .await;
         }
         if !confirmed(&inv.args) && !who.channel {
             let admin_in = Arc::new(AtomicI32::new(0));
@@ -559,24 +619,34 @@ impl AbanService {
             })
             .await;
             if inv.cancel.is_cancelled() {
-                return Err(kit::fail("操作已取消"));
+                return Err(kit::fail(kit::tr("Operation cancelled", "操作已取消")));
             }
             let count = admin_in.load(Ordering::Relaxed);
             if count > 0 {
-                return self
-                    .show(
-                        inv,
-                        &format!("⚠️ 目标在 {count} 个管理群中具有管理员身份，请在命令后加上 {} 确认执行", code("true")),
-                        RESULT_LIFETIME,
+                let warn_msg = if kit::is_zh() {
+                    format!(
+                        "⚠️ 目标在 {count} 个管理群中具有管理员身份，请在命令后加上 {} 确认执行",
+                        code("true")
                     )
-                    .await;
+                } else {
+                    format!(
+                        "⚠️ Target is an admin in {count} managed group(s); append {} to confirm",
+                        code("true")
+                    )
+                };
+                return self.show(inv, &warn_msg, RESULT_LIFETIME).await;
             }
         }
-        inv.edit_text(&kit::working(&format!(
-            "正在 {} 个群组和频道里{label}这个用户",
-            groups.len()
-        )))
-        .await?;
+        let working_msg = if kit::is_zh() {
+            format!("正在 {} 个群组和频道里{label_zh}这个用户", groups.len())
+        } else {
+            format!(
+                "{} user across {} group(s) and channel(s)",
+                if ban { "Banning" } else { "Unbanning" },
+                groups.len()
+            )
+        };
+        inv.edit_text(&kit::working(&working_msg)).await?;
 
         let started = std::time::Instant::now();
         let cleaned = if ban {
@@ -624,30 +694,67 @@ impl AbanService {
         })
         .await;
         if inv.cancel.is_cancelled() {
-            return Err(kit::fail("操作已取消"));
+            return Err(kit::fail(kit::tr("Operation cancelled", "操作已取消")));
         }
 
         let (text, ok_count, fail_count) = {
             let t = tally.lock().unwrap_or_else(|e| e.into_inner());
-            let mut text = format!("✅ 已在 {} 个群组和频道里{label} {}", t.success, escape(&who.display));
+            let mut text = if kit::is_zh() {
+                format!(
+                    "✅ 已在 {} 个群组和频道里{label_zh} {}",
+                    t.success,
+                    escape(&who.display)
+                )
+            } else {
+                format!(
+                    "✅ {} {} across {} group(s) and channel(s)",
+                    if ban { "Banned" } else { "Unbanned" },
+                    escape(&who.display),
+                    t.success
+                )
+            };
             if t.failed > 0 {
-                text.push_str(&format!(
-                    "\n⚠️ 失败 {} 个（{}）",
-                    t.failed,
-                    top_reasons(&t.reasons, 3).join("、")
-                ));
+                if kit::is_zh() {
+                    text.push_str(&format!(
+                        "\n⚠️ 失败 {} 个（{}）",
+                        t.failed,
+                        top_reasons(&t.reasons, 3).join("、")
+                    ));
+                } else {
+                    text.push_str(&format!(
+                        "\n⚠️ Failed in {} ({})",
+                        t.failed,
+                        top_reasons(&t.reasons, 3).join(", ")
+                    ));
+                }
             }
             if t.skipped > 0 {
-                text.push_str(&format!(
-                    "\n⚠️ 跳过 {} 个基本群组（不支持跨群组解封）",
-                    t.skipped
-                ));
+                if kit::is_zh() {
+                    text.push_str(&format!(
+                        "\n⚠️ 跳过 {} 个基本群组（不支持跨群组解封）",
+                        t.skipped
+                    ));
+                } else {
+                    text.push_str(&format!(
+                        "\n⚠️ Skipped {} basic group(s) (global unban not supported)",
+                        t.skipped
+                    ));
+                }
             }
             if ban {
-                let mark = if cleaned { "已清理" } else { "未清理" };
-                text.push_str(&format!("\n当前群组的消息：{mark}"));
+                if kit::is_zh() {
+                    let mark = if cleaned { "已清理" } else { "未清理" };
+                    text.push_str(&format!("\n当前群组的消息：{mark}"));
+                } else {
+                    let mark = if cleaned { "cleaned" } else { "not cleaned" };
+                    text.push_str(&format!("\nMessages in current group: {mark}"));
+                }
             }
-            text.push_str(&format!("\n用时 {:.1} 秒", started.elapsed().as_secs_f64()));
+            if kit::is_zh() {
+                text.push_str(&format!("\n用时 {:.1} 秒", started.elapsed().as_secs_f64()));
+            } else {
+                text.push_str(&format!("\nElapsed: {:.1}s", started.elapsed().as_secs_f64()));
+            }
             (text, t.success, t.failed)
         };
         kit::opt_log(
@@ -662,6 +769,17 @@ impl AbanService {
             ],
         );
         self.show(inv, &text, BATCH_LIFETIME).await
+    }
+}
+
+fn action_labels(action: &str) -> (&'static str, &'static str) {
+    match action {
+        "kick" => (kit::tr("Kicking", "踢出"), kit::tr("Kick", "踢出")),
+        "ban" => (kit::tr("Banning", "封禁"), kit::tr("Ban", "封禁")),
+        "unban" => (kit::tr("Unbanning", "解封"), kit::tr("Unban", "解封")),
+        "mute" => (kit::tr("Muting", "禁言"), kit::tr("Mute", "禁言")),
+        "unmute" => (kit::tr("Unmuting", "解除禁言"), kit::tr("Unmute", "解除禁言")),
+        _ => ("", ""),
     }
 }
 
@@ -757,7 +875,7 @@ fn leading_int(value: &str) -> i64 {
 
 fn format_duration(d: Duration) -> String {
     if d.is_zero() {
-        return "永久".into();
+        return kit::tr("forever", "永久").into();
     }
     let secs = d.as_secs();
     if secs >= 86400 {
@@ -789,7 +907,10 @@ fn mute_duration(args: &[String]) -> Result<Duration, CmdError> {
     }
     let d = parse_duration(&args[1]);
     if d < Duration::from_secs(30) || d > Duration::from_secs(366 * 86400) {
-        return Err(kit::fail("禁言时长要在 30 秒到 366 天之间，例如 60s、5m、1d；省略时长表示永久"));
+        return Err(kit::fail(kit::tr(
+            "Mute duration must be between 30s and 366d (e.g. 60s, 5m, 1d); omit for permanent",
+            "禁言时长要在 30 秒到 366 天之间，例如 60s、5m、1d；省略时长表示永久",
+        )));
     }
     Ok(d)
 }
@@ -888,13 +1009,22 @@ async fn apply_rights(
         return Ok(());
     }
     let tl::enums::InputPeer::Chat(group) = chat else {
-        return Err(kit::fail("这个对话不支持这个操作"));
+        return Err(kit::fail(kit::tr(
+            "Unsupported chat type for this action",
+            "这个对话不支持这个操作",
+        )));
     };
     if !remove {
-        return Err(kit::fail("基本群不支持禁言与解封"));
+        return Err(kit::fail(kit::tr(
+            "Basic groups do not support mute or unban",
+            "基本群不支持禁言与解封",
+        )));
     }
     let Some(user) = kit::input_user(target) else {
-        return Err(kit::fail("目标必须是一个用户"));
+        return Err(kit::fail(kit::tr(
+            "Target must be a user",
+            "目标必须是一个用户",
+        )));
     };
     client
         .invoke(&tl::functions::messages::DeleteChatUser {
@@ -1048,7 +1178,10 @@ fn user_target(
     id: i64,
 ) -> Result<AbanTarget, CmdError> {
     if id == client.self_id() {
-        return Err(kit::fail("不能对自己执行此操作"));
+        return Err(kit::fail(kit::tr(
+            "Cannot perform this action on yourself",
+            "不能对自己执行此操作",
+        )));
     }
     let display = client
         .peers()
@@ -1085,11 +1218,19 @@ async fn channel_target(client: &Client, id: i64) -> Result<AbanTarget, CmdError
         peer = client.peers().input_peer(&p);
     }
     let Some(peer) = peer else {
-        return Err(kit::fail("无法解析该频道，可先回复其一则消息"));
+        return Err(kit::fail(kit::tr(
+            "Unable to resolve channel; reply to a message from it first",
+            "无法解析该频道，可先回复其一则消息",
+        )));
     };
     let info = client.peers().channel(id).unwrap_or_default();
     let fallback = format!("-100{id}");
-    let mut display = format!("频道：{}", kit::or_default(&info.title, &fallback));
+    let title = kit::or_default(&info.title, &fallback);
+    let mut display = if kit::is_zh() {
+        format!("频道：{title}")
+    } else {
+        format!("Channel: {title}")
+    };
     if !info.username.is_empty() {
         display.push_str(&format!(" (@{})", info.username));
     }
@@ -1112,9 +1253,15 @@ fn top_reasons(reasons: &HashMap<String, usize>, n: usize) -> Vec<String> {
 
 fn aban_help(prefix: &str) -> String {
     let p = escape(prefix);
-    format!(
-        "🔨 <b>群组管理</b>\n\n• <code>{p}kick</code> 踢出 · <code>{p}ban</code> 封禁并清理消息\n• <code>{p}unban</code> 解封 · <code>{p}unmute</code> 解除禁言\n• <code>{p}mute [目标] [时长]</code> 禁言，时长如 60s、5m、1h、1d，省略为永久\n• <code>{p}sb [目标]</code> 在所有有管理权的群组和频道封禁，并清理当前群组的消息\n• <code>{p}unsb [目标]</code> 批量解封\n• <code>{p}refresh</code> 刷新管理群组列表（平时缓存一天）\n\n目标可以是回复的消息、@用户名、用户 ID，也可以是频道；目标是管理员时要在后面加 <code>true</code>。\n用户 ID 不要求对方在当前群组，会从对话缓存和管理群组里找。\n基本群组只能踢出：ban 和 sb 在基本群组里是移出，对方还能再加入。"
-    )
+    if kit::is_zh() {
+        format!(
+            "🔨 <b>群组管理</b>\n\n• <code>{p}kick</code> 踢出 · <code>{p}ban</code> 封禁并清理消息\n• <code>{p}unban</code> 解封 · <code>{p}unmute</code> 解除禁言\n• <code>{p}mute [目标] [时长]</code> 禁言，时长如 60s、5m、1h、1d，省略为永久\n• <code>{p}sb [目标]</code> 在所有有管理权的群组和频道封禁，并清理当前群组的消息\n• <code>{p}unsb [目标]</code> 批量解封\n• <code>{p}refresh</code> 刷新管理群组列表（平时缓存一天）\n\n目标可以是回复的消息、@用户名、用户 ID，也可以是频道；目标是管理员时要在后面加 <code>true</code>。\n用户 ID 不要求对方在当前群组，会从对话缓存和管理群组里找。\n基本群组只能踢出：ban 和 sb 在基本群组里是移出，对方还能再加入。"
+        )
+    } else {
+        format!(
+            "🔨 <b>Group Moderation</b>\n\n• <code>{p}kick</code> Kick · <code>{p}ban</code> Ban and clean messages\n• <code>{p}unban</code> Unban · <code>{p}unmute</code> Unmute\n• <code>{p}mute [target] [duration]</code> Mute (e.g. 60s, 5m, 1h, 1d; omit for permanent)\n• <code>{p}sb [target]</code> Ban across all managed groups/channels and clean messages here\n• <code>{p}unsb [target]</code> Global unban\n• <code>{p}refresh</code> Refresh managed groups cache (cached for 24h)\n\nTarget can be a replied message, @username, user ID, or channel; append <code>true</code> if target is an admin.\nUser IDs are searched across cached dialogs and managed groups.\nBasic groups only support removal: ban/sb remove the user without a permanent block."
+        )
+    }
 }
 
 fn new_service(app: &Arc<App>) -> Arc<AbanService> {
@@ -1149,8 +1296,12 @@ fn service_for(app: &Arc<App>) -> Arc<AbanService> {
 pub fn register(app: &Arc<App>) {
     let svc = service_for(app);
 
-    let make_basic = |action: &'static str, label: &'static str, desc: &'static str| {
-        let usage = if action == "mute" { "[目标] [时长]" } else { "[目标]" };
+    let make_basic = |action: &'static str, desc: &'static str, desc_zh: &'static str| {
+        let (usage, usage_zh) = if action == "mute" {
+            ("[target] [duration]", "[目标] [时长]")
+        } else {
+            ("[target]", "[目标]")
+        };
         let s = Arc::clone(&svc);
         Command {
             name: action.into(),
@@ -1161,92 +1312,110 @@ pub fn register(app: &Arc<App>) {
             timeout: Some(Duration::from_secs(120)),
             handle: Arc::new(move |inv| {
                 let s = Arc::clone(&s);
-                Box::pin(async move { s.basic(&inv, action, label).await })
+                Box::pin(async move { s.basic(&inv, action, "").await })
             }),
             ..Default::default()
         }
+        .zh(desc_zh, usage_zh)
     };
 
     let s_help = Arc::clone(&svc);
-    app.registry.register(Command {
-        name: "aban".into(),
-        group: group::ADMIN.into(),
-        description: "查看群管理命令说明".into(),
-        help_fn: Some(Arc::new(aban_help)),
-        handle: Arc::new(move |inv| {
-            let s = Arc::clone(&s_help);
-            Box::pin(async move { s.show(&inv, &aban_help(inv.prefix()), RESULT_LIFETIME).await })
-        }),
-        ..Default::default()
-    });
+    app.registry.register(
+        Command {
+            name: "aban".into(),
+            group: group::ADMIN.into(),
+            description: "Group moderation help".into(),
+            help_fn: Some(Arc::new(aban_help)),
+            handle: Arc::new(move |inv| {
+                let s = Arc::clone(&s_help);
+                Box::pin(async move { s.show(&inv, &aban_help(inv.prefix()), RESULT_LIFETIME).await })
+            }),
+            ..Default::default()
+        }
+        .zh("查看群管理命令说明", ""),
+    );
 
-    app.registry.register(make_basic("kick", "踢出", "把用户踢出当前群组"));
-    app.registry.register(make_basic("ban", "封禁", "在当前群组封禁用户"));
-    app.registry.register(make_basic("unban", "解封", "在当前群组解封用户"));
-    app.registry.register(make_basic("mute", "禁言", "在当前群组禁言用户"));
-    app.registry.register(make_basic("unmute", "解除禁言", "在当前群组解除禁言"));
+    app.registry.register(make_basic("kick", "Kick user from group", "把用户踢出当前群组"));
+    app.registry.register(make_basic("ban", "Ban user in current group", "在当前群组封禁用户"));
+    app.registry.register(make_basic("unban", "Unban user in current group", "在当前群组解封用户"));
+    app.registry.register(make_basic("mute", "Mute user in current group", "在当前群组禁言用户"));
+    app.registry.register(make_basic("unmute", "Unmute user in current group", "在当前群组解除禁言"));
 
     let s_sb = Arc::clone(&svc);
-    app.registry.register(Command {
-        name: "sb".into(),
-        group: group::ADMIN.into(),
-        description: "在所有管理的群组封禁".into(),
-        usage: "[目标]".into(),
-        help_fn: Some(Arc::new(aban_help)),
-        timeout: Some(Duration::from_secs(15 * 60)),
-        handle: Arc::new(move |inv| {
-            let s = Arc::clone(&s_sb);
-            Box::pin(async move { s.batch(&inv, true).await })
-        }),
-        ..Default::default()
-    });
+    app.registry.register(
+        Command {
+            name: "sb".into(),
+            group: group::ADMIN.into(),
+            description: "Ban user in all managed groups".into(),
+            usage: "[target]".into(),
+            help_fn: Some(Arc::new(aban_help)),
+            timeout: Some(Duration::from_secs(15 * 60)),
+            handle: Arc::new(move |inv| {
+                let s = Arc::clone(&s_sb);
+                Box::pin(async move { s.batch(&inv, true).await })
+            }),
+            ..Default::default()
+        }
+        .zh("在所有管理的群组封禁", "[目标]"),
+    );
 
     let s_unsb = Arc::clone(&svc);
-    app.registry.register(Command {
-        name: "unsb".into(),
-        group: group::ADMIN.into(),
-        description: "在所有管理的群组解封".into(),
-        usage: "[目标]".into(),
-        help_fn: Some(Arc::new(aban_help)),
-        timeout: Some(Duration::from_secs(15 * 60)),
-        handle: Arc::new(move |inv| {
-            let s = Arc::clone(&s_unsb);
-            Box::pin(async move { s.batch(&inv, false).await })
-        }),
-        ..Default::default()
-    });
+    app.registry.register(
+        Command {
+            name: "unsb".into(),
+            group: group::ADMIN.into(),
+            description: "Unban in all managed groups".into(),
+            usage: "[target]".into(),
+            help_fn: Some(Arc::new(aban_help)),
+            timeout: Some(Duration::from_secs(15 * 60)),
+            handle: Arc::new(move |inv| {
+                let s = Arc::clone(&s_unsb);
+                Box::pin(async move { s.batch(&inv, false).await })
+            }),
+            ..Default::default()
+        }
+        .zh("在所有管理的群组解封", "[目标]"),
+    );
 
     let s_ref = Arc::clone(&svc);
-    app.registry.register(Command {
-        name: "refresh".into(),
-        group: group::ADMIN.into(),
-        description: "刷新管理群组列表".into(),
-        help_fn: Some(Arc::new(aban_help)),
-        timeout: Some(Duration::from_secs(5 * 60)),
-        handle: Arc::new(move |inv| {
-            let s = Arc::clone(&s_ref);
-            Box::pin(async move {
-                inv.edit_text(&kit::working("正在刷新管理群组列表")).await?;
-                match s.managed_groups(&inv.client, true).await {
-                    Ok(groups) => {
-                        s.show(
-                            &inv,
-                            &format!("✅ 已刷新 {} 个有管理权的群组", groups.len()),
-                            RESULT_LIFETIME,
-                        )
-                        .await
-                    }
-                    Err(err) => {
-                        if inv.cancel.is_cancelled() {
-                            return Err(err);
+    app.registry.register(
+        Command {
+            name: "refresh".into(),
+            group: group::ADMIN.into(),
+            description: "Refresh managed groups cache".into(),
+            help_fn: Some(Arc::new(aban_help)),
+            timeout: Some(Duration::from_secs(5 * 60)),
+            handle: Arc::new(move |inv| {
+                let s = Arc::clone(&s_ref);
+                Box::pin(async move {
+                    inv.edit_text(&kit::working(kit::tr(
+                        "Refreshing managed groups",
+                        "正在刷新管理群组列表",
+                    )))
+                    .await?;
+                    match s.managed_groups(&inv.client, true).await {
+                        Ok(groups) => {
+                            let msg = if kit::is_zh() {
+                                format!("✅ 已刷新 {} 个有管理权的群组", groups.len())
+                            } else {
+                                format!("✅ Refreshed {} managed group(s)", groups.len())
+                            };
+                            s.show(&inv, &msg, RESULT_LIFETIME).await
                         }
-                        s.show_failure(&inv, "刷新失败", err).await
+                        Err(err) => {
+                            if inv.cancel.is_cancelled() {
+                                return Err(err);
+                            }
+                            s.show_failure(&inv, kit::tr("Refresh failed", "刷新失败"), err)
+                                .await
+                        }
                     }
-                }
-            })
-        }),
-        ..Default::default()
-    });
+                })
+            }),
+            ..Default::default()
+        }
+        .zh("刷新管理群组列表", ""),
+    );
 
     let _ = peer_id(&tl::enums::Peer::User(tl::types::PeerUser { user_id: 0 }));
 }
@@ -1668,7 +1837,7 @@ mod tests {
         for (input, want) in cases {
             assert_eq!(parse_duration(input), want, "input={input}");
         }
-        assert_eq!(format_duration(Duration::ZERO), "永久");
+        assert_eq!(format_duration(Duration::ZERO), "forever");
         assert_eq!(format_duration(Duration::from_secs(90 * 60)), "1h");
     }
 
@@ -1843,7 +2012,7 @@ mod tests {
             .resolve_target(&invocation(&fc, here_peer(), 5, &[]), &here_input())
             .await
             .unwrap();
-        assert!(t.channel && t.display == "频道：Spam (@spamchan)");
+        assert!(t.channel && t.display == "Channel: Spam (@spamchan)");
         let err = fc
             .svc
             .resolve_target(&invocation(&fc, here_peer(), 0, &["1"]), &here_input())
@@ -1899,7 +2068,7 @@ mod tests {
         fm.client.peers().remember_users(&[make_user(TARGET_ID, TARGET_HASH, "Spam")]);
         fm.svc.basic(&invocation(&fm, here_peer(), 0, &["42", "5min"]), "mute", "禁言").await.unwrap();
         let calls = fm.fake.calls.lock().unwrap().clone();
-        assert!(calls.last().unwrap() == "edit 1000 ✅ 已禁言 Spam 5m");
+        assert!(calls.last().unwrap() == "edit 1000 ✅ Muted Spam 5m");
         assert!(calls.iter().any(|c| c == "channels.editBanned 10 user42#4242 view=false send=true timed=true"));
         let task = {
             let mut d = fm.deletions.lock().unwrap();
@@ -1927,8 +2096,8 @@ mod tests {
         fb.svc.batch(&invocation(&fb, here_peer(), 0, &["42", "true"]), true).await.unwrap();
         let calls = fb.fake.calls.lock().unwrap().clone();
         let last = calls.last().unwrap();
-        assert!(last.contains("✅ 已在 2 个群组和频道里封禁 Spam"));
-        assert!(last.contains("失败 2 个（CHAT_ADMIN_REQUIRED×2）"));
+        assert!(last.contains("✅ Banned Spam across 2 group(s) and channel(s)"));
+        assert!(last.contains("Failed in 2 (CHAT_ADMIN_REQUIRED×2)"));
         assert_eq!(fb.deletions.lock().unwrap()[0].0, BATCH_LIFETIME);
     }
 }

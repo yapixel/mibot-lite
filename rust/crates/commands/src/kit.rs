@@ -10,13 +10,18 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 pub use mibot_command::{fail, fail as fail_err, fail_with, fail_with as fail_with_err, is_user_error};
+pub use mibot_i18n::{is_zh, tr};
 
 pub fn wrap_fail(msg: &str, err: CmdError) -> CmdError {
     if is_user_error(err.as_ref()) {
         return err;
     }
     let arc: Arc<dyn std::error::Error + Send + Sync> = Arc::from(err);
-    let label = format!("{msg}（{}）", mibot_command::brief(arc.as_ref()));
+    let label = if is_zh() {
+        format!("{msg}（{}）", mibot_command::brief(arc.as_ref()))
+    } else {
+        format!("{msg} ({})", mibot_command::brief(arc.as_ref()))
+    };
     Box::new(mibot_command::UserError {
         text: label,
         cause: Some(arc),
@@ -24,7 +29,7 @@ pub fn wrap_fail(msg: &str, err: CmdError) -> CmdError {
 }
 
 pub fn usage(prefix: &str, spec: &str) -> CmdError {
-    fail(format!("用法：{prefix}{spec}"))
+    fail(format!("{}{prefix}{spec}", tr("Usage: ", "用法：")))
 }
 
 pub fn feedback(state: &str, title: &str, detail: &str) -> String {
@@ -67,8 +72,14 @@ pub async fn reply_msg(inv: &Invocation) -> Result<Option<Message>, CmdError> {
     }
     match inv.get_reply().await {
         Ok(Some(m)) => Ok(Some(m)),
-        Ok(None) => Err(fail("被回复的消息已经不在了")),
-        Err(e) => Err(fail_with("读不到被回复的消息", e)),
+        Ok(None) => Err(fail(tr(
+            "Replied message is no longer available",
+            "被回复的消息已经不在了",
+        ))),
+        Err(e) => Err(fail_with(
+            tr("Failed to read replied message", "读不到被回复的消息"),
+            e,
+        )),
     }
 }
 
@@ -76,12 +87,16 @@ pub fn on_off(value: &str) -> Result<bool, CmdError> {
     match value.to_ascii_lowercase().as_str() {
         "on" => Ok(true),
         "off" => Ok(false),
-        _ => Err(fail("请输入 on 或 off")),
+        _ => Err(fail(tr("Please enter on or off", "请输入 on 或 off"))),
     }
 }
 
 pub fn on_off_text(value: bool) -> &'static str {
-    if value { "开启" } else { "关闭" }
+    if value {
+        tr("on", "开启")
+    } else {
+        tr("off", "关闭")
+    }
 }
 
 pub async fn sleep(cancel: &CancellationToken, d: Duration) -> bool {
@@ -204,7 +219,7 @@ pub fn format_bytes(size: i64) -> String {
 
 pub fn version(app: &App) -> &str {
     if app.version.is_empty() {
-        "未知"
+        tr("unknown", "未知")
     } else {
         &app.version
     }

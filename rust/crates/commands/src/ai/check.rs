@@ -136,7 +136,7 @@ fn display_name_for(kind: &str) -> &'static str {
         "nvidia" => "NVIDIA NIM",
         "novita" => "Novita",
         "cerebras" => "Cerebras",
-        _ => "OpenAI 兼容 API",
+        _ => kit::tr("OpenAI-Compatible API", "OpenAI 兼容 API"),
     }
 }
 
@@ -227,7 +227,11 @@ async fn check_do(
 
 fn transport_failure(err: &HttpxError) -> String {
     if matches!(err, HttpxError::CredentialRedirect | HttpxError::CrossHostRedirect) {
-        "接口跳转到了别的地址，为保护 Key 已拒绝".into()
+        kit::tr(
+            "API redirected to another host; rejected to protect your key",
+            "接口跳转到了别的地址，为保护 Key 已拒绝",
+        )
+        .into()
     } else {
         mibot_httpx::reason(err)
     }
@@ -333,14 +337,23 @@ pub(crate) fn identify_provider(tag: &str, provider: &AiProvider) -> ProviderIde
 
 async fn provider_models(cfg: &AiConfig, tag: &str) -> Result<Vec<String>, CmdError> {
     let Some(provider) = cfg.configs.get(tag) else {
-        return Err(kit::fail("未找到指定的 AI 提供商"));
+        return Err(kit::fail(kit::tr(
+            "Specified AI provider not found",
+            "未找到指定的 AI 提供商",
+        )));
     };
     if tag.is_empty() {
-        return Err(kit::fail("未找到指定的 AI 提供商"));
+        return Err(kit::fail(kit::tr(
+            "Specified AI provider not found",
+            "未找到指定的 AI 提供商",
+        )));
     }
     let kind = resolve_provider_type(provider);
     if kind == "codex" {
-        return Err(kit::fail("codex 类型的 API 不支持模型列表"));
+        return Err(kit::fail(kit::tr(
+            "codex API does not support model listing",
+            "codex 类型的 API 不支持模型列表",
+        )));
     }
     let mut target = provider_endpoint(&provider.url, &kind, "models")?;
     let (resolved_target, headers, secret) = provider_auth(&kind, &provider.key, &target);
@@ -355,17 +368,26 @@ async fn provider_models(cfg: &AiConfig, tag: &str) -> Result<Vec<String>, CmdEr
     loop {
         let rem = deadline.saturating_duration_since(tokio::time::Instant::now());
         if rem.is_zero() {
-            return Err(kit::fail("获取模型列表失败：请求超时，稍后再试"));
+            return Err(kit::fail(kit::tr(
+                "Failed to fetch model list: request timed out, please try again later",
+                "获取模型列表失败：请求超时，稍后再试",
+            )));
         }
         let response = check_do(Method::GET, &target, &headers, None, rem, remaining)
             .await
-            .map_err(|e| kit::fail(format!("获取模型列表失败：{}", transport_failure(&e))))?;
+            .map_err(|e| {
+                kit::fail(format!(
+                    "{}{}",
+                    kit::tr("Failed to fetch model list: ", "获取模型列表失败："),
+                    transport_failure(&e)
+                ))
+            })?;
         if !response.ok() {
             return Err(kit::fail(http_failure(response.status, &response.body, &secret)));
         }
         remaining = remaining.saturating_sub(response.body.len());
         let payload: Value = serde_json::from_slice(&response.body)
-            .map_err(|_| kit::fail("AI 返回无效 JSON"))?;
+            .map_err(|_| kit::fail(kit::tr("AI returned invalid JSON", "AI 返回无效 JSON")))?;
         if ai_provider_failed(&payload) {
             return Err(provider_failure(&payload, &secret));
         }
@@ -401,19 +423,28 @@ async fn provider_models(cfg: &AiConfig, tag: &str) -> Result<Vec<String>, CmdEr
         } else {
             names.sort();
             if names.is_empty() {
-                return Err(kit::fail("接口没有返回任何模型"));
+                return Err(kit::fail(kit::tr(
+                    "API returned no models",
+                    "接口没有返回任何模型",
+                )));
             }
             return Ok(names);
         };
 
-        let mut parsed = Url::parse(&target).map_err(|_| kit::fail("模型列表的分页游标无效"))?;
+        let invalid_cursor = || {
+            kit::fail(kit::tr(
+                "Invalid pagination cursor in model list",
+                "模型列表的分页游标无效",
+            ))
+        };
+        let mut parsed = Url::parse(&target).map_err(|_| invalid_cursor())?;
         let already = parsed
             .query_pairs()
             .find(|(k, _)| k == param)
             .map(|(_, v)| v.into_owned())
             .unwrap_or_default();
         if cursor.is_empty() || already == cursor {
-            return Err(kit::fail("模型列表的分页游标无效"));
+            return Err(invalid_cursor());
         }
         let mut pairs: Vec<(String, String)> = parsed
             .query_pairs()
@@ -571,7 +602,11 @@ fn js_truthy(v: Option<&Value>) -> bool {
 }
 
 fn yes_no_text(v: bool) -> &'static str {
-    if v { "是" } else { "否" }
+    if v {
+        kit::tr("Yes", "是")
+    } else {
+        kit::tr("No", "否")
+    }
 }
 
 async fn open_ai_balance(provider: &AiProvider) -> Balance {
@@ -618,45 +653,49 @@ async fn open_ai_balance(provider: &AiProvider) -> Balance {
     if sub.ok {
         let plan = sub.data.get("plan").and_then(|v| v.as_object());
         fields.push(BalanceField {
-            label: "套餐".into(),
+            label: kit::tr("Plan", "套餐").into(),
             value: js_string(plan.and_then(|p| p.get("title"))),
         });
         fields.push(BalanceField {
-            label: "硬上限".into(),
+            label: kit::tr("Hard limit", "硬上限").into(),
             value: js_string(sub.data.get("hard_limit_usd")),
         });
         fields.push(BalanceField {
-            label: "软上限".into(),
+            label: kit::tr("Soft limit", "软上限").into(),
             value: js_string(sub.data.get("soft_limit_usd")),
         });
         fields.push(BalanceField {
-            label: "系统上限".into(),
+            label: kit::tr("System limit", "系统上限").into(),
             value: js_string(sub.data.get("system_hard_limit_usd")),
         });
     } else {
         fields.push(BalanceField {
-            label: "账单".into(),
-            value: "可能是 platform Key，看不到".into(),
+            label: kit::tr("Billing", "账单").into(),
+            value: kit::tr(
+                "Unavailable (may be a platform key)",
+                "可能是 platform Key，看不到",
+            )
+            .into(),
         });
     }
     if let Some(secs) = sub.data.get("access_until").and_then(|v| v.as_f64())
         && let Some(dt) = chrono::DateTime::from_timestamp(secs as i64, 0)
     {
         fields.push(BalanceField {
-            label: "有效期".into(),
+            label: kit::tr("Expires", "有效期").into(),
             value: dt.format("%Y-%m-%d").to_string(),
         });
     }
     if sub.data.contains_key("has_payment_method") {
         fields.push(BalanceField {
-            label: "支付方式".into(),
+            label: kit::tr("Payment method", "支付方式").into(),
             value: yes_no_text(js_truthy(sub.data.get("has_payment_method"))).into(),
         });
     }
     if usage.ok {
         let total = usage.data.get("total_usage").and_then(|v| v.as_f64()).unwrap_or(0.0);
         fields.push(BalanceField {
-            label: "近 90 天".into(),
+            label: kit::tr("Last 90 days", "近 90 天").into(),
             value: format!("${:.4}", total / 100.0),
         });
     }
@@ -700,8 +739,8 @@ async fn anthropic_balance(provider: &AiProvider, model: &str) -> Balance {
         return Balance {
             status: "unsupported".into(),
             fields: vec![BalanceField {
-                label: "余额".into(),
-                value: "请到官网查看".into(),
+                label: kit::tr("Balance", "余额").into(),
+                value: kit::tr("Check on provider dashboard", "请到官网查看").into(),
             }],
         };
     }
@@ -725,17 +764,25 @@ async fn anthropic_balance(provider: &AiProvider, model: &str) -> Balance {
     )
     .await;
     if reply.ok || reply.status == 429 {
-        let state = if reply.status == 429 { "限流" } else { "正常" };
+        let state = if reply.status == 429 {
+            kit::tr("rate-limited", "限流")
+        } else {
+            kit::tr("ok", "正常")
+        };
         return Balance {
             status: "ok".into(),
             fields: vec![
                 BalanceField {
                     label: "Key".into(),
-                    value: format!("有效（{state}）"),
+                    value: if kit::is_zh() {
+                        format!("有效（{state}）")
+                    } else {
+                        format!("Valid ({state})")
+                    },
                 },
                 BalanceField {
-                    label: "余额".into(),
-                    value: "请到官网查看".into(),
+                    label: kit::tr("Balance", "余额").into(),
+                    value: kit::tr("Check on provider dashboard", "请到官网查看").into(),
                 },
             ],
         };
@@ -801,26 +848,26 @@ async fn provider_balance(provider: &AiProvider, kind: &str, model: &str) -> Bal
                 .unwrap_or(data);
             let label = root.get("label").or_else(|| root.get("name"));
             fields.push(BalanceField {
-                label: "标签".into(),
+                label: kit::tr("Label", "标签").into(),
                 value: js_string(label),
             });
             fields.push(BalanceField {
-                label: "余额".into(),
+                label: kit::tr("Balance", "余额").into(),
                 value: js_string(root.get("credits")),
             });
             fields.push(BalanceField {
-                label: "已用".into(),
+                label: kit::tr("Used", "已用").into(),
                 value: js_string(root.get("usage")),
             });
             fields.push(BalanceField {
-                label: "限额".into(),
+                label: kit::tr("Limit", "限额").into(),
                 value: js_string(root.get("limit")),
             });
             if let Some(rate) = root.get("rate_limit").and_then(|v| v.as_object())
                 && !rate.is_empty()
             {
                 fields.push(BalanceField {
-                    label: "速率".into(),
+                    label: kit::tr("Rate limit", "速率").into(),
                     value: format!(
                         "{} req / {}",
                         js_string(rate.get("requests")),
@@ -832,14 +879,14 @@ async fn provider_balance(provider: &AiProvider, kind: &str, model: &str) -> Bal
                 && !disabled.is_empty()
             {
                 fields.push(BalanceField {
-                    label: "禁用".into(),
+                    label: kit::tr("Disabled", "禁用").into(),
                     value: disabled.len().to_string(),
                 });
             }
         }
         "deepseek" => {
             fields.push(BalanceField {
-                label: "可用".into(),
+                label: kit::tr("Available", "可用").into(),
                 value: yes_no_text(js_truthy(data.get("is_available"))).into(),
             });
             if let Some(infos) = data.get("balance_infos").and_then(|v| v.as_array()) {
@@ -848,7 +895,7 @@ async fn provider_balance(provider: &AiProvider, kind: &str, model: &str) -> Bal
                     let label = if cur.is_some() && !cur.unwrap().is_null() {
                         js_string(cur)
                     } else {
-                        "余额".into()
+                        kit::tr("Balance", "余额").into()
                     };
                     fields.push(BalanceField {
                         label,
@@ -865,11 +912,11 @@ async fn provider_balance(provider: &AiProvider, kind: &str, model: &str) -> Bal
                 .map(|a| a.len())
                 .unwrap_or(0);
             fields.push(BalanceField {
-                label: "状态".into(),
-                value: "有效".into(),
+                label: kit::tr("Status", "状态").into(),
+                value: kit::tr("Valid", "有效").into(),
             });
             fields.push(BalanceField {
-                label: "模型".into(),
+                label: kit::tr("Models", "模型").into(),
                 value: count.to_string(),
             });
         }
@@ -917,7 +964,10 @@ impl Service {
     pub async fn benchmark(&self, tag: &str) -> Result<(ProviderIdentity, Vec<Probe>), CmdError> {
         let cfg = self.read()?;
         let Some(provider) = cfg.configs.get(tag) else {
-            return Err(kit::fail("未找到指定的 AI 提供商"));
+            return Err(kit::fail(kit::tr(
+                "Specified AI provider not found",
+                "未找到指定的 AI 提供商",
+            )));
         };
         let identity = identify_provider(tag, provider);
         let models: Vec<String> = match benchmark_models_for(&identity.kind) {
@@ -942,7 +992,10 @@ impl Service {
     pub async fn diagnose(&self, tag: &str) -> Result<Diagnosis, CmdError> {
         let cfg = self.read()?;
         let Some(provider) = cfg.configs.get(tag) else {
-            return Err(kit::fail("未找到指定的 AI 提供商"));
+            return Err(kit::fail(kit::tr(
+                "Specified AI provider not found",
+                "未找到指定的 AI 提供商",
+            )));
         };
         let identity = identify_provider(tag, provider);
         let selected = configured_chat_model(&cfg, tag);
@@ -980,21 +1033,22 @@ impl Service {
         if !import_tag_re().is_match(&value.tag)
             || ["__proto__", "constructor", "prototype"].contains(&value.tag.as_str())
         {
-            return Err(kit::fail("导入标签无效"));
+            return Err(kit::fail(kit::tr("Invalid import tag", "导入标签无效")));
         }
         if value.url.len() > 2048 || value.key.is_empty() || value.key.len() > 8192 {
-            return Err(kit::fail("导入配置无效"));
+            return Err(kit::fail(kit::tr("Invalid import config", "导入配置无效")));
         }
-        let parsed = Url::parse(&value.url).map_err(|_| kit::fail("导入地址无效"))?;
+        let parsed = Url::parse(&value.url)
+            .map_err(|_| kit::fail(kit::tr("Invalid import URL", "导入地址无效")))?;
         if parsed.host_str().is_none()
             || (parsed.scheme() != "https" && parsed.scheme() != "http")
             || !parsed.username().is_empty()
             || parsed.password().is_some()
         {
-            return Err(kit::fail("导入地址无效"));
+            return Err(kit::fail(kit::tr("Invalid import URL", "导入地址无效")));
         }
         if !value.kind.is_empty() && !AI_PROVIDER_TYPES.contains(&value.kind.as_str()) {
-            return Err(kit::fail("导入类型无效"));
+            return Err(kit::fail(kit::tr("Invalid import type", "导入类型无效")));
         }
         let mut clean_models = HashMap::new();
         for &mode in IMPORT_MODES {
@@ -1045,7 +1099,10 @@ impl Service {
                     }
                 }
                 if actual.is_empty() {
-                    return Err(kit::fail("AI 导入标签已用尽"));
+                    return Err(kit::fail(kit::tr(
+                        "Exhausted AI import tags",
+                        "AI 导入标签已用尽",
+                    )));
                 }
             }
             let mut merged = existing
@@ -1324,7 +1381,7 @@ mod tests {
         assert!(!bad_err.contains("sk-bad") && bad_err.contains("HTTP 401"));
 
         let (ident, probes) = s.benchmark("good").await.unwrap();
-        assert_eq!(ident.display_name, "OpenAI 兼容 API");
+        assert_eq!(ident.display_name, "OpenAI-Compatible API");
         assert!(probes[0].ok && probes[0].model == "m1-2026" && probes[0].usage.as_ref().unwrap().total == 6);
         assert_eq!(
             probes[0].rate_limits,
@@ -1339,7 +1396,7 @@ mod tests {
         assert!(diag.chat.as_ref().unwrap().ok);
 
         let redir_err = s.models("claude").await.unwrap_err().to_string();
-        assert!(redir_err.contains("为保护 Key 已拒绝"));
+        assert!(redir_err.contains("rejected to protect your key"));
 
         // Import tests
         let (tag1, imp1) = s

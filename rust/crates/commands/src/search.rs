@@ -20,7 +20,13 @@ const MAX_ADD_PER_CALL: usize = 50;
 const LISTED_LINES: usize = 20;
 const CAPTION_LIMIT: usize = 1024;
 const MAX_MEDIA_BYTES: i64 = 2 << 30;
-const ERR_BAD_HANDLE_TEXT: &str = "不是有效的频道用户名或链接";
+
+fn err_bad_handle_text() -> &'static str {
+    kit::tr(
+        "Not a valid channel username or link",
+        "不是有效的频道用户名或链接",
+    )
+}
 
 const DEFAULT_FILTERS: &[&str] = &[
     "广告", "推广", "赞助", "合作", "代理", "招商", "加盟", "投资", "理财", "贷款", "借钱", "网贷",
@@ -227,7 +233,12 @@ fn clip_lines(lines: &[String], limit: usize) -> Vec<String> {
         return lines.to_vec();
     }
     let mut out = lines[..limit].to_vec();
-    out.push(format!("…还有 {} 个", lines.len() - limit));
+    let rem = lines.len() - limit;
+    out.push(if kit::is_zh() {
+        format!("…还有 {rem} 个")
+    } else {
+        format!("…and {rem} more")
+    });
     out
 }
 
@@ -397,7 +408,7 @@ fn same_peer(chat: &tl::enums::Chat, peer: &tl::enums::Peer) -> bool {
 
 async fn lookup(client: &Client, handle: &str) -> Result<Source, CmdError> {
     if !valid_handle(handle) {
-        return Err(kit::fail(ERR_BAD_HANDLE_TEXT));
+        return Err(kit::fail(err_bad_handle_text()));
     }
     let (username, invite, id) = parse_handle(handle);
     let mut want: Option<tl::enums::Peer> = None;
@@ -428,7 +439,7 @@ async fn lookup(client: &Client, handle: &str) -> Result<Source, CmdError> {
                     .await?;
                 res.chats()
             }
-            _ => return Err(kit::fail("不是频道或群组")),
+            _ => return Err(kit::fail(kit::tr("Not a channel or group", "不是频道或群组"))),
         }
     } else if !invite.is_empty() {
         let res = client
@@ -438,7 +449,10 @@ async fn lookup(client: &Client, handle: &str) -> Result<Source, CmdError> {
             tl::enums::ChatInvite::Already(v) => vec![v.chat],
             tl::enums::ChatInvite::Peek(v) => vec![v.chat],
             tl::enums::ChatInvite::Invite(_) => {
-                return Err(kit::fail("还没有加入这个邀请链接的群组或频道"));
+                return Err(kit::fail(kit::tr(
+                    "Not a member of this invite link's chat",
+                    "还没有加入这个邀请链接的群组或频道",
+                )));
             }
         }
     } else if !username.is_empty() {
@@ -450,12 +464,12 @@ async fn lookup(client: &Client, handle: &str) -> Result<Source, CmdError> {
             .await?;
         client.peers().remember_entities(&res.users, &res.chats);
         if matches!(res.peer, tl::enums::Peer::User(_)) {
-            return Err(kit::fail("不是频道或群组"));
+            return Err(kit::fail(kit::tr("Not a channel or group", "不是频道或群组")));
         }
         want = Some(res.peer);
         res.chats
     } else {
-        return Err(kit::fail("频道源为空"));
+        return Err(kit::fail(kit::tr("Channel source is empty", "频道源为空")));
     };
 
     client.peers().remember_entities(&[], &chats);
@@ -469,7 +483,7 @@ async fn lookup(client: &Client, handle: &str) -> Result<Source, CmdError> {
             return Ok(found);
         }
     }
-    Err(kit::fail("无法访问"))
+    Err(kit::fail(kit::tr("Unable to access", "无法访问")))
 }
 
 async fn linked_group(client: &Client, source: &Source) -> String {
@@ -737,7 +751,10 @@ impl Service {
 
     async fn add(&self, inv: &Invocation, mut values: Vec<String>) -> Result<(), CmdError> {
         if values.is_empty() {
-            return Err(kit::usage(inv.prefix(), "so add 频道链接或@用户名…"));
+            return Err(kit::usage(
+                inv.prefix(),
+                kit::tr("so add <channel link or @username…>", "so add 频道链接或@用户名…"),
+            ));
         }
         let mut skipped = 0usize;
         if values.len() > MAX_ADD_PER_CALL {
@@ -745,21 +762,31 @@ impl Service {
             values.truncate(MAX_ADD_PER_CALL);
         }
         let cfg = self.read()?;
-        inv.edit_text(&kit::working("正在添加频道")).await?;
+        inv.edit_text(&kit::working(kit::tr("Adding channels", "正在添加频道")))
+            .await?;
 
         let mut added: Vec<Channel> = Vec::new();
         let mut failures: Vec<String> = Vec::new();
         let mut lookups = 0usize;
+        let zh = kit::is_zh();
 
         for value in values {
             let exists = cfg.channel_list.iter().any(|c| c.handle == value)
                 || added.iter().any(|c| c.handle == value);
             if exists {
-                failures.push(format!("{value}：已存在"));
+                failures.push(if zh {
+                    format!("{value}：已存在")
+                } else {
+                    format!("{value}: already exists")
+                });
                 continue;
             }
             if !valid_handle(&value) {
-                failures.push(format!("{value}：{ERR_BAD_HANDLE_TEXT}"));
+                failures.push(if zh {
+                    format!("{value}：{}", err_bad_handle_text())
+                } else {
+                    format!("{value}: {}", err_bad_handle_text())
+                });
                 continue;
             }
             if !self.sources.has(&value) {
@@ -777,7 +804,7 @@ impl Service {
                     let reason = if kit::is_user_error(err.as_ref()) {
                         err.to_string()
                     } else {
-                        "无法访问".to_owned()
+                        kit::tr("Unable to access", "无法访问").to_owned()
                     };
                     kit::opt_log(
                         self.logs.as_ref(),
@@ -785,7 +812,11 @@ impl Service {
                         "search.add_failed",
                         &[("handle", &value), ("error", &err.to_string())],
                     );
-                    failures.push(format!("{value}：{reason}"));
+                    failures.push(if zh {
+                        format!("{value}：{reason}")
+                    } else {
+                        format!("{value}: {reason}")
+                    });
                     continue;
                 }
             };
@@ -818,24 +849,37 @@ impl Service {
         })?;
 
         let skipped_note = if skipped > 0 {
-            format!("一次最多处理 {MAX_ADD_PER_CALL} 个，另外 {skipped} 个没有处理")
+            if zh {
+                format!("一次最多处理 {MAX_ADD_PER_CALL} 个，另外 {skipped} 个没有处理")
+            } else {
+                format!("Max {MAX_ADD_PER_CALL} per call; {skipped} skipped")
+            }
         } else {
             String::new()
         };
         if applied == 0 {
-            let mut reason = format!(
-                "没有添加任何频道：{}",
-                clip_lines(&failures, 5).join("；")
-            );
+            let mut reason = if zh {
+                format!("没有添加任何频道：{}", clip_lines(&failures, 5).join("；"))
+            } else {
+                format!("No channels added: {}", clip_lines(&failures, 5).join("; "))
+            };
             if !skipped_note.is_empty() {
-                reason.push('；');
+                reason.push_str(if zh { "；" } else { "; " });
                 reason.push_str(&skipped_note);
             }
             return Err(kit::fail(reason));
         }
-        let mut text = kit::feedback("success", &format!("已添加 {applied} 个频道"), "");
+        let mut text = kit::feedback(
+            "success",
+            &if zh {
+                format!("已添加 {applied} 个频道")
+            } else {
+                format!("Added {applied} channel(s)")
+            },
+            "",
+        );
         if !failures.is_empty() {
-            text.push_str("\n\n⚠️ 以下频道没有添加\n");
+            text.push_str(kit::tr("\n\n⚠️ Not added\n", "\n\n⚠️ 以下频道没有添加\n"));
             text.push_str(&escape(&clip_lines(&failures, LISTED_LINES).join("\n")));
         }
         if !skipped_note.is_empty() {
@@ -850,7 +894,10 @@ impl Service {
     async fn remove(&self, inv: &Invocation) -> Result<(), CmdError> {
         let raw = inv.raw_after(1);
         if raw.is_empty() {
-            return Err(kit::usage(inv.prefix(), "so del 频道|序号…"));
+            return Err(kit::usage(
+                inv.prefix(),
+                kit::tr("so del <channel|index…>", "so del 频道|序号…"),
+            ));
         }
         let mut removed = Vec::new();
         match self.store.update(|cfg| {
@@ -881,7 +928,10 @@ impl Service {
                 }
             }
             if removed.is_empty() {
-                return Err(kit::fail("列表里没有指定的频道或序号"));
+                return Err(kit::fail(kit::tr(
+                    "No matching channel or index in list",
+                    "列表里没有指定的频道或序号",
+                )));
             }
             cfg.channel_list = kept;
             if let Some(ref def) = cfg.default_channel
@@ -897,7 +947,15 @@ impl Service {
         }
         let text = format!(
             "{}\n{}",
-            kit::feedback("success", &format!("已移除 {} 个频道", removed.len()), ""),
+            kit::feedback(
+                "success",
+                &if kit::is_zh() {
+                    format!("已移除 {} 个频道", removed.len())
+                } else {
+                    format!("Removed {} channel(s)", removed.len())
+                },
+                ""
+            ),
             escape(&format!(
                 "• {}",
                 clip_lines(&removed, LISTED_LINES).join("\n• ")
@@ -911,7 +969,10 @@ impl Service {
     async fn set_default(&self, inv: &Invocation) -> Result<(), CmdError> {
         let raw = inv.raw_after(1).trim().to_owned();
         if raw.is_empty() {
-            return Err(kit::usage(inv.prefix(), "so default 频道|d"));
+            return Err(kit::usage(
+                inv.prefix(),
+                kit::tr("so default <channel|d>", "so default 频道|d"),
+            ));
         }
         let prefix = inv.prefix().to_owned();
         let raw_c = raw.clone();
@@ -921,7 +982,11 @@ impl Service {
                 return Ok(());
             }
             if !cfg.channel_list.iter().any(|c| c.handle == raw_c) {
-                return Err(kit::fail(format!("请先用 {prefix}so add 添加这个频道")));
+                return Err(kit::fail(if kit::is_zh() {
+                    format!("请先用 {prefix}so add 添加这个频道")
+                } else {
+                    format!("Add this channel first with {prefix}so add")
+                }));
             }
             cfg.default_channel = Some(raw_c);
             Ok(())
@@ -931,13 +996,25 @@ impl Service {
             Err(mibot_store::UpdateError::Mutate(e)) => return Err(e),
         }
         if raw == "d" {
-            inv.edit(&kit::feedback("success", "已取消默认频道", ""))
-                .await
-                .map_err(Into::into)
+            inv.edit(&kit::feedback(
+                "success",
+                kit::tr("Default channel cleared", "已取消默认频道"),
+                "",
+            ))
+            .await
+            .map_err(Into::into)
         } else {
-            inv.edit(&kit::feedback("success", &format!("默认频道已设为 {raw}"), ""))
-                .await
-                .map_err(Into::into)
+            inv.edit(&kit::feedback(
+                "success",
+                &if kit::is_zh() {
+                    format!("默认频道已设为 {raw}")
+                } else {
+                    format!("Default channel set to {raw}")
+                },
+                "",
+            ))
+            .await
+            .map_err(Into::into)
         }
     }
 
@@ -951,7 +1028,10 @@ impl Service {
     async fn export(&self, inv: &Invocation) -> Result<(), CmdError> {
         let cfg = self.read()?;
         if cfg.channel_list.is_empty() {
-            return Err(kit::fail("没有可导出的频道"));
+            return Err(kit::fail(kit::tr(
+                "No channels to export",
+                "没有可导出的频道",
+            )));
         }
         let handles: Vec<&str> = cfg.channel_list.iter().map(|c| c.handle.as_str()).collect();
         let peer = inv.peer_result()?;
@@ -963,33 +1043,58 @@ impl Service {
                 mibot_bot::MediaOptions {
                     name: "search-channels.txt".into(),
                     mime_type: "text/plain".into(),
-                    caption: format!("✅ 已导出 {} 个频道源", handles.len()),
+                    caption: if kit::is_zh() {
+                        format!("✅ 已导出 {} 个频道源", handles.len())
+                    } else {
+                        format!("✅ Exported {} channel source(s)", handles.len())
+                    },
                     topic_id: Some(inv.message.topic_id).filter(|&id| id > 0),
                     force_document: true,
                     ..Default::default()
                 },
             )
             .await
-            .map_err(|e| kit::fail_with("导出失败", e))?;
+            .map_err(|e| kit::fail_with(kit::tr("Export failed", "导出失败"), e))?;
         delete_command(inv, self.logs.as_ref()).await;
         Ok(())
     }
 
     async fn import_file(&self, inv: &Invocation) -> Result<(), CmdError> {
         let Some(reply) = kit::reply_msg(inv).await? else {
-            return Err(kit::fail("请回复备份文件"));
+            return Err(kit::fail(kit::tr(
+                "Please reply to a backup file",
+                "请回复备份文件",
+            )));
         };
         if !matches!(
             reply.raw.media,
             Some(tl::enums::MessageMedia::Document(_))
         ) {
-            return Err(kit::fail("请回复备份文件（.txt 文件）"));
+            return Err(kit::fail(kit::tr(
+                "Please reply to a backup file (.txt)",
+                "请回复备份文件（.txt 文件）",
+            )));
         }
         let file = match inv.client.download_media(&reply.raw, MAX_IMPORT_BYTES).await {
             Ok(f) => f,
-            Err(BotError::TooLarge(_)) => return Err(kit::fail("备份文件超过 256 KB")),
-            Err(BotError::NoMedia) => return Err(kit::fail("请回复备份文件")),
-            Err(e) => return Err(kit::fail_with("读取备份文件失败", e)),
+            Err(BotError::TooLarge(_)) => {
+                return Err(kit::fail(kit::tr(
+                    "Backup file exceeds 256 KB",
+                    "备份文件超过 256 KB",
+                )))
+            }
+            Err(BotError::NoMedia) => {
+                return Err(kit::fail(kit::tr(
+                    "Please reply to a backup file",
+                    "请回复备份文件",
+                )))
+            }
+            Err(e) => {
+                return Err(kit::fail_with(
+                    kit::tr("Failed to read backup file", "读取备份文件失败"),
+                    e,
+                ))
+            }
         };
         let handles: Vec<String> = String::from_utf8_lossy(&file.data)
             .split('\n')
@@ -998,7 +1103,7 @@ impl Service {
             .map(str::to_owned)
             .collect();
         if handles.is_empty() {
-            return Err(kit::fail("备份文件无效"));
+            return Err(kit::fail(kit::tr("Invalid backup file", "备份文件无效")));
         }
         self.add(inv, handles).await
     }
@@ -1011,12 +1116,16 @@ impl Service {
                 let cfg = self.read()?;
                 if cfg.ad_filters.is_empty() {
                     return inv
-                        .edit("🎞 <b>广告过滤词</b>\n\n还没有过滤词")
+                        .edit(kit::tr(
+                            "🎞 <b>Ad Filters</b>\n\nNo filter keywords yet",
+                            "🎞 <b>广告过滤词</b>\n\n还没有过滤词",
+                        ))
                         .await
                         .map_err(Into::into);
                 }
                 let text = format!(
-                    "🎞 <b>广告过滤词</b>\n\n{}",
+                    "{}\n\n{}",
+                    kit::tr("🎞 <b>Ad Filters</b>", "🎞 <b>广告过滤词</b>"),
                     escape(&cfg.ad_filters.join("\n"))
                 );
                 return inv
@@ -1026,10 +1135,22 @@ impl Service {
             }
             "add" | "del" => {
                 if words.is_empty() {
-                    return Err(kit::usage(inv.prefix(), &format!("so ad {action} 关键词…")));
+                    return Err(kit::usage(
+                        inv.prefix(),
+                        &if kit::is_zh() {
+                            format!("so ad {action} 关键词…")
+                        } else {
+                            format!("so ad {action} <keyword…>")
+                        },
+                    ));
                 }
             }
-            _ => return Err(kit::usage(inv.prefix(), "so ad add|del|list [关键词…]")),
+            _ => {
+                return Err(kit::usage(
+                    inv.prefix(),
+                    kit::tr("so ad add|del|list [keyword…]", "so ad add|del|list [关键词…]"),
+                ))
+            }
         }
         let mut changed = 0usize;
         kit::update_ok(&self.store, |cfg| {
@@ -1046,31 +1167,37 @@ impl Service {
                 changed = before - cfg.ad_filters.len();
             }
         })?;
-        let verb = if action == "del" { "删除" } else { "添加" };
-        inv.edit(&kit::feedback(
-            "success",
-            &format!("已{verb} {changed} 个广告过滤词"),
-            "",
-        ))
-        .await
-        .map_err(Into::into)
+        let msg = if kit::is_zh() {
+            let verb = if action == "del" { "删除" } else { "添加" };
+            format!("已{verb} {changed} 个广告过滤词")
+        } else {
+            let verb = if action == "del" { "Removed" } else { "Added" };
+            format!("{verb} {changed} ad filter keyword(s)")
+        };
+        inv.edit(&kit::feedback("success", &msg, ""))
+            .await
+            .map_err(Into::into)
     }
 
     async fn search(&self, inv: &Invocation, opts: Options) -> Result<(), CmdError> {
         if !opts.kkp && opts.query.is_empty() {
-            return Err(kit::fail("请输入搜索关键词"));
+            return Err(kit::fail(kit::tr(
+                "Please enter search keywords",
+                "请输入搜索关键词",
+            )));
         }
         let cfg = self.read()?;
         if cfg.channel_list.is_empty() {
-            return Err(kit::fail(format!(
-                "请先用 {}so add 添加至少一个搜索频道",
-                inv.prefix()
-            )));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("请先用 {}so add 添加至少一个搜索频道", inv.prefix())
+            } else {
+                format!("Add at least one channel first with {}so add", inv.prefix())
+            }));
         }
         let progress = if opts.kkp {
-            "正在随机挑选视频"
+            kit::tr("Picking a random video", "正在随机挑选视频")
         } else {
-            "正在搜索视频"
+            kit::tr("Searching videos", "正在搜索视频")
         };
         inv.edit_text(&kit::working(progress)).await?;
 
@@ -1136,13 +1263,17 @@ impl Service {
         let unique = dedupe(found);
         if unique.is_empty() {
             return Err(kit::fail(if opts.kkp {
-                "没有找到合适的视频"
+                kit::tr("No suitable video found", "没有找到合适的视频")
             } else {
-                "所有频道里都没有找到匹配的视频"
+                kit::tr(
+                    "No matching video found in any channel",
+                    "所有频道里都没有找到匹配的视频",
+                )
             }));
         }
         let picked = choose(unique, &opts, self.pick.as_ref());
-        inv.edit_text(&kit::working("正在发送")).await?;
+        inv.edit_text(&kit::working(kit::tr("Sending", "正在发送")))
+            .await?;
         self.deliver(inv, picked, &opts).await
     }
 
@@ -1369,7 +1500,12 @@ impl Service {
                     return Ok(());
                 }
                 Err(e) if e.is_rpc("CHAT_FORWARDS_RESTRICTED") => {}
-                Err(e) => return Err(kit::wrap_fail("转发视频失败", Box::new(e))),
+                Err(e) => {
+                    return Err(kit::wrap_fail(
+                        kit::tr("Failed to forward video", "转发视频失败"),
+                        Box::new(e),
+                    ))
+                }
             }
         }
         let text = if opts.query.is_empty() {
@@ -1398,16 +1534,26 @@ async fn reupload(
     spoiler: bool,
 ) -> Result<(), CmdError> {
     let Some(media_src) = source_of(&picked.message) else {
-        return Err(kit::fail("这条视频已经不可用"));
+        return Err(kit::fail(kit::tr(
+            "This video is no longer available",
+            "这条视频已经不可用",
+        )));
     };
     let Some((doc, video)) = video_document(&picked.message) else {
-        return Err(kit::fail("这条视频已经不可用"));
+        return Err(kit::fail(kit::tr(
+            "This video is no longer available",
+            "这条视频已经不可用",
+        )));
     };
     if doc.size > MAX_MEDIA_BYTES {
-        return Err(kit::fail(format!(
-            "视频 {}，超过 2 GB 上限",
-            kit::format_bytes(doc.size)
-        )));
+        return Err(kit::fail(if kit::is_zh() {
+            format!("视频 {}，超过 2 GB 上限", kit::format_bytes(doc.size))
+        } else {
+            format!(
+                "Video is {}, exceeding the 2 GB limit",
+                kit::format_bytes(doc.size)
+            )
+        }));
     }
     fs::create_dir_all(partial)?;
     let path = partial.join(format!(
@@ -1416,10 +1562,11 @@ async fn reupload(
         mibot_bot::random_id().unsigned_abs()
     ));
     let _guard = TempVideoFile(path.clone());
-    inv.edit_text(&kit::working(&format!(
-        "正在下载视频 {}",
-        kit::format_bytes(doc.size)
-    )))
+    inv.edit_text(&kit::working(&if kit::is_zh() {
+        format!("正在下载视频 {}", kit::format_bytes(doc.size))
+    } else {
+        format!("Downloading video {}", kit::format_bytes(doc.size))
+    }))
     .await?;
 
     {
@@ -1428,21 +1575,25 @@ async fn reupload(
         inv.client
             .download_to(&media_src, &mut async_file)
             .await
-            .map_err(|e| kit::fail_with("下载视频失败", e))?;
+            .map_err(|e| kit::fail_with(kit::tr("Failed to download video", "下载视频失败"), e))?;
         use tokio::io::AsyncWriteExt;
         async_file.flush().await?;
     }
     let meta = fs::metadata(&path)?;
     if meta.len() == 0 {
-        return Err(kit::fail("视频下载为空"));
+        return Err(kit::fail(kit::tr(
+            "Downloaded video is empty",
+            "视频下载为空",
+        )));
     }
 
-    inv.edit_text(&kit::working("正在上传视频")).await?;
+    inv.edit_text(&kit::working(kit::tr("Uploading video", "正在上传视频")))
+        .await?;
     let uploaded = inv
         .client
         .upload_path("video.mp4", &path)
         .await
-        .map_err(|e| kit::fail_with("上传视频失败", e))?;
+        .map_err(|e| kit::fail_with(kit::tr("Failed to upload video", "上传视频失败"), e))?;
     let target = inv.peer_result()?;
     let mime_type = if doc.mime_type.starts_with("video/") {
         doc.mime_type.clone()
@@ -1499,7 +1650,7 @@ async fn reupload(
             },
         )
         .await
-        .map_err(|e| kit::fail_with("发送视频失败", e))?;
+        .map_err(|e| kit::fail_with(kit::tr("Failed to send video", "发送视频失败"), e))?;
     Ok(())
 }
 
@@ -1518,10 +1669,12 @@ async fn delete_command(inv: &Invocation, logs: Option<&Arc<mibot_logtail::Ring>
 
 fn render_list(cfg: &Config, prefix: &str) -> String {
     if cfg.channel_list.is_empty() {
-        return format!(
-            "🎞 <b>搜索频道</b>\n\n还没有添加频道，用 {} 添加",
-            code(&format!("{prefix}so add"))
-        );
+        let add_cmd = code(&format!("{prefix}so add"));
+        return if kit::is_zh() {
+            format!("🎞 <b>搜索频道</b>\n\n还没有添加频道，用 {add_cmd} 添加")
+        } else {
+            format!("🎞 <b>Search Channels</b>\n\nNo channels added yet; add one with {add_cmd}")
+        };
     }
     let lines: Vec<String> = cfg
         .channel_list
@@ -1535,12 +1688,16 @@ fn render_list(cfg: &Config, prefix: &str) -> String {
                 code(&item.handle)
             );
             if cfg.default_channel.as_deref() == Some(item.handle.as_str()) {
-                line.push_str("（默认）");
+                line.push_str(kit::tr(" (default)", "（默认）"));
             }
             line
         })
         .collect();
-    format!("🎞 <b>搜索频道</b>\n\n{}", lines.join("\n"))
+    format!(
+        "{}\n\n{}",
+        kit::tr("🎞 <b>Search Channels</b>", "🎞 <b>搜索频道</b>"),
+        lines.join("\n")
+    )
 }
 
 fn help(prefix: &str) -> String {
@@ -1551,25 +1708,47 @@ fn help(prefix: &str) -> String {
             escape(args)
         )
     };
-    format!(
-        "🎞 <b>频道视频搜索</b>\n\n在添加的频道里找视频，发到当前对话。\n\n\
-        <b>搜索</b>\n{}{}\
-        • 加 <code>-s</code> 下载后以防剧透方式发送，加 <code>-r</code> 从匹配结果里随机选\n\n\
-        <b>频道源</b>\n{}{}{}{}{}{}\n\
-        <b>广告过滤</b>\n{}{}{}\n\
-        先转发原消息；对话禁止转发或用了 -s 时下载再发送，上限 2 GB。<code>{p}search</code> 与 <code>{p}so</code> 用法相同。",
-        item("关键词", "按关键词搜索，不限大小和时长，先搜默认频道"),
-        item("kkp", "随机挑一段 20 秒到 3 分钟的视频"),
-        item("add 频道链接或@用户名…", "添加频道、群组或讨论组，多个用空格或 \\ 分隔"),
-        item("del 频道|序号…", "移除频道源，del all 全部移除"),
-        item("default 频道", "设为默认频道，default d 取消默认"),
-        item("list", "查看频道源"),
-        item("export", "导出频道源文件"),
-        item("import", "回复备份文件导入"),
-        item("ad add 关键词…", "添加过滤词"),
-        item("ad del 关键词…", "删除过滤词"),
-        item("ad list", "查看过滤词"),
-    )
+    if kit::is_zh() {
+        format!(
+            "🎞 <b>频道视频搜索</b>\n\n在添加的频道里找视频，发到当前对话。\n\n\
+            <b>搜索</b>\n{}{}\
+            • 加 <code>-s</code> 下载后以防剧透方式发送，加 <code>-r</code> 从匹配结果里随机选\n\n\
+            <b>频道源</b>\n{}{}{}{}{}{}\n\
+            <b>广告过滤</b>\n{}{}{}\n\
+            先转发原消息；对话禁止转发或用了 -s 时下载再发送，上限 2 GB。<code>{p}search</code> 与 <code>{p}so</code> 用法相同。",
+            item("关键词", "按关键词搜索，不限大小和时长，先搜默认频道"),
+            item("kkp", "随机挑一段 20 秒到 3 分钟的视频"),
+            item("add 频道链接或@用户名…", "添加频道、群组或讨论组，多个用空格或 \\ 分隔"),
+            item("del 频道|序号…", "移除频道源，del all 全部移除"),
+            item("default 频道", "设为默认频道，default d 取消默认"),
+            item("list", "查看频道源"),
+            item("export", "导出频道源文件"),
+            item("import", "回复备份文件导入"),
+            item("ad add 关键词…", "添加过滤词"),
+            item("ad del 关键词…", "删除过滤词"),
+            item("ad list", "查看过滤词"),
+        )
+    } else {
+        format!(
+            "🎞 <b>Channel Video Search</b>\n\nSearch videos in configured channels and send them to the current chat.\n\n\
+            <b>Search</b>\n{}{}\
+            • Add <code>-s</code> to download and reupload as spoiler; add <code>-r</code> to pick randomly from matches\n\n\
+            <b>Sources</b>\n{}{}{}{}{}{}\n\
+            <b>Ad Filters</b>\n{}{}{}\n\
+            Forwards the original message first; downloads and reuploads (max 2 GB) if forwarding is restricted or <code>-s</code> is used. <code>{p}search</code> is an alias for <code>{p}so</code>.",
+            item("keywords", "Search by keyword (any size/duration, default channel first)"),
+            item("kkp", "Pick a random 20s–3min video"),
+            item("add <link or @username…>", "Add channels, groups, or discussion groups (space or \\ separated)"),
+            item("del <channel|index…>", "Remove sources; del all removes all"),
+            item("default <channel>", "Set default channel; default d clears it"),
+            item("list", "List configured channels"),
+            item("export", "Export channel list file"),
+            item("import", "Reply to a backup file to import"),
+            item("ad add <keyword…>", "Add filter keywords"),
+            item("ad del <keyword…>", "Remove filter keywords"),
+            item("ad list", "List filter keywords"),
+        )
+    }
 }
 
 pub fn register(a: &Arc<App>) {
@@ -1578,14 +1757,15 @@ pub fn register(a: &Arc<App>) {
         "so",
         &["search"],
         group::MEDIA,
-        "从频道搜索并发送视频",
-        "关键词|kkp [-s] [-r]",
+        "Search and send channel videos",
+        "keyword|kkp [-s] [-r]",
         help,
         move |inv| {
             let svc = Arc::clone(&svc);
             Box::pin(async move { svc.handle(&inv).await })
         },
-    );
+    )
+    .zh("从频道搜索并发送视频", "关键词|kkp [-s] [-r]");
     cmd.free_text = true;
     cmd.timeout = Some(Duration::from_secs(30 * 60));
     a.registry.register(cmd);
@@ -2590,13 +2770,13 @@ mod tests {
         assert_eq!(cfg.channel_list[0].linked_group, "@talk");
         assert_eq!(cfg.default_channel.as_deref(), Some("@first"));
         let err = h.run(&["add", "@first"]).await.unwrap_err();
-        assert!(err.to_string().contains("没有添加任何频道：@first：已存在"));
+        assert!(err.to_string().contains("No channels added: @first: already exists"));
 
         h.run(&["default", "https://t.me/second"]).await.unwrap();
         assert!(h.run(&["default", "@missing"]).await.is_err());
         assert!(
             render_list(&h.s.read().unwrap(), ".")
-                .contains("2. SECOND · <code>https://t.me/second</code>（默认）")
+                .contains("2. SECOND · <code>https://t.me/second</code> (default)")
         );
         h.run(&["del", "2"]).await.unwrap();
         assert_eq!(h.s.read().unwrap().default_channel.as_deref(), Some("@first"));
@@ -2616,10 +2796,10 @@ mod tests {
             &["ad", "add"][..],
         ] {
             let e = h.run(usage_args).await.unwrap_err();
-            assert!(e.to_string().starts_with("用法：.so "), "{e}");
+            assert!(e.to_string().starts_with("Usage: .so "), "{e}");
         }
-        assert!(h.run(&["海贼王"]).await.unwrap_err().to_string().contains("请先用 .so add 添加"));
-        assert_eq!(h.run(&["-s"]).await.unwrap_err().to_string(), "请输入搜索关键词");
+        assert!(h.run(&["海贼王"]).await.unwrap_err().to_string().contains("Add at least one channel first with .so add"));
+        assert_eq!(h.run(&["-s"]).await.unwrap_err().to_string(), "Please enter search keywords");
 
         // Add limits
         let mut many: Vec<String> = vec!["add".into(), "中文".into(), "a.b".into()];
@@ -2630,7 +2810,7 @@ mod tests {
         fake.calls.lock().unwrap().clear();
         let lim_err = h.run(&refs).await.unwrap_err();
         let ls = lim_err.to_string();
-        assert!(ls.contains("一次最多处理 50 个，另外 7 个没有处理") && ls.contains("…还有"));
+        assert!(ls.contains("Max 50 per call; 7 skipped") && ls.contains("…and"));
         let resolved = fake
             .calls
             .lock()
@@ -2653,7 +2833,7 @@ mod tests {
             .into(),
         );
         *fake.reply.lock().unwrap() = Some(photo);
-        assert!(h.run_replying(9, &["import"]).await.unwrap_err().to_string().contains("请回复备份文件"));
+        assert!(h.run_replying(9, &["import"]).await.unwrap_err().to_string().contains("Please reply to a backup file"));
 
         let import_bytes = b"@first\r\nhello world text\n\n@second\n".to_vec();
         *fake.content.lock().unwrap() = import_bytes.clone();
@@ -2697,7 +2877,7 @@ mod tests {
         h.run_replying(9, &["import"]).await.unwrap();
         assert_eq!(h.s.read().unwrap().channel_list.len(), 2);
         let last_edit = fake.edits.lock().unwrap().last().cloned().unwrap();
-        assert!(last_edit.contains("hello world text：不是有效的频道用户名或链接"));
+        assert!(last_edit.contains("hello world text: Not a valid channel username or link"));
 
         // Forward errors don't reupload + noforwards skips forward
         let fake_f = Arc::new(FakeTg::new());
@@ -2721,7 +2901,7 @@ mod tests {
             },
         );
         let ferr = h_f.run(&["海贼王"]).await.unwrap_err();
-        assert!(ferr.to_string().contains("转发视频失败（CHAT_SEND_MEDIA_FORBIDDEN）"));
+        assert!(ferr.to_string().contains("Failed to forward video (CHAT_SEND_MEDIA_FORBIDDEN)"));
         assert!(h_f.uploads.lock().unwrap().is_empty());
 
         *fake_f.forward_err.lock().unwrap() = None;
@@ -2745,7 +2925,7 @@ mod tests {
         let h_many = new_harness(Arc::clone(&fake), big_cfg);
         h_many.run(&["del", "all"]).await.unwrap();
         let last = fake.edits.lock().unwrap().last().cloned().unwrap();
-        assert!(last.contains("已移除 150 个频道") && last.contains("…还有 130 个"));
+        assert!(last.contains("Removed 150 channel(s)") && last.contains("…and 130 more"));
         assert!(utf16_len(&last) <= 4096);
     }
 }

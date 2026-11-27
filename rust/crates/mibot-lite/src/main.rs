@@ -11,50 +11,50 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio_util::sync::CancellationToken;
 
-const USAGE_TEXT: &str = r#"用法：mibot-lite 模式 [--root 部署目录]
+const USAGE_TEXT: &str = r#"Usage: mibot-lite <mode> [--root <dir>]
 
-模式（选一个）：
-  --serve                 连上 Telegram 提供服务（systemd 就是这样启动的）
-  --check                 只检查部署目录能不能读，不连网、不改文件
-  --verify                连上真实账号，在收藏夹里跑一组只读命令做自检（要先停掉服务）
-  --login [--force]       登录账号，写 config.json；--api-id、--api-hash 可以省掉前两个提问
-  --backup 文件           把 .bf 会发的那份备份写到文件，不连网
-  --restore 文件 [--force] 用备份恢复部署目录（服务要先停掉；--force 覆盖已有账号）
-  --import-mibox 目录     把 MiBox 部署里的命令配置搬进 --root/data，并把 TB_PREFIX 写进 .env；
-                          可以和 --serve、--check、--verify 一起用
-  --version               显示版本
+Modes (pick one):
+  --serve                 Connect to Telegram and serve (used by systemd/OpenRC)
+  --check                 Check deployment directory readability offline
+  --verify                Connect to account and run read-only checks in Saved Messages (stop service first)
+  --login [--force]       Sign in and write config.json (--api-id / --api-hash skip first two prompts)
+  --backup <file>         Write .bf backup archive to file offline
+  --restore <file> [--force]  Restore archive into --root (stop service first; --force overwrites existing account)
+  --import-mibox <dir>    Import MiBox command config into --root/data and write TB_PREFIX to .env;
+                          can be combined with --serve, --check, --verify
+  --version               Show version and exit
 
-通用：
-  --root 部署目录          默认是当前目录 .
-  --verbose               日志用 debug 级别，包括协议细节
+Common:
+  --root <dir>            Deployment directory (default ".")
+  --verbose               Log at debug level including MTProto details
 
-参数：
+Flags:
   -api-hash string
-    	和 --login 一起用：my.telegram.org 上的 api_hash
+    	With --login: api_hash from my.telegram.org
   -api-id int
-    	和 --login 一起用：my.telegram.org 上的 api_id
+    	With --login: api_id from my.telegram.org
   -backup string
-    	把 .bf 会发的那份备份写到这个文件，不连网
+    	Write backup archive offline to this path
   -check
-    	只检查部署目录能不能读，不连网、不改文件
+    	Verify deployment directory readability offline without modifying files
   -force
-    	和 --login 或 --restore 一起用：替换已有的账号
+    	With --login or --restore: replace existing account files
   -import-mibox string
-    	把这个 MiBox 部署目录里的命令配置搬进 --root/data
+    	Import MiBox deployment config into --root/data
   -login
-    	登录 Telegram 账号，把 config.json 写进 --root
+    	Sign in to Telegram and write config.json into --root
   -restore string
-    	把 .bf 或 --backup 做的备份解到 --root；那个目录上的服务要先停掉
+    	Extract .bf / --backup archive into --root (stop service first)
   -root string
-    	部署目录，里面有 config.json (default ".")
+    	Deployment directory containing config.json (default ".")
   -serve
-    	连上 Telegram 提供服务
+    	Connect to Telegram and run the bot
   -verbose
-    	日志用 debug 级别，包括协议细节
+    	Use debug log level including protocol details
   -verify
-    	连上真实账号，在收藏夹里跑一组只读命令做自检
+    	Run live read-only command self-check in Saved Messages
   -version
-    	显示版本后退出
+    	Show version and exit
 "#;
 
 #[derive(Debug, Clone)]
@@ -198,7 +198,7 @@ fn run_backup(f: &Flags) -> i32 {
         Ok((archive, names)) => match write_file_atomic(target, &archive, 0o600) {
             Ok(()) => {
                 println!(
-                    "已把 {} 个文件备份到 {}。里面有登录会话，不要给别人。",
+                    "Backed up {} file(s) to {}. Keep it private — it contains your login session.",
                     names.len(),
                     target.display()
                 );
@@ -228,7 +228,7 @@ fn restore_archive(file: &Path, root: &Path, overwrite: bool) -> Result<(), Stri
         Ok(l) => l,
         Err(AppError::AlreadyRunning) => {
             return Err(format!(
-                "服务正在 {} 上运行，先停掉它（systemctl stop mibot-lite）",
+                "service is running on {}; stop it first (e.g. systemctl stop mibot-lite or rc-service mibot-lite stop)",
                 root.display()
             ));
         }
@@ -238,13 +238,13 @@ fn restore_archive(file: &Path, root: &Path, overwrite: bool) -> Result<(), Stri
         Ok(n) => n,
         Err(BackupError::Exists) => {
             return Err(format!(
-                "{} 里已经有账号了；要用备份替换它，加上 --force",
+                "{} already contains an account; pass --force to replace it",
                 root.display()
             ));
         }
         Err(e) => return Err(e.to_string()),
     };
-    println!("已把 {} 个文件恢复到 {}：", names.len(), root.display());
+    println!("Restored {} file(s) to {}:", names.len(), root.display());
     for name in names {
         println!("  {name}");
     }

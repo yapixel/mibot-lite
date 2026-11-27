@@ -24,15 +24,15 @@ const EBML_CLUSTER: u32 = 0x1f43_b675;
 
 #[derive(Debug, Error)]
 pub enum MediaError {
-    #[error("ffmpeg 不可用，请先安装 ffmpeg")]
+    #[error("ffmpeg is unavailable; please install ffmpeg first")]
     FfmpegUnavailable,
     #[error("not a WebM file")]
     NotWebM,
     #[error("no frames to encode")]
     NoFrames,
-    #[error("视频编码超过 {0:?} 仍未完成")]
+    #[error("video encoding did not finish within {0:?}")]
     EncodeTimeout(Duration),
-    #[error("ffmpeg 失败：{0}")]
+    #[error("ffmpeg failed: {0}")]
     FfmpegFailed(String),
     #[error("{0}")]
     Message(String),
@@ -45,7 +45,10 @@ pub enum MediaError {
 impl MediaError {
     pub fn user_message(&self) -> Option<&'static str> {
         match self {
-            MediaError::FfmpegUnavailable => Some("主机没有安装 ffmpeg，请先安装"),
+            MediaError::FfmpegUnavailable => Some(mibot_i18n::tr(
+                "ffmpeg is not installed on this host",
+                "主机没有安装 ffmpeg，请先安装",
+            )),
             _ => None,
         }
     }

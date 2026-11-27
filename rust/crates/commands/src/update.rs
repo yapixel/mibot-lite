@@ -171,34 +171,59 @@ pub fn register(a: &Arc<App>, restarter: Option<Arc<Restarter>>) {
     }
 
     let u_cmd = Arc::clone(&u);
-    a.registry.register(Command {
-        name: "update".into(),
-        group: group::SYSTEM.into(),
-        description: "检查并更新程序".into(),
-        usage: "[check|run|rollback|auto]".into(),
-        help_fn: Some(Arc::new(help)),
-        timeout: Some(Duration::from_secs(600)),
-        handle: Arc::new(move |inv| {
-            let u = Arc::clone(&u_cmd);
-            Box::pin(async move { u.handle(&inv).await })
-        }),
-        ..Default::default()
-    });
+    a.registry.register(
+        Command {
+            name: "update".into(),
+            group: group::SYSTEM.into(),
+            description: "Check and update binary".into(),
+            usage: "[check|run|rollback|auto]".into(),
+            help_fn: Some(Arc::new(help)),
+            timeout: Some(Duration::from_secs(600)),
+            handle: Arc::new(move |inv| {
+                let u = Arc::clone(&u_cmd);
+                Box::pin(async move { u.handle(&inv).await })
+            }),
+            ..Default::default()
+        }
+        .zh("检查并更新程序", "[check|run|rollback|auto]"),
+    );
 }
 
 fn help(prefix: &str) -> String {
     let c = |text: &str| code(&format!("{prefix}update{text}"));
+    if kit::is_zh() {
+        return format!(
+            "⬆️ <b>程序更新</b>\n\n\
+             • {} 当前版本、回滚和自动更新的状态\n\
+             • {} 读取 GitHub Releases 检查新版本\n\
+             • {} 下载、校验、试跑、替换并重启\n\
+             • {} 换回上一版本并重启\n\
+             • {} 开启或关闭自动更新\n\
+             • {} 自动更新每天检查的时间（北京时间）\n\n\
+             自动更新默认开启：每天到点检查一次，有新版本就走和 {} 一样的流程，\
+             开始和结果都发到收藏夹。它要重启服务，所以等没有命令在跑时再装，最多等两小时，还不空就改天。\n\n\
+             发布仓库由 {} 指定。",
+            c(""),
+            c(" check"),
+            c(" run"),
+            c(" rollback"),
+            c(" auto on|off"),
+            c(" auto time 04:00"),
+            c(" run"),
+            code("MIBOT_UPDATE_REPO")
+        );
+    }
     format!(
-        "⬆️ <b>程序更新</b>\n\n\
-         • {} 当前版本、回滚和自动更新的状态\n\
-         • {} 读取 GitHub Releases 检查新版本\n\
-         • {} 下载、校验、试跑、替换并重启\n\
-         • {} 换回上一版本并重启\n\
-         • {} 开启或关闭自动更新\n\
-         • {} 自动更新每天检查的时间（北京时间）\n\n\
-         自动更新默认开启：每天到点检查一次，有新版本就走和 {} 一样的流程，\
-         开始和结果都发到收藏夹。它要重启服务，所以等没有命令在跑时再装，最多等两小时，还不空就改天。\n\n\
-         发布仓库由 {} 指定。",
+        "⬆️ <b>Self-Update</b>\n\n\
+         • {} Current version, rollback, and auto-update status\n\
+         • {} Check GitHub Releases for a new version\n\
+         • {} Download, verify, test-run, replace, and restart\n\
+         • {} Revert to the previous version and restart\n\
+         • {} Enable or disable auto-update\n\
+         • {} Daily auto-update check time (UTC+8)\n\n\
+         Auto-update is enabled by default: it checks once a day at the configured time and follows the same flow as {}, \
+         sending start and result notices to Saved Messages. Because it restarts the service, it waits up to 2 hours for active commands to finish, skipping to the next day if still busy.\n\n\
+         Release repository is set by {}.",
         c(""),
         c(" check"),
         c(" run"),
@@ -212,9 +237,13 @@ fn help(prefix: &str) -> String {
 
 fn auto_summary(cfg: &AutoConfig) -> String {
     if !cfg.enabled {
-        return "关闭".to_owned();
+        return kit::tr("off", "关闭").to_owned();
     }
-    format!("开启，每天 {}（北京时间）检查", code(&cfg.time))
+    if kit::is_zh() {
+        format!("开启，每天 {}（北京时间）检查", code(&cfg.time))
+    } else {
+        format!("on, checks daily at {} (UTC+8)", code(&cfg.time))
+    }
 }
 
 fn executable_path() -> Result<PathBuf, String> {
@@ -331,23 +360,40 @@ where
 {
     if let Err(err) = rename(binary, aside) {
         return Err(swap_user_err(
-            "无法挪开当前的程序文件，什么都没改".into(),
+            kit::tr(
+                "Could not move current binary aside; nothing changed",
+                "无法挪开当前的程序文件，什么都没改",
+            )
+            .into(),
             err.to_string(),
         ));
     }
     if let Err(err) = rename(incoming, binary) {
         if let Err(restore_err) = rename(aside, binary) {
-            return Err(swap_user_err(
+            let msg = if kit::is_zh() {
                 format!(
                     "程序文件没能换回来，服务下次启动会失败。原来的版本在 {}，请手动把它改名为 {}",
                     aside.display(),
                     binary.display()
-                ),
+                )
+            } else {
+                format!(
+                    "Failed to restore original binary; service will fail on next start. Original is at {}; rename it back to {}",
+                    aside.display(),
+                    binary.display()
+                )
+            };
+            return Err(swap_user_err(
+                msg,
                 format!("{err}; restore: {restore_err}"),
             ));
         }
         return Err(swap_user_err(
-            "无法放入新的程序文件，已恢复原来的版本".into(),
+            kit::tr(
+                "Could not place new binary; restored original version",
+                "无法放入新的程序文件，已恢复原来的版本",
+            )
+            .into(),
             err.to_string(),
         ));
     }
@@ -406,50 +452,83 @@ impl Updater {
         let _guard = if matches!(sub.as_str(), "run" | "apply" | "rollback") {
             if let Some(err) = &self.located_err {
                 kit::warn(&self.a, "update.locate_failed", fail(err).as_ref());
-                return Err(fail("找不到程序文件在哪里，不能替换它"));
+                return Err(fail(kit::tr(
+                    "Cannot locate binary path for replacement",
+                    "找不到程序文件在哪里，不能替换它",
+                )));
             }
             if self.binary.is_none() {
-                return Err(fail("找不到程序文件在哪里，不能替换它"));
+                return Err(fail(kit::tr(
+                    "Cannot locate binary path for replacement",
+                    "找不到程序文件在哪里，不能替换它",
+                )));
             }
             if self.restarter.is_none() {
-                return Err(fail("重启组件不可用"));
+                return Err(fail(kit::tr(
+                    "Restart component is unavailable",
+                    "重启组件不可用",
+                )));
             }
             let Ok(guard) = BUSY_LOCK.try_lock() else {
-                return Err(fail("已有一个更新或回滚正在进行，请稍候"));
+                return Err(fail(kit::tr(
+                    "Another update or rollback is already in progress, please wait",
+                    "已有一个更新或回滚正在进行，请稍候",
+                )));
             };
             Some(guard)
         } else {
             None
         };
 
+        let title = kit::tr("Self-Update", "程序更新");
         match sub.as_str() {
             "" | "ver" | "status" => self.status(inv).await,
             "check" => {
                 inv.edit(&format!(
-                    "⬆️ <b>程序更新</b>\n{}",
-                    escape(&kit::working("正在读取发布信息"))
+                    "⬆️ <b>{title}</b>\n{}",
+                    escape(&kit::working(kit::tr(
+                        "Fetching release info",
+                        "正在读取发布信息"
+                    )))
                 ))
                 .await?;
                 let latest = fetch_release(&self.github_api, &self.repo)
                     .await
-                    .map_err(|e| kit::wrap_fail("检查更新失败", e))?;
+                    .map_err(|e| {
+                        kit::wrap_fail(kit::tr("Update check failed", "检查更新失败"), e)
+                    })?;
                 if !newer(&self.a.version, &latest.tag_name) {
-                    return inv
-                        .edit(&format!(
+                    let msg = if kit::is_zh() {
+                        format!(
                             "✅ 已是最新版本\n当前：{}\n最新：{}",
                             code(kit::version(&self.a)),
                             code(&latest.tag_name)
-                        ))
-                        .await
-                        .map_err(Into::into);
+                        )
+                    } else {
+                        format!(
+                            "✅ Already up to date\nCurrent: {}\nLatest: {}",
+                            code(kit::version(&self.a)),
+                            code(&latest.tag_name)
+                        )
+                    };
+                    return inv.edit(&msg).await.map_err(Into::into);
                 }
                 let notes = truncate(latest.body.trim(), 800);
-                let mut text = format!(
-                    "⬆️ <b>发现新版本</b>\n当前：{}\n最新：{}\n执行 {} 安装。",
-                    code(kit::version(&self.a)),
-                    code(&latest.tag_name),
-                    code(&format!("{}update run", inv.prefix()))
-                );
+                let mut text = if kit::is_zh() {
+                    format!(
+                        "⬆️ <b>发现新版本</b>\n当前：{}\n最新：{}\n执行 {} 安装。",
+                        code(kit::version(&self.a)),
+                        code(&latest.tag_name),
+                        code(&format!("{}update run", inv.prefix()))
+                    )
+                } else {
+                    format!(
+                        "⬆️ <b>New Version Available</b>\nCurrent: {}\nLatest: {}\nRun {} to install.",
+                        code(kit::version(&self.a)),
+                        code(&latest.tag_name),
+                        code(&format!("{}update run", inv.prefix()))
+                    )
+                };
                 if !notes.is_empty() {
                     text.push_str("\n\n<blockquote expandable>");
                     text.push_str(&escape(&notes));
@@ -458,62 +537,101 @@ impl Updater {
                 inv.edit(&text).await.map_err(Into::into)
             }
             "run" | "apply" => {
-                let binary = self
-                    .binary
-                    .as_ref()
-                    .ok_or_else(|| fail("找不到程序文件在哪里，不能替换它"))?;
-                inv.edit("⬆️ <b>程序更新</b>\n⏳ 正在读取发布信息…")
-                    .await?;
+                let binary = self.binary.as_ref().ok_or_else(|| {
+                    fail(kit::tr(
+                        "Cannot locate binary path for replacement",
+                        "找不到程序文件在哪里，不能替换它",
+                    ))
+                })?;
+                inv.edit(&format!(
+                    "⬆️ <b>{title}</b>\n{}",
+                    escape(&kit::working(kit::tr(
+                        "Fetching release info",
+                        "正在读取发布信息"
+                    )))
+                ))
+                .await?;
                 let latest = fetch_release(&self.github_api, &self.repo)
                     .await
-                    .map_err(|e| kit::wrap_fail("更新失败，当前运行的版本没有改动", e))?;
+                    .map_err(|e| {
+                        kit::wrap_fail(
+                            kit::tr(
+                                "Update failed; running binary unchanged",
+                                "更新失败，当前运行的版本没有改动",
+                            ),
+                            e,
+                        )
+                    })?;
                 if !newer(&self.a.version, &latest.tag_name) {
-                    return inv
-                        .edit(&format!(
-                            "✅ 已是最新版本\n当前：{}",
-                            code(kit::version(&self.a))
-                        ))
-                        .await
-                        .map_err(Into::into);
+                    let msg = if kit::is_zh() {
+                        format!("✅ 已是最新版本\n当前：{}", code(kit::version(&self.a)))
+                    } else {
+                        format!("✅ Already up to date\nCurrent: {}", code(kit::version(&self.a)))
+                    };
+                    return inv.edit(&msg).await.map_err(Into::into);
                 }
                 self.install_with_progress(
                     inv.cancel.clone(),
                     &latest,
                     binary,
                     |msg| {
-                        let html = format!("⬆️ <b>程序更新</b>\n⏳ {msg}");
+                        let html = format!("⬆️ <b>{title}</b>\n⏳ {msg}");
                         Box::pin(async move { inv.edit(&html).await.map_err(Into::into) })
                     },
                 )
                 .await?;
-                let restarter = self
-                    .restarter
-                    .as_ref()
-                    .ok_or_else(|| fail("重启组件不可用"))?;
+                let restarter = self.restarter.as_ref().ok_or_else(|| {
+                    fail(kit::tr(
+                        "Restart component is unavailable",
+                        "重启组件不可用",
+                    ))
+                })?;
+                let progress = if kit::is_zh() {
+                    format!(
+                        "⬆️ <b>程序更新</b>\n⏳ 已安装 {}，正在重启…",
+                        code(&latest.tag_name)
+                    )
+                } else {
+                    format!(
+                        "⬆️ <b>Self-Update</b>\n⏳ Installed {}, restarting…",
+                        code(&latest.tag_name)
+                    )
+                };
                 restarter
                     .now(
                         inv,
                         "update",
-                        &format!(
-                            "⬆️ <b>程序更新</b>\n⏳ 已安装 {}，正在重启…",
-                            code(&latest.tag_name)
+                        &progress,
+                        kit::tr(
+                            "Update installed, but restart failed; please restart the service manually.",
+                            "更新后重启失败，可手动重启服务。",
                         ),
-                        "更新后重启失败，可手动重启服务。",
                     )
                     .await
             }
             "rollback" => {
-                let binary = self
-                    .binary
-                    .as_ref()
-                    .ok_or_else(|| fail("找不到程序文件在哪里，不能替换它"))?;
+                let binary = self.binary.as_ref().ok_or_else(|| {
+                    fail(kit::tr(
+                        "Cannot locate binary path for replacement",
+                        "找不到程序文件在哪里，不能替换它",
+                    ))
+                })?;
                 let previous = append_suffix(binary, ".previous");
                 if !has_valid_regular_file(&previous) {
-                    return Err(fail("没有可回滚的上一版本"));
+                    return Err(fail(kit::tr(
+                        "No previous version available to roll back to",
+                        "没有可回滚的上一版本",
+                    )));
                 }
-                self.a
-                    .checkpoint_state()
-                    .map_err(|e| fail_with("保存连接状态失败，没有回滚", e))?;
+                self.a.checkpoint_state().map_err(|e| {
+                    fail_with(
+                        kit::tr(
+                            "Failed to save connection state; rollback aborted",
+                            "保存连接状态失败，没有回滚",
+                        ),
+                        e,
+                    )
+                })?;
                 let aside = append_suffix(binary, ".rollback");
                 if let Err(err) = swap_binary(|f, t| fs::rename(f, t), binary, &previous, &aside) {
                     self.a.logs.record(
@@ -533,16 +651,24 @@ impl Updater {
                         ],
                     );
                 }
-                let restarter = self
-                    .restarter
-                    .as_ref()
-                    .ok_or_else(|| fail("重启组件不可用"))?;
+                let restarter = self.restarter.as_ref().ok_or_else(|| {
+                    fail(kit::tr(
+                        "Restart component is unavailable",
+                        "重启组件不可用",
+                    ))
+                })?;
                 restarter
                     .now(
                         inv,
                         "rollback",
-                        "⬆️ <b>程序更新</b>\n⏳ 已换回上一版本，正在重启…",
-                        "回滚后重启失败。",
+                        kit::tr(
+                            "⬆️ <b>Self-Update</b>\n⏳ Reverted to previous version, restarting…",
+                            "⬆️ <b>程序更新</b>\n⏳ 已换回上一版本，正在重启…",
+                        ),
+                        kit::tr(
+                            "Rollback complete, but restart failed.",
+                            "回滚后重启失败。",
+                        ),
                     )
                     .await
             }
@@ -554,26 +680,48 @@ impl Updater {
     async fn status(&self, inv: &Invocation) -> CmdResult {
         let where_str = match (&self.binary, &self.located_err) {
             (Some(p), None) => code(&p.to_string_lossy()),
-            _ => "无法确定".to_owned(),
+            _ => kit::tr("unknown", "无法确定").to_owned(),
         };
-        let mut rows = vec![
-            "⬆️ <b>程序更新</b>".to_owned(),
-            format!("当前版本：{}", code(kit::version(&self.a))),
-            format!("程序文件：{where_str}"),
-            format!("发布仓库：{}", code(&self.repo)),
-        ];
-        if let Some(bin) = &self.binary
-            && has_valid_regular_file(&append_suffix(bin, ".previous"))
-        {
-            rows.push(format!(
-                "可回滚到上一版本：{}",
-                code(&format!("{}update rollback", inv.prefix()))
-            ));
-        } else {
-            rows.push("暂无可回滚的上一版本".to_owned());
-        }
         let cfg = self.settings.read()?;
-        rows.push(format!("自动更新：{}", auto_summary(&cfg)));
+        let has_prev = self
+            .binary
+            .as_ref()
+            .is_some_and(|bin| has_valid_regular_file(&append_suffix(bin, ".previous")));
+        let rows = if kit::is_zh() {
+            let mut v = vec![
+                "⬆️ <b>程序更新</b>".to_owned(),
+                format!("当前版本：{}", code(kit::version(&self.a))),
+                format!("程序文件：{where_str}"),
+                format!("发布仓库：{}", code(&self.repo)),
+            ];
+            if has_prev {
+                v.push(format!(
+                    "可回滚到上一版本：{}",
+                    code(&format!("{}update rollback", inv.prefix()))
+                ));
+            } else {
+                v.push("暂无可回滚的上一版本".to_owned());
+            }
+            v.push(format!("自动更新：{}", auto_summary(&cfg)));
+            v
+        } else {
+            let mut v = vec![
+                "⬆️ <b>Self-Update</b>".to_owned(),
+                format!("Current: {}", code(kit::version(&self.a))),
+                format!("Binary: {where_str}"),
+                format!("Repository: {}", code(&self.repo)),
+            ];
+            if has_prev {
+                v.push(format!(
+                    "Rollback available: {}",
+                    code(&format!("{}update rollback", inv.prefix()))
+                ));
+            } else {
+                v.push("No previous version for rollback".to_owned());
+            }
+            v.push(format!("Auto-update: {}", auto_summary(&cfg)));
+            v
+        };
         inv.edit(&rows.join("\n")).await.map_err(Into::into)
     }
 
@@ -582,29 +730,44 @@ impl Updater {
         match action.as_str() {
             "" => {
                 let cfg = self.settings.read()?;
-                inv.edit(&format!("⬆️ <b>自动更新</b>\n{}", auto_summary(&cfg)))
-                    .await
-                    .map_err(Into::into)
+                inv.edit(&format!(
+                    "⬆️ <b>{}</b>\n{}",
+                    kit::tr("Auto-Update", "自动更新"),
+                    auto_summary(&cfg)
+                ))
+                .await
+                .map_err(Into::into)
             }
             "on" | "off" => {
                 let enabled = action == "on";
                 kit::update_ok(&self.settings, |cfg| cfg.enabled = enabled)?;
-                inv.edit_text(&format!("✅ 自动更新已{}", kit::on_off_text(enabled)))
-                    .await
-                    .map_err(Into::into)
+                let msg = if kit::is_zh() {
+                    format!("✅ 自动更新已{}", kit::on_off_text(enabled))
+                } else {
+                    format!("✅ Auto-update {}", kit::on_off_text(enabled))
+                };
+                inv.edit_text(&msg).await.map_err(Into::into)
             }
             "time" => {
                 let Some(at) = parse_clock(inv.arg(2)) else {
-                    return Err(fail("时间要写成 HH:MM，例如 04:00"));
+                    return Err(fail(kit::tr(
+                        "Time must be formatted as HH:MM, e.g. 04:00",
+                        "时间要写成 HH:MM，例如 04:00",
+                    )));
                 };
                 let formatted = format!("{:02}:{:02}", at / 60, at % 60);
                 let val = formatted.clone();
                 kit::update_ok(&self.settings, |cfg| cfg.time = val)?;
-                inv.edit_text(&format!(
-                    "✅ 自动更新的检查时间已设为 {formatted}（北京时间）；今天已经查过的话，从明天开始"
-                ))
-                .await
-                .map_err(Into::into)
+                let msg = if kit::is_zh() {
+                    format!(
+                        "✅ 自动更新的检查时间已设为 {formatted}（北京时间）；今天已经查过的话，从明天开始"
+                    )
+                } else {
+                    format!(
+                        "✅ Auto-update check time set to {formatted} (UTC+8); if already checked today, takes effect tomorrow"
+                    )
+                };
+                inv.edit_text(&msg).await.map_err(Into::into)
             }
             _ => Err(kit::usage(
                 inv.prefix(),
@@ -627,9 +790,10 @@ impl Updater {
         if let Some(running) = self.running_file_id
             && (installed.dev(), installed.ino()) != running
         {
-            return Err(fail(
+            return Err(fail(kit::tr(
+                "Binary on disk has changed; restart the service first before updating",
                 "安装位置的程序已经更换，请先重启服务使其生效，再执行更新",
-            ));
+            )));
         }
 
         let asset_name = target_asset_name();
@@ -645,23 +809,40 @@ impl Updater {
             }
         }
         let Some(asset_url) = asset_url else {
-            return Err(fail(format!(
-                "更新失败：发布 {} 里没有 {asset_name}。当前运行的版本没有改动",
-                latest.tag_name
-            )));
+            let msg = if kit::is_zh() {
+                format!(
+                    "更新失败：发布 {} 里没有 {asset_name}。当前运行的版本没有改动",
+                    latest.tag_name
+                )
+            } else {
+                format!(
+                    "Update failed: release {} has no asset {asset_name}; running binary unchanged",
+                    latest.tag_name
+                )
+            };
+            return Err(fail(msg));
         };
         let Some(sums_url) = sums_url else {
-            return Err(fail(
+            return Err(fail(kit::tr(
+                "Update failed: missing checksums.txt in release; refusing unverified binary. Running binary unchanged",
                 "更新失败：发布里缺少 checksums.txt，不安装没有校验过的程序。当前运行的版本没有改动",
-            ));
+            )));
         };
 
-        progress(format!(
-            "正在下载 {}（{}）…",
-            code(&latest.tag_name),
-            kit::format_bytes(asset_size.max(0))
-        ))
-        .await?;
+        let dl_msg = if kit::is_zh() {
+            format!(
+                "正在下载 {}（{}）…",
+                code(&latest.tag_name),
+                kit::format_bytes(asset_size.max(0))
+            )
+        } else {
+            format!(
+                "Downloading {} ({})…",
+                code(&latest.tag_name),
+                kit::format_bytes(asset_size.max(0))
+            )
+        };
+        progress(dl_msg).await?;
 
         let sums = do_request(Request {
             url: sums_url,
@@ -670,36 +851,57 @@ impl Updater {
             ..Default::default()
         })
         .await
-        .map_err(|_| fail("更新失败：读不到校验文件。当前运行的版本没有改动"))?;
+        .map_err(|_| {
+            fail(kit::tr(
+                "Update failed: could not fetch checksums; running binary unchanged",
+                "更新失败：读不到校验文件。当前运行的版本没有改动",
+            ))
+        })?;
         if !sums.ok() {
-            return Err(fail("更新失败：读不到校验文件。当前运行的版本没有改动"));
+            return Err(fail(kit::tr(
+                "Update failed: could not fetch checksums; running binary unchanged",
+                "更新失败：读不到校验文件。当前运行的版本没有改动",
+            )));
         }
         let Some(expected) = parse_checksum(&sums.body, &asset_name) else {
-            return Err(fail(format!(
-                "更新失败：校验文件里没有 {asset_name} 的哈希。当前运行的版本没有改动"
-            )));
+            let msg = if kit::is_zh() {
+                format!("更新失败：校验文件里没有 {asset_name} 的哈希。当前运行的版本没有改动")
+            } else {
+                format!("Update failed: no checksum for {asset_name}; running binary unchanged")
+            };
+            return Err(fail(msg));
         };
 
         let candidate = append_suffix(binary, ".download");
         let digest = tokio::select! {
             _ = cancel.cancelled() => {
                 let _ = fs::remove_file(&candidate);
-                return Err(fail("更新失败：任务已取消，当前运行的版本没有改动"));
+                return Err(fail(kit::tr(
+                    "Update failed: cancelled; running binary unchanged",
+                    "更新失败：任务已取消，当前运行的版本没有改动",
+                )));
             }
             res = download_file(&asset_url, &candidate, 200 << 20) => match res {
                 Ok(d) => d,
                 Err(e) => {
                     let _ = fs::remove_file(&candidate);
-                    return Err(fail_with("更新失败：下载失败，当前运行的版本没有改动", e));
+                    return Err(fail_with(
+                        kit::tr(
+                            "Update failed: download failed; running binary unchanged",
+                            "更新失败：下载失败，当前运行的版本没有改动",
+                        ),
+                        e,
+                    ));
                 }
             }
         };
 
         if digest != expected {
             let _ = fs::remove_file(&candidate);
-            return Err(fail(
+            return Err(fail(kit::tr(
+                "Update failed: SHA-256 mismatch, download discarded; running binary unchanged",
                 "更新失败：SHA-256 不匹配，已丢弃下载。当前运行的版本没有改动",
-            ));
+            )));
         }
 
         #[cfg(unix)]
@@ -711,7 +913,14 @@ impl Updater {
             }
         }
 
-        progress("校验通过，正在试跑新版本…".to_owned()).await?;
+        progress(
+            kit::tr(
+                "Checksum verified, testing new binary…",
+                "校验通过，正在试跑新版本…",
+            )
+            .to_owned(),
+        )
+        .await?;
 
         let check_res = tokio::time::timeout(Duration::from_secs(60), async {
             ProcessCommand::new(&candidate)
@@ -722,6 +931,12 @@ impl Updater {
                 .await
         })
         .await;
+        let check_failed_msg = || {
+            fail(kit::tr(
+                "Update failed: new binary failed self-check (see logs), discarded; running binary unchanged",
+                "更新失败：新版本试跑没通过（详情见日志），已丢弃。当前运行的版本没有改动",
+            ))
+        };
         match check_res {
             Ok(Ok(out)) if out.status.success() => {}
             Ok(Ok(out)) => {
@@ -737,9 +952,7 @@ impl Updater {
                         ("output", &tail_chars(&combined, 400)),
                     ],
                 );
-                return Err(fail(
-                    "更新失败：新版本试跑没通过（详情见日志），已丢弃。当前运行的版本没有改动",
-                ));
+                return Err(check_failed_msg());
             }
             Ok(Err(e)) => {
                 let _ = fs::remove_file(&candidate);
@@ -748,9 +961,7 @@ impl Updater {
                     "update.check_failed",
                     &[("version", &latest.tag_name), ("error", &e.to_string())],
                 );
-                return Err(fail(
-                    "更新失败：新版本试跑没通过（详情见日志），已丢弃。当前运行的版本没有改动",
-                ));
+                return Err(check_failed_msg());
             }
             Err(_) => {
                 let _ = fs::remove_file(&candidate);
@@ -759,15 +970,19 @@ impl Updater {
                     "update.check_failed",
                     &[("version", &latest.tag_name), ("error", "timeout 60s")],
                 );
-                return Err(fail(
-                    "更新失败：新版本试跑没通过（详情见日志），已丢弃。当前运行的版本没有改动",
-                ));
+                return Err(check_failed_msg());
             }
         }
 
         if let Err(e) = self.a.checkpoint_state() {
             let _ = fs::remove_file(&candidate);
-            return Err(fail_with("保存连接状态失败，没有替换程序", e));
+            return Err(fail_with(
+                kit::tr(
+                    "Failed to save connection state; binary unchanged",
+                    "保存连接状态失败，没有替换程序",
+                ),
+                e,
+            ));
         }
         let previous = append_suffix(binary, ".previous");
         if let Err(e) = swap_binary(|f, t| fs::rename(f, t), binary, &candidate, &previous) {
@@ -873,17 +1088,22 @@ impl Updater {
             return;
         };
         let self_peer = grammers_tl_types::enums::InputPeer::PeerSelf;
-        const HEADER: &str = "⬆️ <b>自动更新</b>\n";
-        let sent = match client
-            .send_html(
-                &self_peer,
-                &format!(
-                    "{HEADER}⏳ 正在从 {} 更新到 {}…",
-                    code(kit::version(&self.a)),
-                    code(&latest.tag_name)
-                ),
-                SendOptions::default(),
+        let header = kit::tr("⬆️ <b>Auto-Update</b>\n", "⬆️ <b>自动更新</b>\n");
+        let start_msg = if kit::is_zh() {
+            format!(
+                "{header}⏳ 正在从 {} 更新到 {}…",
+                code(kit::version(&self.a)),
+                code(&latest.tag_name)
             )
+        } else {
+            format!(
+                "{header}⏳ Updating from {} to {}…",
+                code(kit::version(&self.a)),
+                code(&latest.tag_name)
+            )
+        };
+        let sent = match client
+            .send_html(&self_peer, &start_msg, SendOptions::default())
             .await
         {
             Ok(u) => u,
@@ -915,7 +1135,7 @@ impl Updater {
                 c.edit_html(
                     &p,
                     id,
-                    &format!("{HEADER}{text}"),
+                    &format!("{header}{text}"),
                     SendOptions {
                         no_webpage: true,
                         ..Default::default()
@@ -937,7 +1157,7 @@ impl Updater {
                     c.edit_html(
                         &p,
                         id,
-                        &format!("{HEADER}⏳ {text}"),
+                        &format!("{header}⏳ {text}"),
                         SendOptions {
                             no_webpage: true,
                             ..Default::default()
@@ -978,16 +1198,29 @@ impl Updater {
                 .into_iter()
                 .next()
                 .unwrap_or_else(|| ".".to_owned());
-            let _ = show(format!(
-                "⏸ 已安装 {}，但还有任务在跑，没有重启；任务结束后用 {} 重启生效",
-                code(&latest.tag_name),
-                code(&format!("{pfx}restart"))
-            ))
-            .await;
+            let msg = if kit::is_zh() {
+                format!(
+                    "⏸ 已安装 {}，但还有任务在跑，没有重启；任务结束后用 {} 重启生效",
+                    code(&latest.tag_name),
+                    code(&format!("{pfx}restart"))
+                )
+            } else {
+                format!(
+                    "⏸ Installed {}, but commands are still running; run {} when idle to restart",
+                    code(&latest.tag_name),
+                    code(&format!("{pfx}restart"))
+                )
+            };
+            let _ = show(msg).await;
             return;
         }
 
-        if let Err(e) = show(format!("⏳ 已安装 {}，正在重启…", code(&latest.tag_name))).await {
+        let restarting_msg = if kit::is_zh() {
+            format!("⏳ 已安装 {}，正在重启…", code(&latest.tag_name))
+        } else {
+            format!("⏳ Installed {}, restarting…", code(&latest.tag_name))
+        };
+        if let Err(e) = show(restarting_msg).await {
             self.a.logs.record(
                 Level::Warn,
                 "update.auto_notice_failed",
@@ -1012,12 +1245,20 @@ impl Updater {
                 "update.auto_restart_failed",
                 &[("error", &e.to_string())],
             );
-            let _ = show(format!(
-                "❌ 已安装 {}，但重启没提交成功，可以手动重启服务\n状态：\n{}",
-                code(&latest.tag_name),
-                restarter.status().await
-            ))
-            .await;
+            let fail_msg = if kit::is_zh() {
+                format!(
+                    "❌ 已安装 {}，但重启没提交成功，可以手动重启服务\n状态：\n{}",
+                    code(&latest.tag_name),
+                    restarter.status().await
+                )
+            } else {
+                format!(
+                    "❌ Installed {}, but failed to schedule restart; please restart manually\nStatus:\n{}",
+                    code(&latest.tag_name),
+                    restarter.status().await
+                )
+            };
+            let _ = show(fail_msg).await;
             return;
         }
 
@@ -1136,7 +1377,7 @@ mod tests {
             Err(std::io::Error::other("injected step 1"))
         };
         let err = swap_binary(fail_first, &binary, &incoming, &aside).unwrap_err();
-        assert!(err.to_string().contains("无法挪开当前的程序文件"));
+        assert!(err.to_string().contains("Could not move current binary aside"));
 
         // Rollback when step 2 fails
         let aside2 = dir.0.join("aside2");
@@ -1152,7 +1393,7 @@ mod tests {
             fs::rename(from, to)
         };
         let err2 = swap_binary(fail_second, &binary, &inc2, &aside2).unwrap_err();
-        assert!(err2.to_string().contains("已恢复原来的版本"));
+        assert!(err2.to_string().contains("restored original version"));
         assert_eq!(fs::read(&binary).expect("restored"), b"new");
 
         // Both step 2 and restore fail
@@ -1166,7 +1407,7 @@ mod tests {
             fs::rename(from, to)
         };
         let err3 = swap_binary(fail_both, &binary, &inc2, &aside2).unwrap_err();
-        assert!(err3.to_string().contains("原来的版本在"));
+        assert!(err3.to_string().contains("Original is at"));
         assert!(fs::read(&aside2).is_ok());
     }
 

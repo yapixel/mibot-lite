@@ -100,7 +100,10 @@ impl Service {
                 t.is_running = false;
                 t.sleep_until = None;
                 if !t.errors.is_empty() {
-                    t.errors = vec!["历史任务存在删除失败".into()];
+                    t.errors = vec![kit::tr(
+                        "Previous task had deletion failures",
+                        "历史任务存在删除失败",
+                    ).into()];
                 } else {
                     t.errors = Vec::new();
                 }
@@ -144,28 +147,46 @@ impl Service {
             && until > now
         {
             let wait_secs = ((until - now) as f64 / 1000.0).ceil() as i64;
-            format!("休眠中（{wait_secs} 秒）")
+            if kit::is_zh() {
+                format!("休眠中（{wait_secs} 秒）")
+            } else {
+                format!("Sleeping ({wait_secs}s)")
+            }
         } else if task.is_running {
-            "运行中".to_owned()
+            kit::tr("Running", "运行中").to_owned()
         } else if task.is_paused {
-            "已暂停".to_owned()
+            kit::tr("Paused", "已暂停").to_owned()
         } else {
-            "已停止".to_owned()
+            kit::tr("Stopped", "已停止").to_owned()
         };
         let tail_start = task.errors.len().saturating_sub(3);
         let tail = task.errors[tail_start..].join("\n");
         let rate = task.deleted_messages as f64 / seconds as f64;
-        let text = format!(
-            "🧹 <b>删除任务：{}</b>\n群组：{}\n状态：{state}\n已删除：{} 条\n删除速度：{rate:.2} 条/秒\n运行时长：{}小时 {}分钟 {}秒\n最后更新：{}\n{}",
-            escape(status),
-            escape(&task.chat_name),
-            task.deleted_messages,
-            seconds / 3600,
-            (seconds % 3600) / 60,
-            seconds % 60,
-            format_ts_ms(task.last_update),
-            escape(&tail)
-        );
+        let text = if kit::is_zh() {
+            format!(
+                "🧹 <b>删除任务：{}</b>\n群组：{}\n状态：{state}\n已删除：{} 条\n删除速度：{rate:.2} 条/秒\n运行时长：{}小时 {}分钟 {}秒\n最后更新：{}\n{}",
+                escape(status),
+                escape(&task.chat_name),
+                task.deleted_messages,
+                seconds / 3600,
+                (seconds % 3600) / 60,
+                seconds % 60,
+                format_ts_ms(task.last_update),
+                escape(&tail)
+            )
+        } else {
+            format!(
+                "🧹 <b>Delete Task: {}</b>\nGroup: {}\nStatus: {state}\nDeleted: {} msg(s)\nSpeed: {rate:.2} msg/s\nElapsed: {}h {}m {}s\nUpdated: {}\n{}",
+                escape(status),
+                escape(&task.chat_name),
+                task.deleted_messages,
+                seconds / 3600,
+                (seconds % 3600) / 60,
+                seconds % 60,
+                format_ts_ms(task.last_update),
+                escape(&tail)
+            )
+        };
         if task.saved_message_id > 0
             && client
                 .edit_message_html(
@@ -201,12 +222,12 @@ impl Service {
         };
         let status = if sub == "stop" {
             if had_slot {
-                "正在停止，等待当前请求结束"
+                kit::tr("Stopping, waiting for current request", "正在停止，等待当前请求结束")
             } else {
-                "已手动停止"
+                kit::tr("Manually stopped", "已手动停止")
             }
         } else {
-            "状态查询"
+            kit::tr("Status check", "状态查询")
         };
         self.progress(&inv.client, &task, status).await;
     }
@@ -219,9 +240,11 @@ impl Service {
                 return Ok(false);
             }
             if g.slots.len() >= LONG_TASKS {
-                return Err(kit::fail(format!(
-                    "已经有 {LONG_TASKS} 个群在删除，等其中一个结束后再开始"
-                )));
+                return Err(kit::fail(if kit::is_zh() {
+                    format!("已经有 {LONG_TASKS} 个群在删除，等其中一个结束后再开始")
+                } else {
+                    format!("{LONG_TASKS} groups are already deleting; wait for one to finish")
+                }));
             }
             let slot_id = {
                 let mut n = self.next_slot_id.lock().unwrap_or_else(|e| e.into_inner());
@@ -269,7 +292,10 @@ impl Service {
             })
         });
         if !accepted {
-            return Err(kit::fail("服务正在更新或退出，没有开始删除"));
+            return Err(kit::fail(kit::tr(
+                "Service is updating or shutting down; did not start",
+                "服务正在更新或退出，没有开始删除",
+            )));
         }
         Ok(true)
     }
@@ -301,13 +327,13 @@ impl Service {
         task.sleep_until = None;
         self.save(task);
         let status = if cancel.is_cancelled() {
-            "已停止"
+            kit::tr("Stopped", "已停止")
         } else if completed && !task.errors.is_empty() {
-            "完成，存在删除失败"
+            kit::tr("Completed with deletion failures", "完成，存在删除失败")
         } else if completed {
-            "任务完成"
+            kit::tr("Completed", "任务完成")
         } else {
-            "执行失败"
+            kit::tr("Failed", "执行失败")
         };
         if let Ok(saved_id) =
             tokio::time::timeout(Duration::from_secs(5), self.progress(&self.app.client, task, status))
@@ -342,7 +368,7 @@ impl Service {
         self.save(&mut task);
 
         let Ok(peer) = self.app.client.input_peer(&message.peer) else {
-            task.errors.push("无法定位该群组".into());
+            task.errors.push(kit::tr("Unable to locate this group", "无法定位该群组").into());
             self.finish(&cancel, &mut task, &id, false).await;
             return;
         };
@@ -355,7 +381,9 @@ impl Service {
         };
         let admin = run.is_admin().await;
         let _ = self.app.client.delete_messages(&peer, &[message.id]).await;
-        run.task.saved_message_id = self.progress(&self.app.client, run.task, "任务已启动").await;
+        run.task.saved_message_id = self
+            .progress(&self.app.client, run.task, kit::tr("Started", "任务已启动"))
+            .await;
         self.save(run.task);
         let completed = if admin {
             run.sweep_all().await
@@ -465,7 +493,11 @@ impl DaRun<'_> {
                         "da.delete",
                         &[("count", &ids.len().to_string()), ("error", &err.to_string())],
                     );
-                    append_bounded(&mut self.task.errors, "部分消息删除失败", 20);
+                    append_bounded(
+                        &mut self.task.errors,
+                        kit::tr("Some messages failed to delete", "部分消息删除失败"),
+                        20,
+                    );
                     if ids.len() > 1 {
                         for &single in ids {
                             if self.cancel.is_cancelled() {
@@ -523,7 +555,14 @@ impl DaRun<'_> {
             let res = match self.svc.app.client.invoke(&req).await {
                 Ok(r) => r,
                 Err(err) => {
-                    if self.retry_after(&err, "da.history", "读取历史消息失败").await {
+                    if self
+                        .retry_after(
+                            &err,
+                            "da.history",
+                            kit::tr("Failed to read message history", "读取历史消息失败"),
+                        )
+                        .await
+                    {
                         continue;
                     }
                     return false;
@@ -579,7 +618,14 @@ impl DaRun<'_> {
             let res = match self.svc.app.client.invoke(&req).await {
                 Ok(r) => r,
                 Err(err) => {
-                    if self.retry_after(&err, "da.search", "搜索自己的消息失败").await {
+                    if self
+                        .retry_after(
+                            &err,
+                            "da.search",
+                            kit::tr("Failed to search own messages", "搜索自己的消息失败"),
+                        )
+                        .await
+                    {
                         continue;
                     }
                     return false;
@@ -633,13 +679,23 @@ fn append_bounded(values: &mut Vec<String>, value: &str, limit: usize) {
 
 pub fn help(prefix: &str) -> String {
     let p = escape(prefix);
-    format!(
-        "🧹 <b>批量删除群组消息</b>\n\n\
-         • <code>{p}da true</code> 开始或继续删除\n\
-         • <code>{p}da stop</code> 停止任务\n\
-         • <code>{p}da status</code> 把进度发到收藏夹\n\n\
-         管理员删除全部消息，普通成员只删自己的消息。"
-    )
+    if kit::is_zh() {
+        format!(
+            "🧹 <b>批量删除群组消息</b>\n\n\
+             • <code>{p}da true</code> 开始或继续删除\n\
+             • <code>{p}da stop</code> 停止任务\n\
+             • <code>{p}da status</code> 把进度发到收藏夹\n\n\
+             管理员删除全部消息，普通成员只删自己的消息。"
+        )
+    } else {
+        format!(
+            "🧹 <b>Bulk Delete Group Messages</b>\n\n\
+             • <code>{p}da true</code> Start or resume deleting\n\
+             • <code>{p}da stop</code> Stop task\n\
+             • <code>{p}da status</code> Send progress to Saved Messages\n\n\
+             Admins delete all messages; regular members only delete their own."
+        )
+    }
 }
 
 pub fn register(app: &Arc<App>) {
@@ -648,45 +704,55 @@ pub fn register(app: &Arc<App>) {
         svc.pause_interrupted();
     }
     let svc_cmd = Arc::clone(&svc);
-    app.registry.register(Command {
-        name: "da".into(),
-        group: group::MEDIA.into(),
-        description: "批量删除群组消息".into(),
-        usage: "true|stop|status".into(),
-        help: help("."),
-        help_fn: Some(Arc::new(help)),
-        timeout: Some(Duration::from_secs(120)),
-        handle: Arc::new(move |inv| {
-            let svc = Arc::clone(&svc_cmd);
-            Box::pin(async move {
-                if !inv.message.chat_id.starts_with('-') {
-                    return Err(kit::fail("只能在群组里用"));
-                }
-                let sub = inv.arg(0).to_ascii_lowercase();
-                match sub.as_str() {
-                    "" => {
-                        inv.edit(&help(inv.prefix())).await?;
-                        return Ok(());
-                    }
-                    "stop" | "status" => svc.report(&inv, &sub).await,
-                    "true" => {
-                        if svc.start(&inv)? {
-                            return Ok(());
-                        }
-                    }
-                    _ => {
-                        return Err(kit::fail(format!(
-                            "未知子命令：{sub}，{}da help 看用法",
-                            inv.prefix()
+    app.registry.register(
+        Command {
+            name: "da".into(),
+            group: group::MEDIA.into(),
+            description: "Bulk delete group messages".into(),
+            usage: "true|stop|status".into(),
+            help: help("."),
+            help_fn: Some(Arc::new(help)),
+            timeout: Some(Duration::from_secs(120)),
+            handle: Arc::new(move |inv| {
+                let svc = Arc::clone(&svc_cmd);
+                Box::pin(async move {
+                    if !inv.message.chat_id.starts_with('-') {
+                        return Err(kit::fail(kit::tr(
+                            "Only works in groups",
+                            "只能在群组里用",
                         )));
                     }
-                }
-                let _ = inv.delete().await;
-                Ok(())
-            })
-        }),
-        ..Default::default()
-    });
+                    let sub = inv.arg(0).to_ascii_lowercase();
+                    match sub.as_str() {
+                        "" => {
+                            inv.edit(&help(inv.prefix())).await?;
+                            return Ok(());
+                        }
+                        "stop" | "status" => svc.report(&inv, &sub).await,
+                        "true" => {
+                            if svc.start(&inv)? {
+                                return Ok(());
+                            }
+                        }
+                        _ => {
+                            return Err(kit::fail(if kit::is_zh() {
+                                format!("未知子命令：{sub}，{}da help 看用法", inv.prefix())
+                            } else {
+                                format!(
+                                    "Unknown subcommand: {sub}; use {}da help for usage",
+                                    inv.prefix()
+                                )
+                            }));
+                        }
+                    }
+                    let _ = inv.delete().await;
+                    Ok(())
+                })
+            }),
+            ..Default::default()
+        }
+        .zh("批量删除群组消息", "true|stop|status"),
+    );
 }
 
 #[cfg(test)]

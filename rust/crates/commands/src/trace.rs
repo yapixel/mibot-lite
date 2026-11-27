@@ -62,7 +62,7 @@ impl<'de> Deserialize<'de> for Reaction {
 impl Reaction {
     fn display(&self) -> String {
         if !self.document_id.is_empty() {
-            format!("自定义：{}", self.document_id)
+            format!("{}{}", kit::tr("custom:", "自定义："), self.document_id)
         } else {
             self.emoticon.clone()
         }
@@ -262,9 +262,20 @@ impl Service {
                     }
                 })?;
                 if reset {
-                    self.receipt(&inv, "✅ 已重置自动回应的追踪和设置").await
+                    self.receipt(
+                        &inv,
+                        kit::tr(
+                            "✅ Reset auto-reactions and settings",
+                            "✅ 已重置自动回应的追踪和设置",
+                        ),
+                    )
+                    .await
                 } else {
-                    self.receipt(&inv, "✅ 已清空所有追踪").await
+                    self.receipt(
+                        &inv,
+                        kit::tr("✅ Cleared all auto-reaction rules", "✅ 已清空所有追踪"),
+                    )
+                    .await
                 }
             }
             "log" | "big" => {
@@ -278,13 +289,18 @@ impl Service {
                         cfg.config.big = val;
                     }
                 })?;
-                let label = if sub == "big" {
-                    "大号表情动画"
+                let msg = if kit::is_zh() {
+                    let label = if sub == "big" { "大号表情动画" } else { "保留回执" };
+                    format!("✅ {label}已{}", kit::on_off_text(val))
                 } else {
-                    "保留回执"
+                    let label = if sub == "big" {
+                        "Big reaction animation"
+                    } else {
+                        "Keep command receipt"
+                    };
+                    format!("✅ {label} turned {}", kit::on_off_text(val))
                 };
-                self.receipt(&inv, &format!("✅ {label}已{}", kit::on_off_text(val)))
-                    .await
+                self.receipt(&inv, &msg).await
             }
             "kw" => self.keyword(&inv).await,
             _ => self.user(&inv).await,
@@ -297,17 +313,24 @@ impl Service {
         if word.is_empty() || (action != "add" && action != "del") {
             return Err(kit::usage(
                 inv.prefix(),
-                "trace kw add 关键词 表情|kw del 关键词",
+                kit::tr(
+                    "trace kw add keyword emoji|kw del keyword",
+                    "trace kw add 关键词 表情|kw del 关键词",
+                ),
             ));
         }
         let mut items = Vec::new();
         if action == "add" {
             items = reactions_after(inv, 3);
             if items.is_empty() {
-                return Err(kit::fail(format!(
-                    "没找到能用的表情，{}help trace 看可用的表情",
-                    inv.prefix()
-                )));
+                return Err(kit::fail(if kit::is_zh() {
+                    format!("没找到能用的表情，{}help trace 看可用的表情", inv.prefix())
+                } else {
+                    format!(
+                        "No supported emoji found; run {}help trace to see available emojis",
+                        inv.prefix()
+                    )
+                }));
             }
             need_premium(&inv.client, &items)?;
         }
@@ -322,13 +345,32 @@ impl Service {
             }
         })?;
         if !found {
-            return Err(kit::fail(format!("没有追踪关键词 {word}")));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("没有追踪关键词 {word}")
+            } else {
+                format!("Keyword {word} is not tracked")
+            }));
         }
         if action == "add" {
-            self.receipt(inv, &format!("✅ 已追踪关键词 {word}：{}", display(&items)))
-                .await
+            self.receipt(
+                inv,
+                &if kit::is_zh() {
+                    format!("✅ 已追踪关键词 {word}：{}", display(&items))
+                } else {
+                    format!("✅ Tracking keyword {word}: {}", display(&items))
+                },
+            )
+            .await
         } else {
-            self.receipt(inv, &format!("✅ 已取消追踪关键词 {word}")).await
+            self.receipt(
+                inv,
+                &if kit::is_zh() {
+                    format!("✅ 已取消追踪关键词 {word}")
+                } else {
+                    format!("✅ Stopped tracking keyword {word}")
+                },
+            )
+            .await
         }
     }
 
@@ -340,7 +382,7 @@ impl Service {
         };
         let id = peer_id(&reply.sender);
         if id.is_empty() || reply.sender_is_user(inv.client.self_id()) {
-            return Err(kit::fail("不能追踪自己"));
+            return Err(kit::fail(kit::tr("Cannot track yourself", "不能追踪自己")));
         }
         if inv.args.is_empty() {
             let mut found = false;
@@ -349,16 +391,33 @@ impl Service {
                 found = cfg.users.remove(&id_clone).is_some();
             })?;
             if !found {
-                return Err(kit::fail(format!("没有在追踪 {id}")));
+                return Err(kit::fail(if kit::is_zh() {
+                    format!("没有在追踪 {id}")
+                } else {
+                    format!("Not tracking {id}")
+                }));
             }
-            return self.receipt(inv, &format!("✅ 已取消追踪 {id}")).await;
+            return self
+                .receipt(
+                    inv,
+                    &if kit::is_zh() {
+                        format!("✅ 已取消追踪 {id}")
+                    } else {
+                        format!("✅ Stopped tracking {id}")
+                    },
+                )
+                .await;
         }
         let items = reactions_after(inv, 0);
         if items.is_empty() {
-            return Err(kit::fail(format!(
-                "没找到能用的表情，{}help trace 看可用的表情",
-                inv.prefix()
-            )));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("没找到能用的表情，{}help trace 看可用的表情", inv.prefix())
+            } else {
+                format!(
+                    "No supported emoji found; run {}help trace to see available emojis",
+                    inv.prefix()
+                )
+            }));
         }
         need_premium(&inv.client, &items)?;
         let id_clone = id.clone();
@@ -376,13 +435,24 @@ impl Service {
             };
             if let Err(err) = react(&inv.client, &job).await {
                 return Err(mibot_command::fail_with(
-                    format!("已追踪 {id}，但这次没能点上表情"),
+                    if kit::is_zh() {
+                        format!("已追踪 {id}，但这次没能点上表情")
+                    } else {
+                        format!("Tracked {id}, but failed to react to this message")
+                    },
                     err,
                 ));
             }
         }
-        self.receipt(inv, &format!("✅ 已追踪 {id}：{}", display(&items)))
-            .await
+        self.receipt(
+            inv,
+            &if kit::is_zh() {
+                format!("✅ 已追踪 {id}：{}", display(&items))
+            } else {
+                format!("✅ Tracking {id}: {}", display(&items))
+            },
+        )
+        .await
     }
 
     async fn receipt(&self, inv: &Invocation, text: &str) -> CmdResult {
@@ -396,45 +466,78 @@ impl Service {
 
     async fn status(&self, inv: &Invocation) -> CmdResult {
         let cfg = self.store.snapshot()?;
-        let mut lines = vec![
-            "👀 <b>自动回应</b>".to_owned(),
-            format!(
-                "追踪 {} 个用户、{} 个关键词",
-                cfg.users.len(),
-                cfg.keywords.len()
-            ),
-            String::new(),
-            "<b>用户</b>".to_owned(),
-        ];
+        let mut lines = if kit::is_zh() {
+            vec![
+                "👀 <b>自动回应</b>".to_owned(),
+                format!(
+                    "追踪 {} 个用户、{} 个关键词",
+                    cfg.users.len(),
+                    cfg.keywords.len()
+                ),
+                String::new(),
+                "<b>用户</b>".to_owned(),
+            ]
+        } else {
+            vec![
+                "👀 <b>Auto-React</b>".to_owned(),
+                format!(
+                    "Tracking {} user(s), {} keyword(s)",
+                    cfg.users.len(),
+                    cfg.keywords.len()
+                ),
+                String::new(),
+                "<b>Users</b>".to_owned(),
+            ]
+        };
         if cfg.users.is_empty() {
-            lines.push("无".to_owned());
+            lines.push(kit::tr("None", "无").to_owned());
         } else {
             for (id, items) in &cfg.users {
                 let mut name = id.clone();
                 if let Some(peer) = peer_from_id(id) {
                     let title = inv.client.peers().title(&peer);
                     if !title.is_empty() && title != *id {
-                        name = format!("{title}（{id}）");
+                        name = if kit::is_zh() {
+                            format!("{title}（{id}）")
+                        } else {
+                            format!("{title} ({id})")
+                        };
                     }
                 }
-                lines.push(format!("• {}：{}", escape(&name), escape(&display(items))));
+                lines.push(if kit::is_zh() {
+                    format!("• {}：{}", escape(&name), escape(&display(items)))
+                } else {
+                    format!("• {}: {}", escape(&name), escape(&display(items)))
+                });
             }
         }
         lines.push(String::new());
-        lines.push("<b>关键词</b>".to_owned());
+        lines.push(kit::tr("<b>Keywords</b>", "<b>关键词</b>").to_owned());
         if cfg.keywords.is_empty() {
-            lines.push("无".to_owned());
+            lines.push(kit::tr("None", "无").to_owned());
         } else {
             for (word, items) in &cfg.keywords {
-                lines.push(format!("• {}：{}", code(word), escape(&display(items))));
+                lines.push(if kit::is_zh() {
+                    format!("• {}：{}", code(word), escape(&display(items)))
+                } else {
+                    format!("• {}: {}", code(word), escape(&display(items)))
+                });
             }
         }
         lines.push(String::new());
-        lines.push(format!(
-            "保留回执：{} · 大号动画：{}",
-            kit::on_off_text(cfg.config.keep_log),
-            kit::on_off_text(cfg.config.big)
-        ));
+        lines.push(if kit::is_zh() {
+            format!(
+                "保留回执：{} · 大号动画：{}",
+                kit::on_off_text(cfg.config.keep_log),
+                kit::on_off_text(cfg.config.big)
+            )
+        } else {
+            format!(
+                "Keep receipt: {} · Big animation: {}",
+                kit::on_off_text(cfg.config.keep_log),
+                kit::on_off_text(cfg.config.big)
+            )
+        });
         let pages = html_pages(&lines.join("\n"), PAGE_LIMIT);
         inv.respond_pages(&pages).await?;
         Ok(())
@@ -468,7 +571,10 @@ fn on_off(value: &str) -> Result<bool, mibot_command::CmdError> {
 
 fn need_premium(client: &Client, items: &[Reaction]) -> CmdResult {
     if items.iter().any(|i| !i.document_id.is_empty()) && !client.can_send_rich() {
-        return Err(kit::fail("自定义表情要会员才能用"));
+        return Err(kit::fail(kit::tr(
+            "Custom emoji reactions require Telegram Premium",
+            "自定义表情要会员才能用",
+        )));
     }
     Ok(())
 }
@@ -557,31 +663,59 @@ fn display(items: &[Reaction]) -> String {
 
 pub fn help(prefix: &str) -> String {
     let c = |text: &str| code(&format!("{prefix}trace{text}"));
-    format!(
-        "👀 <b>自动回应</b>\n\n追踪指定的用户或关键词，他们发消息时账号自动点上表情回应。\n\n\
-         <b>用户</b>\n\
-         • 回复一条消息发 {} 追踪发这条消息的人，并马上给这条点上\n\
-         • 回复一条消息发 {} 取消追踪这个人\n\n\
-         <b>关键词</b>\n\
-         • {} 消息里有这个词就点上\n\
-         • {} 删除\n\n\
-         <b>管理</b>\n\
-         • {} 查看追踪的用户和关键词\n\
-         • {} 清空所有追踪，{} 连设置一起重置\n\
-         • {} 保留命令回执（关闭时 10 秒后删掉）\n\
-         • {} 大号表情动画\n\n\
-         可用的表情：{}。会员可以用自定义表情；不是会员的账号一条消息只能点一个表情。",
-        c(" 👍🔥"),
-        c(""),
-        c(" kw add 关键词 👍🔥"),
-        c(" kw del 关键词"),
-        c(" status"),
-        c(" clean"),
-        c(" reset"),
-        c(" log on|off"),
-        c(" big on|off"),
-        AVAILABLE.concat(),
-    )
+    if kit::is_zh() {
+        format!(
+            "👀 <b>自动回应</b>\n\n追踪指定的用户或关键词，他们发消息时账号自动点上表情回应。\n\n\
+             <b>用户</b>\n\
+             • 回复一条消息发 {} 追踪发这条消息的人，并马上给这条点上\n\
+             • 回复一条消息发 {} 取消追踪这个人\n\n\
+             <b>关键词</b>\n\
+             • {} 消息里有这个词就点上\n\
+             • {} 删除\n\n\
+             <b>管理</b>\n\
+             • {} 查看追踪的用户和关键词\n\
+             • {} 清空所有追踪，{} 连设置一起重置\n\
+             • {} 保留命令回执（关闭时 10 秒后删掉）\n\
+             • {} 大号表情动画\n\n\
+             可用的表情：{}。会员可以用自定义表情；不是会员的账号一条消息只能点一个表情。",
+            c(" 👍🔥"),
+            c(""),
+            c(" kw add 关键词 👍🔥"),
+            c(" kw del 关键词"),
+            c(" status"),
+            c(" clean"),
+            c(" reset"),
+            c(" log on|off"),
+            c(" big on|off"),
+            AVAILABLE.concat(),
+        )
+    } else {
+        format!(
+            "👀 <b>Auto-React</b>\n\nAutomatically react to messages from tracked users or containing tracked keywords.\n\n\
+             <b>Users</b>\n\
+             • Reply to a message with {} to track its sender and react immediately\n\
+             • Reply to a message with {} to stop tracking that user\n\n\
+             <b>Keywords</b>\n\
+             • {} react when a message contains this keyword\n\
+             • {} remove keyword\n\n\
+             <b>Management</b>\n\
+             • {} view tracked users and keywords\n\
+             • {} clear all rules, {} also reset settings\n\
+             • {} keep command receipts (deleted after 10s when off)\n\
+             • {} large reaction animation\n\n\
+             Available emojis: {}. Custom emojis require Premium; non-Premium accounts can only add one reaction per message.",
+            c(" 👍🔥"),
+            c(""),
+            c(" kw add keyword 👍🔥"),
+            c(" kw del keyword"),
+            c(" status"),
+            c(" clean"),
+            c(" reset"),
+            c(" log on|off"),
+            c(" big on|off"),
+            AVAILABLE.concat(),
+        )
+    }
 }
 
 pub fn register(app: &Arc<App>) {
@@ -594,19 +728,22 @@ pub fn register(app: &Arc<App>) {
         Box::pin(async move { s.work(cancel).await })
     }));
     let s_cmd = Arc::clone(&s);
-    app.registry.register(Command {
-        name: "trace".into(),
-        group: group::MEDIA.into(),
-        description: "自动给指定用户点表情".into(),
-        usage: "[表情…|kw|status|clean|reset]".into(),
-        help: help("."),
-        help_fn: Some(Arc::new(help)),
-        handle: Arc::new(move |inv| {
-            let s = Arc::clone(&s_cmd);
-            Box::pin(async move { s.handle(inv).await })
-        }),
-        ..Default::default()
-    });
+    app.registry.register(
+        Command {
+            name: "trace".into(),
+            group: group::MEDIA.into(),
+            description: "Auto-react to messages".into(),
+            usage: "[emoji…|kw|status|clean|reset]".into(),
+            help: help("."),
+            help_fn: Some(Arc::new(help)),
+            handle: Arc::new(move |inv| {
+                let s = Arc::clone(&s_cmd);
+                Box::pin(async move { s.handle(inv).await })
+            }),
+            ..Default::default()
+        }
+        .zh("自动给指定用户点表情", "[表情…|kw|status|clean|reset]"),
+    );
 }
 
 #[cfg(test)]
@@ -675,7 +812,7 @@ mod tests {
             .into(),
         ];
         let got = parse(text, start, &entities);
-        assert_eq!(display(&got), "👍 自定义：555");
+        assert_eq!(display(&got), "👍 custom:555");
         assert!(parse("hello", 0, &[]).is_empty());
     }
 

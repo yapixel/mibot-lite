@@ -18,16 +18,42 @@ use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
 pub mod group {
-    pub const SYSTEM: &str = "运行与维护";
-    pub const TOOLS: &str = "查询与工具";
+    pub const SYSTEM: &str = "Running & Ops";
+    pub const TOOLS: &str = "Lookups & Tools";
     pub const AI: &str = "AI";
-    pub const MEDIA: &str = "消息与贴纸";
-    pub const ADMIN: &str = "群组管理";
-    pub const ACCOUNT: &str = "账号";
+    pub const MEDIA: &str = "Messages & Stickers";
+    pub const ADMIN: &str = "Group Admin";
+    pub const ACCOUNT: &str = "Account";
     pub const GENERAL: &str = SYSTEM;
     pub const STATUS: &str = SYSTEM;
     pub const OPS: &str = SYSTEM;
     pub const LOGS: &str = SYSTEM;
+
+    pub fn zh_name(grp: &str) -> Option<&'static str> {
+        match grp {
+            SYSTEM => Some("运行与维护"),
+            TOOLS => Some("查询与工具"),
+            AI => Some("AI"),
+            MEDIA => Some("消息与贴纸"),
+            ADMIN => Some("群组管理"),
+            ACCOUNT => Some("账号"),
+            _ => None,
+        }
+    }
+
+    pub fn display(grp: &str) -> &str {
+        if mibot_i18n::is_zh()
+            && let Some(zh) = zh_name(grp)
+        {
+            return zh;
+        }
+        grp
+    }
+
+    pub fn matches(grp: &str, needle_lower: &str) -> bool {
+        grp.to_ascii_lowercase().contains(needle_lower)
+            || zh_name(grp).is_some_and(|zh| zh.to_ascii_lowercase().contains(needle_lower))
+    }
 }
 
 pub const GROUPS: &[&str] = &[
@@ -53,12 +79,38 @@ pub struct Command {
     pub aliases: Vec<String>,
     pub group: String,
     pub description: String,
+    pub description_zh: String,
     pub usage: String,
+    pub usage_zh: String,
     pub help: String,
     pub help_fn: Option<HelpFn>,
     pub handle: HandlerFn,
     pub timeout: Option<Duration>,
     pub free_text: bool,
+}
+
+impl Command {
+    pub fn desc_text(&self) -> &str {
+        if mibot_i18n::is_zh() && !self.description_zh.is_empty() {
+            &self.description_zh
+        } else {
+            &self.description
+        }
+    }
+
+    pub fn usage_text(&self) -> &str {
+        if mibot_i18n::is_zh() && !self.usage_zh.is_empty() {
+            &self.usage_zh
+        } else {
+            &self.usage
+        }
+    }
+
+    pub fn zh(mut self, description: impl Into<String>, usage: impl Into<String>) -> Self {
+        self.description_zh = description.into();
+        self.usage_zh = usage.into();
+        self
+    }
 }
 
 impl Default for Command {
@@ -68,7 +120,9 @@ impl Default for Command {
             aliases: Vec::new(),
             group: group::GENERAL.into(),
             description: String::new(),
+            description_zh: String::new(),
             usage: String::new(),
+            usage_zh: String::new(),
             help: String::new(),
             help_fn: None,
             handle: Arc::new(|_| Box::pin(async { Ok(()) })),
@@ -521,15 +575,16 @@ impl Registry {
             f(prefix)
         } else if !cmd.help.is_empty() {
             cmd.help.clone()
-        } else if !cmd.usage.is_empty() {
+        } else if !cmd.usage_text().is_empty() {
             format!(
-                "<b>{}</b> — {}\n用法：<code>{}</code>",
+                "<b>{}</b> — {}\n{}<code>{}</code>",
                 escape(&cmd.name),
-                escape(&cmd.description),
-                escape(&cmd.usage)
+                escape(cmd.desc_text()),
+                mibot_i18n::tr("Usage: ", "用法："),
+                escape(cmd.usage_text())
             )
         } else {
-            format!("<b>{}</b> — {}", escape(&cmd.name), escape(&cmd.description))
+            format!("<b>{}</b> — {}", escape(&cmd.name), escape(cmd.desc_text()))
         };
         let unmentioned: Vec<&str> = cmd
             .aliases
@@ -538,7 +593,7 @@ impl Registry {
             .filter(|a| !contains_alias_token(&out, a))
             .collect();
         if !unmentioned.is_empty() {
-            out.push_str("\n简写：");
+            out.push_str(mibot_i18n::tr("\nAliases: ", "\n简写："));
             let escaped: Vec<String> = unmentioned.iter().map(|a| code(a)).collect();
             out.push_str(&escaped.join(" "));
         }
@@ -740,7 +795,12 @@ impl Registry {
             if !self.scheduler.is_closed() {
                 let inv_reject = inv;
                 tokio::spawn(async move {
-                    let _ = inv_reject.respond("⏳ 当前排队任务过多，请稍后再试").await;
+                    let _ = inv_reject
+                        .respond(mibot_i18n::tr(
+                            "⏳ Too many queued tasks, please try again later",
+                            "⏳ 当前排队任务过多，请稍后再试",
+                        ))
+                        .await;
                 });
             }
             return DispatchOutcome::Rejected(RejectReason::Busy);
@@ -1146,11 +1206,11 @@ mod tests {
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
 
         let cmd = reg.command("failer").unwrap();
-        assert!(reg.help_text(&cmd).contains("简写：<code>f</code>"));
+        assert!(reg.help_text(&cmd).contains("Aliases: <code>f</code>"));
         let bodies = sent_bodies.lock().await;
         assert_eq!(bodies.len(), 2);
-        assert!(bodies[0].contains("内部错误，详情见日志"));
+        assert!(bodies[0].contains("Internal error, see log for details"));
         assert!(!bodies[0].contains("/secret/path"));
-        assert!(bodies[1].contains("简写：f"));
+        assert!(bodies[1].contains("Aliases: f"));
     }
 }

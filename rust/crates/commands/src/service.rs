@@ -121,6 +121,9 @@ fn number(s: &Status, key: &str) -> Option<u64> {
 }
 
 fn translate_active(val: &str) -> &str {
+    if !kit::is_zh() {
+        return val;
+    }
     match val {
         "active" => "活跃",
         "reloading" => "重新加载中",
@@ -135,6 +138,9 @@ fn translate_active(val: &str) -> &str {
 }
 
 fn translate_sub(val: &str) -> &str {
+    if !kit::is_zh() {
+        return val;
+    }
     match val {
         "running" => "运行中",
         "exited" => "已退出",
@@ -155,6 +161,13 @@ fn translate_sub(val: &str) -> &str {
 }
 
 fn translate_file(val: &str) -> &str {
+    if !kit::is_zh() {
+        return match val {
+            "enabled-runtime" => "enabled (runtime only)",
+            "static" => "static (started by another unit)",
+            other => other,
+        };
+    }
     match val {
         "enabled" => "开启",
         "enabled-runtime" => "开启（仅本次开机）",
@@ -180,26 +193,45 @@ fn memory_text(s: &Status) -> String {
     let mut text = code(&kit::format_bytes(current as i64));
     let mut notes = Vec::new();
     if let Some(peak) = number(s, "MemoryPeak") {
-        notes.push(format!("峰值 {}", kit::format_bytes(peak as i64)));
+        notes.push(format!("{} {}", kit::tr("peak", "峰值"), kit::format_bytes(peak as i64)));
     }
     if let Some(high) = number(s, "MemoryHigh") {
-        notes.push(format!("限流线 {}", kit::format_bytes(high as i64)));
+        notes.push(format!("{} {}", kit::tr("high", "限流线"), kit::format_bytes(high as i64)));
     }
     if let Some(limit) = number(s, "MemoryMax") {
-        notes.push(format!("上限 {}", kit::format_bytes(limit as i64)));
+        notes.push(format!("{} {}", kit::tr("limit", "上限"), kit::format_bytes(limit as i64)));
     }
     if !notes.is_empty() {
-        text.push_str(&format!("（{}）", notes.join(" · ")));
+        if kit::is_zh() {
+            text.push_str(&format!("（{}）", notes.join(" · ")));
+        } else {
+            text.push_str(&format!(" ({})", notes.join(" · ")));
+        }
     }
     text
 }
 
 fn report(name: &str, origin: &str, s: &Status, booted: Duration) -> String {
-    let row = |label: &str, value: &str| format!("• {label}：{value}");
+    let zh = kit::is_zh();
+    let row = |label: &str, value: &str| {
+        if zh {
+            format!("• {label}：{value}")
+        } else {
+            format!("• {label}: {value}")
+        }
+    };
     let id = s.get("Id").map(String::as_str).unwrap_or("");
-    let mut title = format!("⚙️ <b>服务状态</b>\n{}", code(kit::or_default(id, name)));
+    let mut title = format!(
+        "⚙️ <b>{}</b>\n{}",
+        kit::tr("Service Status", "服务状态"),
+        code(kit::or_default(id, name))
+    );
     if !origin.is_empty() {
-        title.push_str(&format!("（{origin}）"));
+        if zh {
+            title.push_str(&format!("（{origin}）"));
+        } else {
+            title.push_str(&format!(" ({origin})"));
+        }
     }
     if let Some(desc) = s.get("Description") {
         let trimmed = desc.trim();
@@ -212,21 +244,33 @@ fn report(name: &str, origin: &str, s: &Status, booted: Duration) -> String {
     let sub = s.get("SubState").map(String::as_str).unwrap_or("");
     let mut state = translate_active(active).to_owned();
     if !sub.is_empty() && translate_sub(sub) != state {
-        state.push_str(&format!("（{}）", translate_sub(sub)));
+        if zh {
+            state.push_str(&format!("（{}）", translate_sub(sub)));
+        } else {
+            state.push_str(&format!(" ({})", translate_sub(sub)));
+        }
     }
-    let mut rows = vec![row("状态", &escape(&state))];
+    let mut rows = vec![row(kit::tr("State", "状态"), &escape(&state))];
     let res_str = s.get("Result").map(String::as_str).unwrap_or("");
     if active == "failed" || (active == "inactive" && !res_str.is_empty() && res_str != "success") {
-        let mut detail = code(kit::or_default(res_str, "未知"));
+        let mut detail = code(kit::or_default(res_str, kit::tr("unknown", "未知")));
         if let Some(exit_code) = number(s, "ExecMainStatus")
             && exit_code != 0
         {
-            match s.get("ExecMainCode").map(String::as_str).unwrap_or("") {
-                "2" | "3" => detail.push_str(&format!("（信号 {exit_code}）")),
-                _ => detail.push_str(&format!("（退出码 {exit_code}）")),
+            let code_type = s.get("ExecMainCode").map(String::as_str).unwrap_or("");
+            if zh {
+                match code_type {
+                    "2" | "3" => detail.push_str(&format!("（信号 {exit_code}）")),
+                    _ => detail.push_str(&format!("（退出码 {exit_code}）")),
+                }
+            } else {
+                match code_type {
+                    "2" | "3" => detail.push_str(&format!(" (signal {exit_code})")),
+                    _ => detail.push_str(&format!(" (exit code {exit_code})")),
+                }
             }
         }
-        rows.push(row("上次结果", &detail));
+        rows.push(row(kit::tr("Last result", "上次结果"), &detail));
     }
     let running = matches!(active, "active" | "reloading" | "deactivating");
     let mut alive: Option<Duration> = None;
@@ -238,24 +282,24 @@ fn report(name: &str, origin: &str, s: &Status, booted: Duration) -> String {
         let entered_dur = Duration::from_micros(entered);
         if let Some(val) = booted.checked_sub(entered_dur) {
             alive = Some(val);
-            rows.push(row("运行时间", &code(&format_uptime(val))));
+            rows.push(row(kit::tr("Uptime", "运行时间"), &code(&format_uptime(val))));
         }
     }
     if let Some(pid) = number(s, "MainPID")
         && pid > 0
     {
-        rows.push(row("主进程 PID", &code(&pid.to_string())));
+        rows.push(row(kit::tr("Main PID", "主进程 PID"), &code(&pid.to_string())));
     }
     if let Some(current) = number(s, "TasksCurrent") {
         let mut val = current.to_string();
         if let Some(limit) = number(s, "TasksMax") {
             val.push_str(&format!(" / {limit}"));
         }
-        rows.push(row("任务数", &code(&val)));
+        rows.push(row(kit::tr("Tasks", "任务数"), &code(&val)));
     }
     let memory = memory_text(s);
     if !memory.is_empty() {
-        rows.push(row("内存", &memory));
+        rows.push(row(kit::tr("Memory", "内存"), &memory));
     }
     if let Some(cpu_ns) = number(s, "CPUUsageNSec") {
         let mut val = code(&format_uptime(Duration::from_nanos(cpu_ns)));
@@ -263,17 +307,26 @@ fn report(name: &str, origin: &str, s: &Status, booted: Duration) -> String {
             && !al.is_zero()
         {
             let pct = (cpu_ns as f64) / (al.as_nanos() as f64) * 100.0;
-            val.push_str(&format!("（平均 {pct:.1}%）"));
+            if zh {
+                val.push_str(&format!("（平均 {pct:.1}%）"));
+            } else {
+                val.push_str(&format!(" (avg {pct:.1}%)"));
+            }
         }
-        rows.push(row("CPU 时间", &val));
+        rows.push(row(kit::tr("CPU time", "CPU 时间"), &val));
     }
     if let Some(restarts) = number(s, "NRestarts") {
-        rows.push(row("自动重启", &code(&format!("{restarts} 次"))));
+        let count = if zh {
+            format!("{restarts} 次")
+        } else {
+            restarts.to_string()
+        };
+        rows.push(row(kit::tr("Restarts", "自动重启"), &code(&count)));
     }
     if let Some(file) = s.get("UnitFileState")
         && !file.is_empty()
     {
-        rows.push(row("开机启动", &escape(translate_file(file))));
+        rows.push(row(kit::tr("Autostart", "开机启动"), &escape(translate_file(file))));
     }
     format!("{title}\n\n{}", rows.join("\n"))
 }
@@ -482,11 +535,11 @@ fn detect(a: &App) -> (String, &'static str) {
     if let Ok(content) = std::fs::read_to_string("/proc/self/cgroup")
         && let Some(name) = cgroup_unit(&content)
     {
-        return (name, "当前进程");
+        return (name, kit::tr("current process", "当前进程"));
     }
     let name = unit_name(a.env.get("MIBOT_SERVICE", "mibot-lite.service"))
         .unwrap_or_else(|| "mibot-lite.service".to_owned());
-    (name, "默认")
+    (name, kit::tr("default", "默认"))
 }
 
 fn host_uptime() -> Duration {
@@ -515,30 +568,53 @@ fn inspect_with<F, Fut>(
     let raw = match output {
         Ok(out) => out,
         Err(SysctlErr::NoSystemctl) => {
-            return Err(kit::fail_err("主机上没有 systemctl，查不了服务状态"));
+            return Err(kit::fail_err(kit::tr(
+                "systemctl is not available on this host",
+                "主机上没有 systemctl，查不了服务状态",
+            )));
         }
         Err(SysctlErr::Timeout) => {
-            return Err(kit::fail_err("systemctl 没有应答，稍后再试"));
+            return Err(kit::fail_err(kit::tr(
+                "systemctl did not respond, please try again later",
+                "systemctl 没有应答，稍后再试",
+            )));
         }
         Err(SysctlErr::Failed(msg)) if no_systemd(&msg) => {
-            return Err(kit::fail_err("连不上 systemd，主机可能没有用 systemd 管理服务"));
+            return Err(kit::fail_err(kit::tr(
+                "Cannot connect to systemd; host may not use systemd",
+                "连不上 systemd，主机可能没有用 systemd 管理服务",
+            )));
         }
         Err(e) => {
-            return Err(kit::fail_with_err("读取服务状态失败", e));
+            return Err(kit::fail_with_err(
+                kit::tr("Failed to read service status", "读取服务状态失败"),
+                e,
+            ));
         }
     };
     let s = parse_show(&raw);
     match s.get("LoadState").map(String::as_str).unwrap_or("") {
         "not-found" => {
             if !origin.is_empty() {
-                Err(kit::fail_err(format!(
-                    "没有叫 {name} 的服务，用 {prefix}service 服务名 指定"
-                )))
+                let msg = if kit::is_zh() {
+                    format!("没有叫 {name} 的服务，用 {prefix}service 服务名 指定")
+                } else {
+                    format!("No service named {name}; specify one with {prefix}service <name>")
+                };
+                Err(kit::fail_err(msg))
             } else {
-                Err(kit::fail_err(format!("没有叫 {name} 的服务")))
+                let msg = if kit::is_zh() {
+                    format!("没有叫 {name} 的服务")
+                } else {
+                    format!("No service named {name}")
+                };
+                Err(kit::fail_err(msg))
             }
         }
-        "" => Err(kit::fail_err("systemctl 没有返回服务状态")),
+        "" => Err(kit::fail_err(kit::tr(
+            "systemctl returned no service status",
+            "systemctl 没有返回服务状态",
+        ))),
         _ => Ok(report(name, origin, &s, booted)),
     }
 }
@@ -693,7 +769,10 @@ async fn inspect_openrc(
     origin: &str,
 ) -> mibot_command::CmdResult<String> {
     let Some(bin_path) = rc_service_path() else {
-        return Err(kit::fail_err("主机上没有 rc-service 或 systemctl，查不了服务状态"));
+        return Err(kit::fail_err(kit::tr(
+            "Neither rc-service nor systemctl found on this host",
+            "主机上没有 rc-service 或 systemctl，查不了服务状态",
+        )));
     };
     let init_exists = Path::new("/etc/init.d").join(name).exists();
     if !init_exists {
@@ -704,12 +783,25 @@ async fn inspect_openrc(
     let args = vec![name.to_owned(), "status".into()];
     let (status, out_s, err_s) = match run_cmd_limited(cancel, bin_path, &args).await {
         Ok(res) => res,
-        Err(SysctlErr::Timeout) => return Err(kit::fail_err("rc-service 没有应答，稍后再试")),
-        Err(e) => return Err(kit::fail_with_err("读取服务状态失败", e)),
+        Err(SysctlErr::Timeout) => {
+            return Err(kit::fail_err(kit::tr(
+                "rc-service did not respond, please try again later",
+                "rc-service 没有应答，稍后再试",
+            )));
+        }
+        Err(e) => {
+            return Err(kit::fail_with_err(
+                kit::tr("Failed to read service status", "读取服务状态失败"),
+                e,
+            ));
+        }
     };
     let combined = format!("{out_s}\n{err_s}");
     if !status.success() && !combined.contains("status:") && !combined.contains("does not exist") {
-        return Err(kit::fail_err("读取服务状态失败"));
+        return Err(kit::fail_err(kit::tr(
+            "Failed to read service status",
+            "读取服务状态失败",
+        )));
     }
     let enabled = Path::new("/etc/runlevels/default").join(name).exists();
     let proc_info = openrc_proc_metrics(name);
@@ -725,20 +817,29 @@ fn detect_openrc(a: &App) -> (String, &'static str) {
     if let Ok(svc) = std::env::var("RC_SVCNAME")
         && let Some(clean) = openrc_service_name(svc.trim())
     {
-        return (clean, "当前进程");
+        return (clean, kit::tr("current process", "当前进程"));
     }
     let raw = a.env.get("MIBOT_SERVICE", "mibot-lite.service");
     let clean = openrc_service_name(raw).unwrap_or_else(|| "mibot-lite".to_owned());
-    (clean, "默认")
+    (clean, kit::tr("default", "默认"))
 }
 
 fn help(prefix: &str) -> String {
     let p = escape(prefix);
+    if kit::is_zh() {
+        return format!(
+            "⚙️ <b>服务状态</b>\n\n查看系统服务（systemd / OpenRC）的运行状态、运行时间、内存和 CPU。\n\n\
+             • <code>{p}service</code> 查看本程序所在的服务\n\
+             • <code>{p}service 服务名</code> 查看指定服务，如 {}\n\n\
+             systemd 下不写后缀时按 .service 查，也可查 .timer、.socket 等；OpenRC 下会自动匹配 /etc/init.d/ 服务名。",
+            code(&format!("{prefix}service ssh"))
+        );
+    }
     format!(
-        "⚙️ <b>服务状态</b>\n\n查看系统服务（systemd / OpenRC）的运行状态、运行时间、内存和 CPU。\n\n\
-         • <code>{p}service</code> 查看本程序所在的服务\n\
-         • <code>{p}service 服务名</code> 查看指定服务，如 {}\n\n\
-         systemd 下不写后缀时按 .service 查，也可查 .timer、.socket 等；OpenRC 下会自动匹配 /etc/init.d/ 服务名。",
+        "⚙️ <b>Service Status</b>\n\nCheck status, uptime, memory, and CPU of a system service (systemd / OpenRC).\n\n\
+         • <code>{p}service</code> Check the service running this bot\n\
+         • <code>{p}service name</code> Check a specific service, e.g. {}\n\n\
+         On systemd, .service is assumed if omitted; .timer, .socket, etc. also work. On OpenRC, matches /etc/init.d/ service names.",
         code(&format!("{prefix}service ssh"))
     )
 }
@@ -749,46 +850,62 @@ pub fn register(a: &Arc<App>) {
         "service",
         &[],
         group::SYSTEM,
-        "查看系统服务状态",
-        "[服务名]",
+        "Check system service status",
+        "[service]",
         help,
         move |inv: Invocation| {
             let app = Arc::clone(&app);
             Box::pin(async move {
                 if inv.args.len() > 1 {
-                    return Err(kit::usage(inv.prefix(), "service [服务名]"));
+                    return Err(kit::usage(
+                        inv.prefix(),
+                        kit::tr("service [name]", "service [服务名]"),
+                    ));
                 }
                 if detect_init_system() == Some(InitSystem::OpenRc) {
                     let (name, origin) = if !inv.arg(0).is_empty() {
                         let Some(checked) = openrc_service_name(inv.arg(0)) else {
-                            return Err(kit::fail_err("服务名只能有字母、数字和 - _ . @"));
+                            return Err(kit::fail_err(kit::tr(
+                                "Service name may only contain letters, digits, and - _ . @",
+                                "服务名只能有字母、数字和 - _ . @",
+                            )));
                         };
                         (checked, "")
                     } else {
                         detect_openrc(&app)
                     };
-                    inv.edit_text(&kit::working(&format!("正在查询 {name}")))
-                        .await?;
+                    inv.edit_text(&kit::working(&format!(
+                        "{}{name}",
+                        kit::tr("Checking ", "正在查询 ")
+                    )))
+                    .await?;
                     let text = inspect_openrc(&inv.cancel, inv.prefix(), &name, origin).await?;
                     return inv.edit(&text).await.map_err(Into::into);
                 }
                 let (name, origin) = if !inv.arg(0).is_empty() {
                     let Some(checked) = unit_name(inv.arg(0)) else {
-                        return Err(kit::fail_err("服务名只能有字母、数字和 - _ . @ :"));
+                        return Err(kit::fail_err(kit::tr(
+                            "Service name may only contain letters, digits, and - _ . @ :",
+                            "服务名只能有字母、数字和 - _ . @ :",
+                        )));
                     };
                     (checked, "")
                 } else {
                     detect(&app)
                 };
-                inv.edit_text(&kit::working(&format!("正在查询 {name}")))
-                    .await?;
+                inv.edit_text(&kit::working(&format!(
+                    "{}{name}",
+                    kit::tr("Checking ", "正在查询 ")
+                )))
+                .await?;
                 let args = show_args(&name);
                 let out = run_systemctl(&inv.cancel, &args).await;
                 let text = inspect_with::<(), ()>(inv.prefix(), &name, origin, host_uptime(), out)?;
                 inv.edit(&text).await.map_err(Into::into)
             })
         },
-    );
+    )
+    .zh("查看系统服务状态", "[服务名]");
     cmd.timeout = Some(Duration::from_secs(60));
     a.registry.register(cmd);
 }
@@ -879,22 +996,29 @@ Unknown=value
 
     #[test]
     fn test_report_running() {
-        let text = report("mibot-lite.service", "当前进程", &parse_show(RUNNING), Duration::from_secs(7200));
+        let text = report("mibot-lite.service", "current process", &parse_show(RUNNING), Duration::from_secs(7200));
         for wanted in [
-            "⚙️ <b>服务状态</b>\n<code>mibot-lite.service</code>（当前进程）\nMiBot Lite",
-            "• 状态：活跃（运行中）",
-            "• 运行时间：<code>01:00:00</code>",
-            "• 主进程 PID：<code>4242</code>",
-            "• 任务数：<code>12 / 4915</code>",
-            "• 内存：<code>30.0 MB</code>（峰值 45.0 MB · 上限 512.0 MB）",
-            "• CPU 时间：<code>00:00:36</code>（平均 1.0%）",
-            "• 自动重启：<code>2 次</code>",
-            "• 开机启动：开启",
+            "⚙️ <b>Service Status</b>\n<code>mibot-lite.service</code> (current process)\nMiBot Lite",
+            "• State: active (running)",
+            "• Uptime: <code>01:00:00</code>",
+            "• Main PID: <code>4242</code>",
+            "• Tasks: <code>12 / 4915</code>",
+            "• Memory: <code>30.0 MB</code> (peak 45.0 MB · limit 512.0 MB)",
+            "• CPU time: <code>00:00:36</code> (avg 1.0%)",
+            "• Restarts: <code>2</code>",
+            "• Autostart: enabled",
         ] {
             assert!(text.contains(wanted), "missing {wanted} in:\n{text}");
         }
-        assert!(!text.contains("限流线") && !text.contains("上次结果"));
+        assert!(!text.contains("high") && !text.contains("Last result"));
         parse_html(&text, None).unwrap();
+
+        mibot_i18n::with_lang(mibot_i18n::Lang::Zh, || {
+            let zh = report("mibot-lite.service", "当前进程", &parse_show(RUNNING), Duration::from_secs(7200));
+            assert!(zh.contains("⚙️ <b>服务状态</b>\n<code>mibot-lite.service</code>（当前进程）"));
+            assert!(zh.contains("• 状态：活跃（运行中）"));
+            assert!(zh.contains("• 内存：<code>30.0 MB</code>（峰值 45.0 MB · 上限 512.0 MB）"));
+        });
     }
 
     #[test]
@@ -906,13 +1030,13 @@ Unknown=value
         );
         let text = report("x.service", "", &failed, Duration::from_secs(3600));
         for wanted in [
-            "• 状态：失败",
-            "• 上次结果：<code>exit-code</code>（退出码 1）",
-            "• 开机启动：关闭",
+            "• State: failed",
+            "• Last result: <code>exit-code</code> (exit code 1)",
+            "• Autostart: disabled",
         ] {
             assert!(text.contains(wanted), "missing {wanted} in:\n{text}");
         }
-        for unwanted in ["/srv", "运行时间", "PID", "内存", "CPU", "任务数"] {
+        for unwanted in ["/srv", "Uptime", "PID", "Memory", "CPU", "Tasks"] {
             assert!(!text.contains(unwanted), "unexpected {unwanted} in:\n{text}");
         }
         let killed = report(
@@ -921,31 +1045,31 @@ Unknown=value
             &parse_show("Id=k.service\nLoadState=loaded\nActiveState=failed\nSubState=failed\nResult=signal\nExecMainCode=2\nExecMainStatus=9\n"),
             Duration::from_secs(3600),
         );
-        assert!(killed.contains("<code>signal</code>（信号 9）"));
+        assert!(killed.contains("<code>signal</code> (signal 9)"));
         let dead = report(
             "y.service",
             "",
             &parse_show("Id=y.service\nLoadState=loaded\nActiveState=inactive\nSubState=dead\nResult=success\nUnitFileState=static\n"),
             Duration::from_secs(3600),
         );
-        assert!(dead.contains("• 状态：未运行（已停止）") && !dead.contains("上次结果") && dead.contains("静态"));
+        assert!(dead.contains("• State: inactive (dead)") && !dead.contains("Last result") && dead.contains("static"));
         let odd = report("z.service", "", &parse_show(RUNNING), Duration::from_secs(1800));
-        assert!(!odd.contains("运行时间") && !odd.contains("平均"));
+        assert!(!odd.contains("Uptime") && !odd.contains("avg"));
     }
 
     #[test]
     fn test_inspect_errors_and_limited_buf() {
-        let ok = inspect_with::<(), ()>(".", "mibot-lite.service", "当前进程", Duration::from_secs(7200), Ok(RUNNING.into())).unwrap();
-        assert!(ok.contains("运行时间：<code>01:00:00</code>"));
+        let ok = inspect_with::<(), ()>(".", "mibot-lite.service", "current process", Duration::from_secs(7200), Ok(RUNNING.into())).unwrap();
+        assert!(ok.contains("Uptime: <code>01:00:00</code>"));
 
         for (out, origin, want) in [
-            (Ok("Id=nope.service\nLoadState=not-found\nActiveState=inactive\n".into()), "", "没有叫 nope.service 的服务"),
-            (Ok("Id=nope.service\nLoadState=not-found\n".into()), "默认", ".service 服务名 指定"),
-            (Err(SysctlErr::NoSystemctl), "", "没有 systemctl"),
-            (Err(SysctlErr::Timeout), "", "没有应答"),
-            (Err(SysctlErr::Failed("exit 1: System has not been booted with systemd as init system (PID 1).".into())), "", "连不上 systemd"),
-            (Err(SysctlErr::Failed("exit 1: Access denied at /run/x".into())), "", "读取服务状态失败"),
-            (Ok("garbage".into()), "", "没有返回服务状态"),
+            (Ok("Id=nope.service\nLoadState=not-found\nActiveState=inactive\n".into()), "", "No service named nope.service"),
+            (Ok("Id=nope.service\nLoadState=not-found\n".into()), "default", ".service <name>"),
+            (Err(SysctlErr::NoSystemctl), "", "systemctl is not available"),
+            (Err(SysctlErr::Timeout), "", "did not respond"),
+            (Err(SysctlErr::Failed("exit 1: System has not been booted with systemd as init system (PID 1).".into())), "", "Cannot connect to systemd"),
+            (Err(SysctlErr::Failed("exit 1: Access denied at /run/x".into())), "", "Failed to read service status"),
+            (Ok("garbage".into()), "", "returned no service status"),
         ] {
             let err = inspect_with::<(), ()>(".", "nope.service", origin, Duration::from_secs(7200), out).unwrap_err();
             let msg = mibot_command::brief(err.as_ref());
@@ -977,12 +1101,12 @@ Unknown=value
         assert_eq!(proc_info.threads, Some(6));
 
         let st = build_openrc_status("mibot-lite", " * status: started\n", true, true, Some(proc_info));
-        let txt = report("mibot-lite", "默认", &st, Duration::from_secs(7200));
-        assert!(txt.contains("<code>mibot-lite</code>（默认）"));
-        assert!(txt.contains("• 状态：活跃（运行中）"));
-        assert!(txt.contains("• 主进程 PID：<code>2142</code>"));
-        assert!(txt.contains("• 内存：<code>28.0 MB</code>"));
-        assert!(txt.contains("• 开机启动：开启"));
+        let txt = report("mibot-lite", "default", &st, Duration::from_secs(7200));
+        assert!(txt.contains("<code>mibot-lite</code> (default)"));
+        assert!(txt.contains("• State: active (running)"));
+        assert!(txt.contains("• Main PID: <code>2142</code>"));
+        assert!(txt.contains("• Memory: <code>28.0 MB</code>"));
+        assert!(txt.contains("• Autostart: enabled"));
 
         let missing = build_openrc_status("nope", "", false, false, None);
         assert_eq!(missing.get("LoadState").map(String::as_str), Some("not-found"));

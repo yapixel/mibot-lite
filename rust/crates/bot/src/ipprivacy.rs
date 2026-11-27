@@ -10,7 +10,7 @@ use thiserror::Error;
 use url::Url;
 
 #[derive(Debug, Error)]
-#[error("IP 显示设置无效：IPv4 1–4 段，IPv6 1–8 段")]
+#[error("invalid IP privacy policy: IPv4 segments 1–4, IPv6 segments 1–8")]
 pub struct InvalidIpPolicyError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,7 +188,7 @@ fn ip_replacements(text: &str, policy: &IpPolicy) -> Vec<IpReplacement> {
 
 fn masked_address(address: &str, version: u8, policy: &IpPolicy) -> String {
     if policy.mode == "hide" {
-        return "[IP已隐藏]".into();
+        return mibot_i18n::tr("[IP hidden]", "[IP已隐藏]").into();
     }
     let (mut parts, sep, count) = if version == 6 {
         (ipv6_groups(address), ":", usize::from(policy.ipv6_segments))
@@ -837,7 +837,10 @@ mod tests {
             ipv4_segments: 2,
             ipv6_segments: 4,
         };
-        assert_eq!(mask_ips_with("a 1.2.3.4 b", &hide), "a [IP已隐藏] b");
+        assert_eq!(mask_ips_with("a 1.2.3.4 b", &hide), "a [IP hidden] b");
+        mibot_i18n::with_lang(mibot_i18n::Lang::Zh, || {
+            assert_eq!(mask_ips_with("a 1.2.3.4 b", &hide), "a [IP已隐藏] b");
+        });
 
         let full = IpPolicy {
             mode: "mask".into(),

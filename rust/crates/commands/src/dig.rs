@@ -19,8 +19,14 @@ use tokio_util::sync::CancellationToken;
 const RUN_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_OUTPUT: usize = 32 << 10;
 const MAX_STDERR: usize = 4 << 10;
-const BATCH_API: &str = "http://ip-api.com/batch?fields=status,country,regionName,city,as,query&lang=zh-CN";
 const MAX_LOOKUPS: usize = 50;
+
+fn batch_api_url() -> String {
+    format!(
+        "http://ip-api.com/batch?fields=status,country,regionName,city,as,query&lang={}",
+        kit::tr("en", "zh-CN")
+    )
+}
 
 const RECORD_TYPES: &[&str] = &["A", "AAAA", "MX", "CNAME", "TXT", "NS", "SOA", "PTR", "SRV", "CAA"];
 const OUTPUT_FLAGS: &[&str] = &["+short", "+noall", "+answer", "+stats", "+comments", "+tcp"];
@@ -189,13 +195,14 @@ fn borrowed_server_allowed(server: &str) -> bool {
 }
 
 fn ascii_domain(value: &str) -> Result<String, CmdError> {
+    let bad = || kit::tr("Invalid domain format", "域名格式无效");
     let name = if value.is_ascii() {
         value.to_owned()
     } else {
-        idna::domain_to_ascii(value).map_err(|_| kit::fail("域名格式无效"))?
+        idna::domain_to_ascii(value).map_err(|_| kit::fail(bad()))?
     };
     if name.len() > 253 || !domain_re().is_match(&name) {
-        return Err(kit::fail("域名格式无效"));
+        return Err(kit::fail(bad()));
     }
     Ok(name)
 }
@@ -212,10 +219,11 @@ fn parse_args(input: &[String]) -> Result<Query, CmdError> {
         if value.starts_with('+') {
             let flag = value.to_ascii_lowercase();
             if !OUTPUT_FLAGS.contains(&flag.as_str()) {
-                return Err(kit::fail(format!(
-                    "不支持的选项 {value}，只能用 {}",
-                    OUTPUT_FLAGS.join(" ")
-                )));
+                return Err(kit::fail(if kit::is_zh() {
+                    format!("不支持的选项 {value}，只能用 {}", OUTPUT_FLAGS.join(" "))
+                } else {
+                    format!("Unsupported option {value}; allowed: {}", OUTPUT_FLAGS.join(" "))
+                }));
             }
             if !flags.contains(&flag) {
                 flags.push(flag);
@@ -227,13 +235,19 @@ fn parse_args(input: &[String]) -> Result<Query, CmdError> {
         }
     }
     if servers.len() > 1 {
-        return Err(kit::fail("只能指定一个 DNS 服务器"));
+        return Err(kit::fail(kit::tr(
+            "Only one DNS server can be specified",
+            "只能指定一个 DNS 服务器",
+        )));
     }
     if rest.is_empty() {
-        return Err(kit::fail("请写上要查的域名"));
+        return Err(kit::fail(kit::tr(
+            "Please enter a domain or IP to query",
+            "请写上要查的域名",
+        )));
     }
     if rest.len() > 3 || (servers.len() == 1 && rest.len() > 2) {
-        return Err(kit::fail("参数过多"));
+        return Err(kit::fail(kit::tr("Too many arguments", "参数过多")));
     }
     let mut q = Query {
         name: String::new(),
@@ -245,16 +259,19 @@ fn parse_args(input: &[String]) -> Result<Query, CmdError> {
     if rest.len() > 1 {
         q.kind = rest[1].to_ascii_uppercase();
         if !RECORD_TYPES.contains(&q.kind.as_str()) {
-            return Err(kit::fail(format!(
-                "不支持的记录类型 {}，可用 {}",
-                rest[1],
-                RECORD_TYPES.join(" ")
-            )));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("不支持的记录类型 {}，可用 {}", rest[1], RECORD_TYPES.join(" "))
+            } else {
+                format!("Unsupported record type {}; allowed: {}", rest[1], RECORD_TYPES.join(" "))
+            }));
         }
     }
     if let Some(ip) = parse_ip(&rest[0]) {
         if rest.len() > 1 && q.kind != "PTR" {
-            return Err(kit::fail("IP 只能反查 PTR 记录"));
+            return Err(kit::fail(kit::tr(
+                "IP addresses only support PTR reverse lookup",
+                "IP 只能反查 PTR 记录",
+            )));
         }
         q.name = ip;
         q.kind = "PTR".into();
@@ -265,13 +282,19 @@ fn parse_args(input: &[String]) -> Result<Query, CmdError> {
     if servers.len() == 1 {
         q.server = servers.remove(0);
         if q.server.is_empty() {
-            return Err(kit::fail("DNS 服务器格式无效"));
+            return Err(kit::fail(kit::tr(
+                "Invalid DNS server format",
+                "DNS 服务器格式无效",
+            )));
         }
     } else if rest.len() == 3 {
         q.server = rest.remove(2);
     }
     if !q.server.is_empty() && !valid_server(&q.server) {
-        return Err(kit::fail("DNS 服务器格式无效，写 IP 或主机名"));
+        return Err(kit::fail(kit::tr(
+            "Invalid DNS server format; use an IP or hostname",
+            "DNS 服务器格式无效，写 IP 或主机名",
+        )));
     }
     Ok(q)
 }
@@ -407,15 +430,27 @@ async fn run_dig(cancel: &CancellationToken, args: &[String]) -> Result<(Vec<u8>
 
 fn explain(err: DigRunError) -> CmdError {
     match err {
-        DigRunError::NoDig => kit::fail("主机上没有 dig，装上 dnsutils（Debian/Ubuntu）或 bind-utils 后再试"),
-        DigRunError::Timeout => kit::fail("查询超时，稍后再试或换一个 DNS 服务器"),
-        DigRunError::Exit { code: Some(9), .. } => kit::fail("DNS 服务器没有应答，稍后再试或换一个服务器"),
+        DigRunError::NoDig => kit::fail(kit::tr(
+            "dig not found; install dnsutils (Debian/Ubuntu) or bind-utils",
+            "主机上没有 dig，装上 dnsutils（Debian/Ubuntu）或 bind-utils 后再试",
+        )),
+        DigRunError::Timeout => kit::fail(kit::tr(
+            "Query timed out; try again or use another DNS server",
+            "查询超时，稍后再试或换一个 DNS 服务器",
+        )),
+        DigRunError::Exit { code: Some(9), .. } => kit::fail(kit::tr(
+            "No response from DNS server; try again or use another server",
+            "DNS 服务器没有应答，稍后再试或换一个服务器",
+        )),
         DigRunError::Exit { ref stderr, ref stdout, .. }
             if stderr.contains("couldn't get address") || stdout.contains("couldn't get address") =>
         {
-            kit::fail("解析不了指定的 DNS 服务器")
+            kit::fail(kit::tr(
+                "Cannot resolve the specified DNS server",
+                "解析不了指定的 DNS 服务器",
+            ))
         }
-        other => kit::fail_with("DNS 查询失败", other),
+        other => kit::fail_with(kit::tr("DNS query failed", "DNS 查询失败"), other),
     }
 }
 
@@ -569,17 +604,25 @@ fn annotate(output: &str, locations: &HashMap<String, String>) -> String {
 }
 
 fn render(q: &Query, output: &str, locations: &HashMap<String, String>, truncated: bool) -> String {
-    let mut head = format!("🧭 <b>DNS 查询</b>\n{} · {}", code(&q.name), code(&q.kind));
+    let mut head = format!(
+        "{}\n{} · {}",
+        kit::tr("🧭 <b>DNS Lookup</b>", "🧭 <b>DNS 查询</b>"),
+        code(&q.name),
+        code(&q.kind)
+    );
     if !q.server.is_empty() {
         head.push_str(&format!(" · {}", code(&format!("@{}", q.server))));
     }
     if output.is_empty() {
-        return format!("{head}\n\n没有记录");
+        return format!("{head}\n\n{}", kit::tr("No records found", "没有记录"));
     }
     let body = escape(&annotate(output, locations));
     let mut text = format!("{head}\n\n<pre>{body}</pre>");
     if truncated {
-        text.push_str("\n⚠️ 输出超过 32 KB，后面的省略了");
+        text.push_str(kit::tr(
+            "\n⚠️ Output exceeded 32 KB and was truncated",
+            "\n⚠️ 输出超过 32 KB，后面的省略了",
+        ));
     }
     text
 }
@@ -587,27 +630,51 @@ fn render(q: &Query, output: &str, locations: &HashMap<String, String>, truncate
 fn help(prefix: &str) -> String {
     let p = escape(prefix);
     let c = |text: &str| format!("<code>{p}{text}</code>");
-    format!(
-        "🧭 <b>DNS 查询</b>\n\n用主机上的 dig 查 DNS 记录，结果里的 IP 附上归属地和 AS 号。\n\n\
-         • {} 查 A 记录\n\
-         • {} 指定记录类型\n\
-         • {} 指定 DNS 服务器，也可以写成第三个参数\n\
-         • {} 指定输出选项\n\
-         • {} 反查 IP 的 PTR 记录\n\n\
-         <b>参数</b>\n\
-         • 记录类型：{}\n\
-         • 输出选项：{}，默认 {}\n\
-         • DNS 服务器写 IP 或主机名；借用时只能写公网 IP\n\n\
-         归属地来自 ip-api.com。主机上要装有 dig（dnsutils 或 bind-utils）。",
-        c("dig example.com"),
-        c("dig example.com MX"),
-        c("dig example.com MX @1.1.1.1"),
-        c("dig example.com MX +noall +answer"),
-        c("dig 8.8.8.8"),
-        RECORD_TYPES.join("、"),
-        code(&OUTPUT_FLAGS.join(" ")),
-        code("+short"),
-    )
+    if kit::is_zh() {
+        format!(
+            "🧭 <b>DNS 查询</b>\n\n用主机上的 dig 查 DNS 记录，结果里的 IP 附上归属地和 AS 号。\n\n\
+             • {} 查 A 记录\n\
+             • {} 指定记录类型\n\
+             • {} 指定 DNS 服务器，也可以写成第三个参数\n\
+             • {} 指定输出选项\n\
+             • {} 反查 IP 的 PTR 记录\n\n\
+             <b>参数</b>\n\
+             • 记录类型：{}\n\
+             • 输出选项：{}，默认 {}\n\
+             • DNS 服务器写 IP 或主机名；借用时只能写公网 IP\n\n\
+             归属地来自 ip-api.com。主机上要装有 dig（dnsutils 或 bind-utils）。",
+            c("dig example.com"),
+            c("dig example.com MX"),
+            c("dig example.com MX @1.1.1.1"),
+            c("dig example.com MX +noall +answer"),
+            c("dig 8.8.8.8"),
+            RECORD_TYPES.join("、"),
+            code(&OUTPUT_FLAGS.join(" ")),
+            code("+short"),
+        )
+    } else {
+        format!(
+            "🧭 <b>DNS Lookup</b>\n\nQuery DNS records using host dig and annotate IPs with geolocation and ASN.\n\n\
+             • {} Query A record\n\
+             • {} Specify record type\n\
+             • {} Specify DNS server (or pass as 3rd argument)\n\
+             • {} Specify output flags\n\
+             • {} Reverse PTR lookup for an IP\n\n\
+             <b>Arguments</b>\n\
+             • Record types: {}\n\
+             • Output flags: {}, default {}\n\
+             • DNS server: IP or hostname (public IP only when delegated)\n\n\
+             Geolocation by ip-api.com. Requires dig (dnsutils or bind-utils).",
+            c("dig example.com"),
+            c("dig example.com MX"),
+            c("dig example.com MX @1.1.1.1"),
+            c("dig example.com MX +noall +answer"),
+            c("dig 8.8.8.8"),
+            RECORD_TYPES.join(", "),
+            code(&OUTPUT_FLAGS.join(" ")),
+            code("+short"),
+        )
+    }
 }
 
 type RunnerFn = dyn Fn(&CancellationToken, &[String]) -> BoxFuture<'static, Result<(Vec<u8>, bool), DigRunError>>
@@ -646,34 +713,45 @@ async fn handle(inv: &Invocation, app: &App) -> CmdResult {
     }
     let q = parse_args(&inv.args)?;
     if inv.foreign && !borrowed_server_allowed(&q.server) {
-        return Err(kit::fail("借用时只能用公网 IP 指定 DNS 服务器"));
+        return Err(kit::fail(kit::tr(
+            "Delegated queries can only use a public IP as DNS server",
+            "借用时只能用公网 IP 指定 DNS 服务器",
+        )));
     }
-    inv.edit_text(&kit::working(&format!("正在查询 {}", q.name))).await?;
+    inv.edit_text(&kit::working(&if kit::is_zh() {
+        format!("正在查询 {}", q.name)
+    } else {
+        format!("Querying {}", q.name)
+    }))
+    .await?;
     let runner = |cancel: &CancellationToken, args: &[String]| {
         let cancel = cancel.clone();
         let args = args.to_vec();
         Box::pin(async move { run_dig(&cancel, &args).await }) as BoxFuture<'static, _>
     };
-    let text = lookup_with(&inv.cancel, Some(&app.logs), &q, &runner, BATCH_API).await?;
+    let text = lookup_with(&inv.cancel, Some(&app.logs), &q, &runner, &batch_api_url()).await?;
     inv.respond_pages(&html_pages(&text, PAGE_LIMIT)).await?;
     Ok(())
 }
 
 pub fn register(app: &Arc<App>) {
     let app_ref = Arc::clone(app);
-    app.registry.register(Command {
-        name: "dig".into(),
-        group: group::TOOLS.into(),
-        description: "查询 DNS 记录".into(),
-        usage: "域名 [类型] [@服务器] [+选项…]".into(),
-        help_fn: Some(Arc::new(help)),
-        timeout: Some(Duration::from_secs(60)),
-        handle: Arc::new(move |inv| {
-            let a = Arc::clone(&app_ref);
-            Box::pin(async move { handle(&inv, &a).await })
-        }),
-        ..Default::default()
-    });
+    app.registry.register(
+        Command {
+            name: "dig".into(),
+            group: group::TOOLS.into(),
+            description: "Query DNS records".into(),
+            usage: "domain [type] [@server] [+flags…]".into(),
+            help_fn: Some(Arc::new(help)),
+            timeout: Some(Duration::from_secs(60)),
+            handle: Arc::new(move |inv| {
+                let a = Arc::clone(&app_ref);
+                Box::pin(async move { handle(&inv, &a).await })
+            }),
+            ..Default::default()
+        }
+        .zh("查询 DNS 记录", "域名 [类型] [@服务器] [+选项…]"),
+    );
 }
 
 #[cfg(test)]
@@ -829,13 +907,13 @@ mod tests {
             stderr: "dig: couldn't get address for 'nope.invalid': not found".into(),
             stdout: String::new(),
         });
-        assert!(err.to_string().contains("解析不了"));
+        assert!(err.to_string().contains("Cannot resolve"));
         let err2 = explain(DigRunError::Exit {
             code: Some(9),
             stderr: String::new(),
             stdout: "timed out".into(),
         });
-        assert!(err2.to_string().contains("没有应答"));
+        assert!(err2.to_string().contains("No response"));
         let err3 = explain(DigRunError::Exit {
             code: Some(10),
             stderr: "/usr/lib/x.so: bad".into(),

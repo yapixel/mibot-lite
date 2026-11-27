@@ -26,7 +26,10 @@ pub struct NothingToCopyError;
 
 impl std::fmt::Display for NothingToCopyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("消息里没有能保存的内容")
+        f.write_str(kit::tr(
+            "Message has no saveable content",
+            "消息里没有能保存的内容",
+        ))
     }
 }
 
@@ -38,7 +41,7 @@ pub fn is_nothing_to_copy(err: &(dyn StdError + 'static)) -> bool {
 
 fn err_nothing_to_copy() -> CmdError {
     Box::new(mibot_command::UserError::with_cause(
-        "消息里没有能保存的内容",
+        kit::tr("Message has no saveable content", "消息里没有能保存的内容"),
         NothingToCopyError,
     ))
 }
@@ -171,13 +174,22 @@ fn parse_save_args(args: &[String]) -> Result<SaveRequest, CmdError> {
     for arg in args {
         if let Some((left, right)) = arg.split_once('|') {
             if req.range.is_some() {
-                return Err(kit::fail("一次只能保存一个消息范围"));
+                return Err(kit::fail(kit::tr(
+                    "Only one message range can be saved at a time",
+                    "一次只能保存一个消息范围",
+                )));
             }
             let (Some(mut from), Some(mut to)) = (parse_link(left), parse_link(right)) else {
-                return Err(kit::fail("范围两头都得是消息链接：链接1|链接2"));
+                return Err(kit::fail(kit::tr(
+                    "Both ends of a range must be message links: link1|link2",
+                    "范围两头都得是消息链接：链接1|链接2",
+                )));
             };
             if !from.same_chat(&to) {
-                return Err(kit::fail("范围的两个链接必须在同一个对话里"));
+                return Err(kit::fail(kit::tr(
+                    "Both links in a range must be from the same chat",
+                    "范围的两个链接必须在同一个对话里",
+                )));
             }
             if from.id > to.id {
                 std::mem::swap(&mut from, &mut to);
@@ -194,10 +206,22 @@ fn parse_save_args(args: &[String]) -> Result<SaveRequest, CmdError> {
     match others.len() {
         0 => {}
         1 => req.target = others[0].to_owned(),
-        _ => return Err(kit::fail(format!("看不懂 {}：链接之外只能跟一个目标", others.join(" ")))),
+        _ => {
+            return Err(kit::fail(if kit::is_zh() {
+                format!("看不懂 {}：链接之外只能跟一个目标", others.join(" "))
+            } else {
+                format!(
+                    "Unexpected arguments {}: only one target allowed besides links",
+                    others.join(" ")
+                )
+            }));
+        }
     }
     if req.range.is_some() && !req.links.is_empty() {
-        return Err(kit::fail("范围和单独的链接不能混在一起"));
+        return Err(kit::fail(kit::tr(
+            "Range and individual links cannot be mixed",
+            "范围和单独的链接不能混在一起",
+        )));
     }
     Ok(req)
 }
@@ -212,9 +236,9 @@ fn is_local_target(target: &str) -> bool {
 
 fn describe_target(target: &str) -> String {
     if is_self_target(target) {
-        "收藏夹".into()
+        kit::tr("Saved Messages", "收藏夹").into()
     } else if is_local_target(target) {
-        "主机本地的 save/ 目录".into()
+        kit::tr("host save/ directory", "主机本地的 save/ 目录").into()
     } else {
         target.to_owned()
     }
@@ -279,6 +303,12 @@ impl Saver {
             self.usernames.insert(key, p.clone());
             return Ok(p);
         }
+        let not_member = || {
+            kit::tr(
+                "Chat not found; account must be a member",
+                "找不到这个对话：账号得是它的成员",
+            )
+        };
         match self.client.input_peer_from_chat_id(&link.chat_id) {
             Ok(p) => Ok(p),
             Err(err) if err.is_unaddressable_peer() && !self.learned => {
@@ -286,9 +316,9 @@ impl Saver {
                 learn_dialogs(&self.client).await?;
                 self.client
                     .input_peer_from_chat_id(&link.chat_id)
-                    .map_err(|_| kit::fail("找不到这个对话：账号得是它的成员"))
+                    .map_err(|_| kit::fail(not_member()))
             }
-            Err(_) => Err(kit::fail("找不到这个对话：账号得是它的成员")),
+            Err(_) => Err(kit::fail(not_member())),
         }
     }
 
@@ -296,6 +326,13 @@ impl Saver {
         if is_self_target(target) {
             return Ok(tl::enums::InputPeer::PeerSelf);
         }
+        let not_found = || {
+            if kit::is_zh() {
+                format!("找不到目标 {target}")
+            } else {
+                format!("Target not found: {target}")
+            }
+        };
         match self.client.resolve_target(target).await {
             Ok(p) => Ok(p),
             Err(err) if err.is_unaddressable_peer() && !self.learned => {
@@ -304,9 +341,9 @@ impl Saver {
                 self.client
                     .resolve_target(target)
                     .await
-                    .map_err(|_| kit::fail(format!("找不到目标 {target}")))
+                    .map_err(|_| kit::fail(not_found()))
             }
-            Err(_) => Err(kit::fail(format!("找不到目标 {target}"))),
+            Err(_) => Err(kit::fail(not_found())),
         }
     }
 
@@ -455,7 +492,10 @@ impl Saver {
                         .into(),
                     ))
                 } else {
-                    Err(kit::fail("这种消息在禁止转发的对话里没法复制"))
+                    Err(kit::fail(kit::tr(
+                        "This message type cannot be copied from a forward-restricted chat",
+                        "这种消息在禁止转发的对话里没法复制",
+                    )))
                 }
             }
             tl::enums::MessageMedia::Venue(v) => {
@@ -477,7 +517,10 @@ impl Saver {
                         .into(),
                     ))
                 } else {
-                    Err(kit::fail("这种消息在禁止转发的对话里没法复制"))
+                    Err(kit::fail(kit::tr(
+                        "This message type cannot be copied from a forward-restricted chat",
+                        "这种消息在禁止转发的对话里没法复制",
+                    )))
                 }
             }
             tl::enums::MessageMedia::Contact(c) => Ok(Some(
@@ -524,20 +567,27 @@ impl Saver {
             }
             tl::enums::MessageMedia::Photo(_) | tl::enums::MessageMedia::Document(_) => {
                 let Some(source) = source_of(message) else {
-                    return Err(kit::fail("这条消息的媒体已经不可用"));
+                    return Err(kit::fail(kit::tr(
+                        "Media in this message is no longer available",
+                        "这条消息的媒体已经不可用",
+                    )));
                 };
                 if source.size > SAVE_MAX_BYTES {
-                    return Err(kit::fail(format!(
-                        "文件 {}，超过 Telegram 的上限",
-                        kit::format_bytes(source.size)
-                    )));
+                    return Err(kit::fail(if kit::is_zh() {
+                        format!("文件 {}，超过 Telegram 的上限", kit::format_bytes(source.size))
+                    } else {
+                        format!(
+                            "File is {}, exceeding Telegram's limit",
+                            kit::format_bytes(source.size)
+                        )
+                    }));
                 }
                 if cancel.is_cancelled() {
-                    return Err(kit::fail("操作已取消"));
+                    return Err(kit::fail(kit::tr("Operation cancelled", "操作已取消")));
                 }
                 let path = self.download(&source).await?;
                 let cleanup = TempFileGuard(path.clone());
-                self.progress(&kit::working("正在上传"));
+                self.progress(&kit::working(kit::tr("Uploading", "正在上传")));
                 let bytes = tokio::fs::read(&cleanup.0).await?;
                 let upload_name = if source.file_name.is_empty() {
                     if source.photo { "photo.jpg" } else { "file" }
@@ -576,25 +626,36 @@ impl Saver {
                     ))
                 }
             }
-            _ => Err(kit::fail("这种消息在禁止转发的对话里没法复制")),
+            _ => Err(kit::fail(kit::tr(
+                "This message type cannot be copied from a forward-restricted chat",
+                "这种消息在禁止转发的对话里没法复制",
+            ))),
         }
     }
 
     async fn download(&self, source: &MediaSource) -> Result<PathBuf, CmdError> {
         if source.size > SAVE_MAX_BYTES {
-            return Err(kit::fail(format!(
-                "文件 {}，超过 Telegram 的上限",
-                kit::format_bytes(source.size)
-            )));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("文件 {}，超过 Telegram 的上限", kit::format_bytes(source.size))
+            } else {
+                format!(
+                    "File is {}, exceeding Telegram's limit",
+                    kit::format_bytes(source.size)
+                )
+            }));
         }
         std::fs::create_dir_all(&self.partial)?;
         let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO).as_nanos();
         let part_path = self.partial.join(format!("part-{nanos}"));
         let mut file = File::create(&part_path).await?;
         if source.size > 0 {
-            self.progress(&kit::working(&format!("正在下载 {}", kit::format_bytes(source.size))));
+            self.progress(&kit::working(&if kit::is_zh() {
+                format!("正在下载 {}", kit::format_bytes(source.size))
+            } else {
+                format!("Downloading {}", kit::format_bytes(source.size))
+            }));
         } else {
-            self.progress(&kit::working("正在下载"));
+            self.progress(&kit::working(kit::tr("Downloading", "正在下载")));
         }
         if let Err(err) = self.client.download_to(source, &mut file).await {
             drop(file);
@@ -891,11 +952,19 @@ async fn run_save_jobs(
                     }
                     if !forward_rejected(&err) {
                         index += job.messages.len();
-                        tally.failures.push(format!(
-                            "相册 #{}：没有确认保存，不再重发（{}）",
-                            job.messages[0].id,
-                            brief(&err)
-                        ));
+                        tally.failures.push(if kit::is_zh() {
+                            format!(
+                                "相册 #{}：没有确认保存，不再重发（{}）",
+                                job.messages[0].id,
+                                brief(&err)
+                            )
+                        } else {
+                            format!(
+                                "Album #{}: delivery unconfirmed, not resent ({})",
+                                job.messages[0].id,
+                                brief(&err)
+                            )
+                        });
                         continue;
                     }
                 }
@@ -913,7 +982,11 @@ async fn run_save_jobs(
                     raw: String::new(),
                 };
                 match work.save_local(m, &link).await {
-                    Err(err) => tally.failures.push(format!("#{}：{err}", m.id)),
+                    Err(err) => tally.failures.push(if kit::is_zh() {
+                        format!("#{}：{err}", m.id)
+                    } else {
+                        format!("#{}: {err}", m.id)
+                    }),
                     Ok(None) => tally.skipped += 1,
                     Ok(Some(path)) => {
                         tally.saved += 1;
@@ -927,7 +1000,11 @@ async fn run_save_jobs(
                     if cancel.is_cancelled() {
                         return Err(err);
                     }
-                    tally.failures.push(format!("#{}：{}", m.id, brief(err.as_ref())));
+                    tally.failures.push(if kit::is_zh() {
+                        format!("#{}：{}", m.id, brief(err.as_ref()))
+                    } else {
+                        format!("#{}: {}", m.id, brief(err.as_ref()))
+                    });
                 }
                 Ok(copied) => {
                     tally.saved += 1;
@@ -970,22 +1047,41 @@ fn source_notice(sources: &[SavedSource], is_range: bool) -> String {
     if is_range {
         let first = linked[0];
         let last = linked[linked.len() - 1];
-        return format!(
-            "🔗 <b>范围保存来源</b>\n\n▶️ <b>起始消息</b>\n• {} / {}\n\n⏹ <b>结尾消息</b>\n• {} / {}",
-            bold(&first.title),
-            source_anchor(&first.link),
-            bold(&last.title),
-            source_anchor(&last.link),
-        );
+        return if kit::is_zh() {
+            format!(
+                "🔗 <b>范围保存来源</b>\n\n▶️ <b>起始消息</b>\n• {} / {}\n\n⏹ <b>结尾消息</b>\n• {} / {}",
+                bold(&first.title),
+                source_anchor(&first.link),
+                bold(&last.title),
+                source_anchor(&last.link),
+            )
+        } else {
+            format!(
+                "🔗 <b>Range Save Source</b>\n\n▶️ <b>Start</b>\n• {} / {}\n\n⏹ <b>End</b>\n• {} / {}",
+                bold(&first.title),
+                source_anchor(&first.link),
+                bold(&last.title),
+                source_anchor(&last.link),
+            )
+        };
     }
     if linked.len() == 1 {
         let s = linked[0];
-        return format!(
-            "🔗 <b>消息来源</b>\n\n📝 <a href=\"{}\">查看原消息</a>\n👤 来源对话：{}\n#️⃣ 消息 ID：{}",
-            escape(&s.link.url()),
-            bold(&s.title),
-            code(&s.link.id.to_string()),
-        );
+        return if kit::is_zh() {
+            format!(
+                "🔗 <b>消息来源</b>\n\n📝 <a href=\"{}\">查看原消息</a>\n👤 来源对话：{}\n#️⃣ 消息 ID：{}",
+                escape(&s.link.url()),
+                bold(&s.title),
+                code(&s.link.id.to_string()),
+            )
+        } else {
+            format!(
+                "🔗 <b>Message Source</b>\n\n📝 <a href=\"{}\">View original</a>\n👤 Chat: {}\n#️⃣ Message ID: {}",
+                escape(&s.link.url()),
+                bold(&s.title),
+                code(&s.link.id.to_string()),
+            )
+        };
     }
     struct ChatGroup {
         key: String,
@@ -1028,33 +1124,70 @@ fn source_notice(sources: &[SavedSource], is_range: bool) -> String {
                     parts.push(format!("{}-{}", source_anchor(&start), source_anchor(&end)));
                 }
             }
-            format!("👤 {}（{} 条）：{}", bold(&g.title), count, parts.join(", "))
+            if kit::is_zh() {
+                format!("👤 {}（{} 条）：{}", bold(&g.title), count, parts.join(", "))
+            } else {
+                format!("👤 {} ({} msgs): {}", bold(&g.title), count, parts.join(", "))
+            }
         })
         .collect();
     let mut body = sections.join("\n");
     if body.chars().count() > 350 || sections.len() > 6 {
         body = format!("<blockquote expandable>{body}</blockquote>");
     }
-    format!("🔗 <b>批量保存来源</b>\n\n{body}")
+    if kit::is_zh() {
+        format!("🔗 <b>批量保存来源</b>\n\n{body}")
+    } else {
+        format!("🔗 <b>Batch Save Sources</b>\n\n{body}")
+    }
 }
 
 fn render_save_result(tally: &SaveTally, target: &str, root: &Path) -> String {
-    let mut lines = vec![format!("✅ 已保存 {} 条到{}", tally.saved, describe_target(target))];
-    if tally.copied > 0 {
-        lines.push(format!("其中 {} 条来自禁止转发的对话，已重新上传", tally.copied));
-    }
-    if tally.skipped > 0 {
-        lines.push(format!("跳过 {} 条纯文本（本地模式只存媒体）", tally.skipped));
-    }
-    if !tally.files.is_empty() {
-        lines.push(format!("文件在 {}/", root.join("save").to_string_lossy()));
-    }
+    let mut lines = if kit::is_zh() {
+        let mut v = vec![format!("✅ 已保存 {} 条到{}", tally.saved, describe_target(target))];
+        if tally.copied > 0 {
+            v.push(format!("其中 {} 条来自禁止转发的对话，已重新上传", tally.copied));
+        }
+        if tally.skipped > 0 {
+            v.push(format!("跳过 {} 条纯文本（本地模式只存媒体）", tally.skipped));
+        }
+        if !tally.files.is_empty() {
+            v.push(format!("文件在 {}/", root.join("save").to_string_lossy()));
+        }
+        v
+    } else {
+        let mut v = vec![format!(
+            "✅ Saved {} message(s) to {}",
+            tally.saved,
+            describe_target(target)
+        )];
+        if tally.copied > 0 {
+            v.push(format!(
+                "{} from forward-restricted chats re-uploaded",
+                tally.copied
+            ));
+        }
+        if tally.skipped > 0 {
+            v.push(format!(
+                "Skipped {} text-only message(s) (local mode saves media only)",
+                tally.skipped
+            ));
+        }
+        if !tally.files.is_empty() {
+            v.push(format!("Files saved in {}/", root.join("save").to_string_lossy()));
+        }
+        v
+    };
     if !tally.failures.is_empty() {
         if tally.saved == 0 {
-            lines[0] = "❌ 没有保存成功".into();
+            lines[0] = kit::tr("❌ Nothing saved", "❌ 没有保存成功").into();
         }
         let shown = &tally.failures[..tally.failures.len().min(5)];
-        lines.push(format!("失败 {} 条：", tally.failures.len()));
+        lines.push(if kit::is_zh() {
+            format!("失败 {} 条：", tally.failures.len())
+        } else {
+            format!("{} failed:", tally.failures.len())
+        });
         lines.extend(shown.iter().cloned());
     }
     lines.join("\n")
@@ -1062,22 +1195,46 @@ fn render_save_result(tally: &SaveTally, target: &str, root: &Path) -> String {
 
 fn about_link(link: &str, err: CmdError) -> CmdError {
     if kit::is_user_error(err.as_ref()) {
-        kit::fail(format!("{link}：{}", brief(err.as_ref())))
+        kit::fail(if kit::is_zh() {
+            format!("{link}：{}", brief(err.as_ref()))
+        } else {
+            format!("{link}: {}", brief(err.as_ref()))
+        })
     } else {
-        kit::fail_with(format!("{link} 读取失败"), mibot_command::UserError::new(err.to_string()))
+        kit::fail_with(
+            if kit::is_zh() {
+                format!("{link} 读取失败")
+            } else {
+                format!("Failed to read {link}")
+            },
+            mibot_command::UserError::new(err.to_string()),
+        )
     }
 }
 
 async fn show_save_settings(inv: &Invocation, settings: &Store<SaveDocument>) -> CmdResult {
     let current = settings.read()?;
-    let source = if current.source { "开" } else { "关" };
-    inv.edit(&format!(
-        "💾 <b>保存设置</b>\n\n默认目标：{}\n来源链接：{}\n\n<i>{} 修改默认目标</i>",
-        code(&describe_target(&current.target)),
-        code(source),
-        escape(&format!("{}save to 目标", inv.prefix()))
-    ))
-    .await?;
+    let source = if current.source {
+        kit::tr("on", "开")
+    } else {
+        kit::tr("off", "关")
+    };
+    let text = if kit::is_zh() {
+        format!(
+            "💾 <b>保存设置</b>\n\n默认目标：{}\n来源链接：{}\n\n<i>{} 修改默认目标</i>",
+            code(&describe_target(&current.target)),
+            code(source),
+            escape(&format!("{}save to 目标", inv.prefix()))
+        )
+    } else {
+        format!(
+            "💾 <b>Save Settings</b>\n\nDefault target: {}\nSource link: {}\n\n<i>{} to change default target</i>",
+            code(&describe_target(&current.target)),
+            code(source),
+            escape(&format!("{}save to target", inv.prefix()))
+        )
+    };
+    inv.edit(&text).await?;
     Ok(())
 }
 
@@ -1098,7 +1255,13 @@ async fn save_setting(inv: &Invocation, settings: &Store<SaveDocument>) -> Resul
         "to" => {
             let raw_target = inv.raw_after(1).trim().to_owned();
             if raw_target.is_empty() {
-                return Err(kit::usage(inv.prefix(), "save to me|@用户名|对话 ID|local"));
+                return Err(kit::usage(
+                    inv.prefix(),
+                    kit::tr(
+                        "save to me|@username|chat_id|local",
+                        "save to me|@用户名|对话 ID|local",
+                    ),
+                ));
             }
             if !is_self_target(&raw_target) && !is_local_target(&raw_target) {
                 let mut check = Saver::new_background(Arc::clone(&inv.client), PathBuf::new(), 0);
@@ -1125,13 +1288,22 @@ async fn collect_save_jobs(
     if let Some([from, to]) = &req.range {
         let count = (to.id - from.id + 1) as usize;
         if count > SAVE_RANGE_LIMIT {
-            return Err(kit::fail(format!(
-                "范围有 {count} 条，一次最多 {SAVE_RANGE_LIMIT} 条，分几段来"
-            )));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("范围有 {count} 条，一次最多 {SAVE_RANGE_LIMIT} 条，分几段来")
+            } else {
+                format!(
+                    "Range has {count} messages (max {SAVE_RANGE_LIMIT} per run); split it up"
+                )
+            }));
         }
         let peer = work.peer_of(from).await.map_err(|e| about_link(&from.raw, e))?;
         let ids: Vec<i32> = (from.id..=to.id).collect();
-        inv.edit_text(&kit::working(&format!("正在读取 {count} 个编号"))).await?;
+        inv.edit_text(&kit::working(&if kit::is_zh() {
+            format!("正在读取 {count} 个编号")
+        } else {
+            format!("Fetching {count} message IDs")
+        }))
+        .await?;
         let messages = work.fetch(&peer, &ids).await?;
         return Ok(vec![SaveJob {
             link: from.clone(),
@@ -1147,7 +1319,11 @@ async fn collect_save_jobs(
             let peer = work.peer_of(link).await.map_err(|e| about_link(&link.raw, e))?;
             let messages = work.fetch(&peer, &[link.id]).await?;
             if messages.is_empty() {
-                return Err(kit::fail(format!("{} 这条消息不存在或已删除", link.raw)));
+                return Err(kit::fail(if kit::is_zh() {
+                    format!("{} 这条消息不存在或已删除", link.raw)
+                } else {
+                    format!("{} does not exist or was deleted", link.raw)
+                }));
             }
             let Some(group_id) = messages[0].grouped_id else {
                 jobs.push(SaveJob {
@@ -1174,7 +1350,10 @@ async fn collect_save_jobs(
     }
     let reply = kit::reply_msg(inv).await?;
     let Some(reply) = reply else {
-        return Err(kit::fail("读不到被回复的消息"));
+        return Err(kit::fail(kit::tr(
+            "Failed to read replied message",
+            "读不到被回复的消息",
+        )));
     };
     let raw = reply.raw;
     let peer = inv.client.input_peer(&reply.peer)?;
@@ -1223,7 +1402,7 @@ async fn save_handle(inv: &Invocation, settings: &Store<SaveDocument>, root: &Pa
     let jobs = collect_save_jobs(inv, &mut work, &req).await?;
     let total: usize = jobs.iter().map(|j| j.messages.len()).sum();
     if total == 0 {
-        return Err(kit::fail("范围内没有消息"));
+        return Err(kit::fail(kit::tr("No messages in range", "范围内没有消息")));
     }
     let local = is_local_target(&target);
     let destination = if local {
@@ -1254,39 +1433,59 @@ async fn save_handle(inv: &Invocation, settings: &Store<SaveDocument>, root: &Pa
 
 fn save_help(prefix: &str) -> String {
     let p = escape(prefix);
-    format!(
-        "💾 <b>保存消息</b>\n\n转发消息；遇到禁止转发的对话，就下载后重新发一份，文字格式和媒体属性都保留。\n\n\
-         <b>保存</b>\n\
-         • 回复一条消息发 <code>{p}save</code>\n\
-         • <code>{p}save 链接 [链接…]</code> 按链接批量保存；链接指向相册里的一条时，整个相册一起保存\n\
-         • <code>{p}save 链接1|链接2</code> 保存两条之间的所有消息，缺号自动跳过，一次最多 {SAVE_RANGE_LIMIT} 条\n\
-         • 末尾加一个目标只这一次发到那里：<code>{p}save 链接 @某人</code>、<code>{p}save 链接 local</code>\n\n\
-         <b>设置</b>\n\
-         • <code>{p}save to 目标</code> 默认目标：<code>me</code>（收藏夹）、<code>@用户名</code>、对话 ID、<code>local</code>（存到主机）\n\
-         • <code>{p}save target</code> 看当前设置\n\
-         • <code>{p}save source on|off</code> 保存后回复一条来源说明，带原消息链接\n\n\
-         <b>链接</b>\n支持 <code>t.me/用户名/编号</code>、<code>t.me/c/数字/编号</code>，以及带话题的形式。私密对话要求账号是成员。\n\n\
-         <b>本地模式</b>\n只存媒体，纯文本跳过。文件放在部署目录的 <code>save/对话/</code> 下，旁边有同名 <code>.json</code> 记录来源。"
-    )
+    if kit::is_zh() {
+        format!(
+            "💾 <b>保存消息</b>\n\n转发消息；遇到禁止转发的对话，就下载后重新发一份，文字格式和媒体属性都保留。\n\n\
+             <b>保存</b>\n\
+             • 回复一条消息发 <code>{p}save</code>\n\
+             • <code>{p}save 链接 [链接…]</code> 按链接批量保存；链接指向相册里的一条时，整个相册一起保存\n\
+             • <code>{p}save 链接1|链接2</code> 保存两条之间的所有消息，缺号自动跳过，一次最多 {SAVE_RANGE_LIMIT} 条\n\
+             • 末尾加一个目标只这一次发到那里：<code>{p}save 链接 @某人</code>、<code>{p}save 链接 local</code>\n\n\
+             <b>设置</b>\n\
+             • <code>{p}save to 目标</code> 默认目标：<code>me</code>（收藏夹）、<code>@用户名</code>、对话 ID、<code>local</code>（存到主机）\n\
+             • <code>{p}save target</code> 看当前设置\n\
+             • <code>{p}save source on|off</code> 保存后回复一条来源说明，带原消息链接\n\n\
+             <b>链接</b>\n支持 <code>t.me/用户名/编号</code>、<code>t.me/c/数字/编号</code>，以及带话题的形式。私密对话要求账号是成员。\n\n\
+             <b>本地模式</b>\n只存媒体，纯文本跳过。文件放在部署目录的 <code>save/对话/</code> 下，旁边有同名 <code>.json</code> 记录来源。"
+        )
+    } else {
+        format!(
+            "💾 <b>Save Messages</b>\n\nForward messages, or download and re-upload them when forwarding is restricted (preserving formatting and media attributes).\n\n\
+             <b>Save</b>\n\
+             • Reply to a message with <code>{p}save</code>\n\
+             • <code>{p}save link [link…]</code> batch save by links (albums are saved together)\n\
+             • <code>{p}save link1|link2</code> save all messages between two links (missing IDs skipped, max {SAVE_RANGE_LIMIT})\n\
+             • Append a target for a one-off destination: <code>{p}save link @user</code>, <code>{p}save link local</code>\n\n\
+             <b>Settings</b>\n\
+             • <code>{p}save to target</code> default target: <code>me</code> (Saved Messages), <code>@username</code>, chat ID, <code>local</code> (save to host)\n\
+             • <code>{p}save target</code> view current settings\n\
+             • <code>{p}save source on|off</code> reply with a source link after saving\n\n\
+             <b>Links</b>\nSupports <code>t.me/username/id</code>, <code>t.me/c/num/id</code>, and topic links. Private chats require membership.\n\n\
+             <b>Local Mode</b>\nSaves media only (skips plain text) into <code>save/chat/</code> with a matching <code>.json</code> metadata file."
+        )
+    }
 }
 
 pub fn register(app: &Arc<App>) {
     let settings = Arc::new(kit::new_store(app, "save.json", SaveDocument::default));
     let root = app.root.clone();
-    app.registry.register(Command {
-        name: "save".into(),
-        group: group::MEDIA.into(),
-        description: "保存或转发消息".into(),
-        usage: "[链接…] [目标]".into(),
-        help_fn: Some(Arc::new(save_help)),
-        timeout: Some(Duration::from_secs(3600)),
-        handle: Arc::new(move |inv| {
-            let s = Arc::clone(&settings);
-            let r = root.clone();
-            Box::pin(async move { save_handle(&inv, &s, &r).await })
-        }),
-        ..Default::default()
-    });
+    app.registry.register(
+        Command {
+            name: "save".into(),
+            group: group::MEDIA.into(),
+            description: "Save or forward messages".into(),
+            usage: "[links…] [target]".into(),
+            help_fn: Some(Arc::new(save_help)),
+            timeout: Some(Duration::from_secs(3600)),
+            handle: Arc::new(move |inv| {
+                let s = Arc::clone(&settings);
+                let r = root.clone();
+                Box::pin(async move { save_handle(&inv, &s, &r).await })
+            }),
+            ..Default::default()
+        }
+        .zh("保存或转发消息", "[链接…] [目标]"),
+    );
 }
 
 #[cfg(test)]
@@ -1391,7 +1590,7 @@ mod tests {
         assert!(single.contains("https://t.me/c/5000/2") && single.contains("<b>群</b>") && single.contains("<code>2</code>"));
 
         let batch = source_notice(&[chan(4), pub_s(9), chan(2), chan(3), chan(7)], false);
-        assert!(batch.contains("<b>群</b>（4 条）：<a href=\"https://t.me/c/5000/2\">2</a>-<a href=\"https://t.me/c/5000/4\">4</a>, <a href=\"https://t.me/c/5000/7\">7</a>"));
+        assert!(batch.contains("<b>群</b> (4 msgs): <a href=\"https://t.me/c/5000/2\">2</a>-<a href=\"https://t.me/c/5000/4\">4</a>, <a href=\"https://t.me/c/5000/7\">7</a>"));
         assert!(batch.find("Durov").unwrap() < batch.find("群").unwrap());
         parse_html(&batch, None).unwrap();
 

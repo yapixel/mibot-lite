@@ -50,7 +50,7 @@ pub struct ReceiptDocument {
 
 #[derive(Debug, Error)]
 pub enum ScheduleError {
-    #[error("重启请求已提交，请稍候")]
+    #[error("Restart request already submitted, please wait")]
     Pending,
     #[error("systemctl restart: {0}")]
     Trigger(String),
@@ -146,7 +146,7 @@ async fn trigger_systemd_restart(cancel: CancellationToken, service: String) -> 
         return Err(TriggerFailure::Interrupted);
     }
     match res {
-        Err(_) => Err(TriggerFailure::Timeout("systemctl 5 秒没有返回".into())),
+        Err(_) => Err(TriggerFailure::Timeout("systemctl did not return within 5s".into())),
         Ok(Err(e)) => Err(TriggerFailure::Exit(e.to_string())),
         Ok(Ok(st)) if st.success() => Ok(()),
         Ok(Ok(st)) => {
@@ -164,15 +164,15 @@ async fn trigger_systemd_restart(cancel: CancellationToken, service: String) -> 
 
 async fn trigger_openrc_restart(cancel: CancellationToken, service: String) -> Result<(), TriggerFailure> {
     let Some(svc) = crate::service::openrc_service_name(&service) else {
-        return Err(TriggerFailure::Exit(format!("无效的 OpenRC 服务名: {service}")));
+        return Err(TriggerFailure::Exit(format!("invalid OpenRC service name: {service}")));
     };
     let Some(bin) = crate::service::rc_service_path() else {
-        return Err(TriggerFailure::Exit("主机上没有 rc-service".into()));
+        return Err(TriggerFailure::Exit("rc-service not found on host".into()));
     };
     let script = Path::new("/etc/init.d").join(&svc);
     if !script.exists() {
         return Err(TriggerFailure::Exit(format!(
-            "未找到 OpenRC 服务脚本 /etc/init.d/{svc}"
+            "OpenRC service script /etc/init.d/{svc} not found"
         )));
     }
     let mut cmd = std::process::Command::new(&bin);
@@ -423,7 +423,10 @@ impl Restarter {
         {
             Ok(()) => Ok(()),
             Err(ScheduleError::Pending) => inv
-                .edit_text("重启请求已提交，请稍候")
+                .edit_text(kit::tr(
+                    "Restart request already submitted, please wait",
+                    "重启请求已提交，请稍候",
+                ))
                 .await
                 .map_err(Into::into),
             Err(ScheduleError::Trigger(_)) => {
@@ -437,11 +440,19 @@ impl Restarter {
                 } else {
                     format!("systemctl status {} --no-pager", self.service)
                 };
-                let msg = format!(
-                    "{}\n状态：\n{st}\n\n可执行 {} 查看详情。",
-                    escape(failure),
-                    code(&inspect_cmd)
-                );
+                let msg = if kit::is_zh() {
+                    format!(
+                        "{}\n状态：\n{st}\n\n可执行 {} 查看详情。",
+                        escape(failure),
+                        code(&inspect_cmd)
+                    )
+                } else {
+                    format!(
+                        "{}\nStatus:\n{st}\n\nRun {} for details.",
+                        escape(failure),
+                        code(&inspect_cmd)
+                    )
+                };
                 inv.edit(&msg).await.map_err(Into::into)
             }
             Err(ScheduleError::Other(e)) => Err(kit::fail_err(e)),
@@ -494,13 +505,34 @@ impl Restarter {
         };
 
         let text = match note.kind.as_str() {
-            "update" => "⬆️ <b>程序更新</b>\n✅ 更新完成，新版本已就绪".to_owned(),
-            "rollback" => "⬆️ <b>程序更新</b>\n✅ 回滚完成，已换回上一版本".to_owned(),
-            "auto-update" => format!(
-                "⬆️ <b>自动更新</b>\n✅ 已更新到 {}",
-                code(kit::version(&self.a))
-            ),
-            _ => "🔄 <b>重启服务</b>\n✅ 重启成功，服务已就绪".to_owned(),
+            "update" => kit::tr(
+                "⬆️ <b>Self-Update</b>\n✅ Update complete, new version is ready",
+                "⬆️ <b>程序更新</b>\n✅ 更新完成，新版本已就绪",
+            )
+            .to_owned(),
+            "rollback" => kit::tr(
+                "⬆️ <b>Self-Update</b>\n✅ Rollback complete, reverted to previous version",
+                "⬆️ <b>程序更新</b>\n✅ 回滚完成，已换回上一版本",
+            )
+            .to_owned(),
+            "auto-update" => {
+                if kit::is_zh() {
+                    format!(
+                        "⬆️ <b>自动更新</b>\n✅ 已更新到 {}",
+                        code(kit::version(&self.a))
+                    )
+                } else {
+                    format!(
+                        "⬆️ <b>Auto-Update</b>\n✅ Updated to {}",
+                        code(kit::version(&self.a))
+                    )
+                }
+            }
+            _ => kit::tr(
+                "🔄 <b>Restart Service</b>\n✅ Restart succeeded, service is ready",
+                "🔄 <b>重启服务</b>\n✅ 重启成功，服务已就绪",
+            )
+            .to_owned(),
         };
 
         if let Err(err) = client
@@ -549,19 +581,30 @@ fn owner_hint() -> String {
         if let Ok(meta) = std::fs::metadata("/proc/self") {
             let uid = meta.uid();
             return if uid == 0 {
-                "当前运行在 root 用户。".to_owned()
-            } else {
+                kit::tr("Running as root.", "当前运行在 root 用户。").to_owned()
+            } else if kit::is_zh() {
                 format!("当前运行用户 UID={uid}，通常需要 root 或 systemd 管理权限。")
+            } else {
+                format!(
+                    "Running as UID={uid}; root or service manager permissions are usually required."
+                )
             };
         }
     }
-    "当前环境无 UID 查询。".to_owned()
+    kit::tr("UID unavailable in this environment.", "当前环境无 UID 查询。").to_owned()
 }
 
 fn restart_help(prefix: &str) -> String {
+    if kit::is_zh() {
+        return format!(
+            "🔄 <b>重启服务</b>\n\n{} 通过系统服务管理器（systemd / OpenRC）重启服务。正在跑的命令会被中断，重启前发的命令重启后也不会补跑；\
+             重启完成后这条消息会改成「重启成功」。\n\n如果跑在另一个服务名下，可在 .env 里写 MIBOT_SERVICE=服务名。",
+            code(&format!("{prefix}restart"))
+        );
+    }
     format!(
-        "🔄 <b>重启服务</b>\n\n{} 通过系统服务管理器（systemd / OpenRC）重启服务。正在跑的命令会被中断，重启前发的命令重启后也不会补跑；\
-         重启完成后这条消息会改成「重启成功」。\n\n如果跑在另一个服务名下，可在 .env 里写 MIBOT_SERVICE=服务名。",
+        "🔄 <b>Restart Service</b>\n\n{} restarts the service via the system service manager (systemd / OpenRC). Running commands will be interrupted and won't resume after restart; \
+         this message will update to “Restart succeeded” once ready.\n\nIf running under a different service name, set MIBOT_SERVICE=name in .env.",
         code(&format!("{prefix}restart"))
     )
 }
@@ -569,32 +612,44 @@ fn restart_help(prefix: &str) -> String {
 pub fn register(a: &Arc<App>) -> Arc<Restarter> {
     let r = Restarter::new(Arc::clone(a));
     let r_cmd = Arc::clone(&r);
-    a.registry.register(kit::make_cmd(
-        "restart",
-        &[],
-        group::SYSTEM,
-        "重启系统服务",
-        "",
-        restart_help,
-        move |inv: Invocation| {
-            let r = Arc::clone(&r_cmd);
-            Box::pin(async move {
-                if !inv.args.is_empty() {
-                    return Err(kit::usage(
-                        inv.prefix(),
-                        "restart（不带参数）重启服务，重启完成后这条消息会改成「重启成功」",
-                    ));
-                }
-                r.command(
-                    &inv,
-                    "restart",
-                    "🔄 <b>重启服务</b>\n⏳ 正在提交重启请求…",
-                    "服务重启命令执行失败。",
-                )
-                .await
-            })
-        },
-    ));
+    a.registry.register(
+        kit::make_cmd(
+            "restart",
+            &[],
+            group::SYSTEM,
+            "Restart system service",
+            "",
+            restart_help,
+            move |inv: Invocation| {
+                let r = Arc::clone(&r_cmd);
+                Box::pin(async move {
+                    if !inv.args.is_empty() {
+                        return Err(kit::usage(
+                            inv.prefix(),
+                            kit::tr(
+                                "restart (no arguments) restarts the service and updates this message when ready",
+                                "restart（不带参数）重启服务，重启完成后这条消息会改成「重启成功」",
+                            ),
+                        ));
+                    }
+                    r.command(
+                        &inv,
+                        "restart",
+                        kit::tr(
+                            "🔄 <b>Restart Service</b>\n⏳ Submitting restart request…",
+                            "🔄 <b>重启服务</b>\n⏳ 正在提交重启请求…",
+                        ),
+                        kit::tr(
+                            "Failed to execute service restart command.",
+                            "服务重启命令执行失败。",
+                        ),
+                    )
+                    .await
+                })
+            },
+        )
+        .zh("重启系统服务", ""),
+    );
     let r_ready = Arc::clone(&r);
     a.on_ready(Arc::new(move |app, _cancel| {
         let r = Arc::clone(&r_ready);

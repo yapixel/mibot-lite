@@ -88,11 +88,11 @@ impl Drop for RunningGuard {
 
 fn safe_relative(value: &str) -> Result<&str, CmdError> {
     if value.is_empty() || value.contains('\\') || value.contains("://") {
-        return Err(kit::fail("素材路径无效"));
+        return Err(kit::fail(kit::tr("Invalid asset path", "素材路径无效")));
     }
     for part in value.split('/') {
         if part.is_empty() || part == "." || part == ".." {
-            return Err(kit::fail("素材路径无效"));
+            return Err(kit::fail(kit::tr("Invalid asset path", "素材路径无效")));
         }
     }
     Ok(value)
@@ -246,7 +246,7 @@ impl EatgifService {
             DOC_REFRESH,
         )
         .await?;
-        serde_json::from_slice(&data).map_err(|_| kit::fail("素材配置无效"))
+        serde_json::from_slice(&data).map_err(|_| kit::fail(kit::tr("Invalid asset config", "素材配置无效")))
     }
 
     async fn get_catalog(
@@ -298,13 +298,23 @@ impl EatgifService {
 
     fn help(&self, prefix: &str) -> String {
         let p = escape(prefix);
-        let text = format!(
-            "🎬 <b>头像动画贴纸</b>\n\n\
-            回复一条消息（用户或频道发的都可以），把双方头像合成为动画贴纸。\n\n\
-            • 回复一条消息发 <code>{p}eatgif 名称</code> 生成\n\
-            • <code>{p}eatgif list</code> 列出全部可用动画\n\
-            • <code>{p}eatgif clear</code> 清空素材缓存\n\n"
-        );
+        let text = if kit::is_zh() {
+            format!(
+                "🎬 <b>头像动画贴纸</b>\n\n\
+                回复一条消息（用户或频道发的都可以），把双方头像合成为动画贴纸。\n\n\
+                • 回复一条消息发 <code>{p}eatgif 名称</code> 生成\n\
+                • <code>{p}eatgif list</code> 列出全部可用动画\n\
+                • <code>{p}eatgif clear</code> 清空素材缓存\n\n"
+            )
+        } else {
+            format!(
+                "🎬 <b>Avatar Animated Stickers</b>\n\n\
+                Reply to a message (from a user or channel) to combine both avatars into an animated sticker.\n\n\
+                • Reply to a message with <code>{p}eatgif name</code> to generate\n\
+                • <code>{p}eatgif list</code> list all available animations\n\
+                • <code>{p}eatgif clear</code> clear asset cache\n\n"
+            )
+        };
         let cat_opt = self
             .state
             .lock()
@@ -312,20 +322,33 @@ impl EatgifService {
             .catalog
             .clone();
         let Some(catalog) = cat_opt else {
-            return format!(
-                "{text}动画列表暂时读不到，稍后发 <code>{p}eatgif list</code> 查看。"
-            );
+            return if kit::is_zh() {
+                format!("{text}动画列表暂时读不到，稍后发 <code>{p}eatgif list</code> 查看。")
+            } else {
+                format!("{text}Animation list is unavailable right now; send <code>{p}eatgif list</code> later.")
+            };
         };
         let mut names: Vec<&String> = catalog.keys().collect();
         names.sort();
-        let mut lines = vec![format!("🎬 <b>全部动画</b>（{} 款）", names.len())];
+        let mut lines = vec![if kit::is_zh() {
+            format!("🎬 <b>全部动画</b>（{} 款）", names.len())
+        } else {
+            format!("🎬 <b>All Animations</b> ({})", names.len())
+        }];
         for name in names {
             lines.push(format!("• {} {}", code(name), escape(&catalog[name].desc)));
         }
-        format!(
-            "{text}{}\n\n素材首次使用时从远程下载并缓存，需要主机装有 ffmpeg。",
-            lines.join("\n")
-        )
+        if kit::is_zh() {
+            format!(
+                "{text}{}\n\n素材首次使用时从远程下载并缓存，需要主机装有 ffmpeg。",
+                lines.join("\n")
+            )
+        } else {
+            format!(
+                "{text}{}\n\nAssets are downloaded and cached on first use; requires ffmpeg on host.",
+                lines.join("\n")
+            )
+        }
     }
 
     async fn handle(self: Arc<Self>, inv: &Invocation) -> Result<(), CmdError> {
@@ -336,21 +359,28 @@ impl EatgifService {
         let catalog = self
             .get_catalog(&inv.cancel)
             .await
-            .map_err(|e| kit::wrap_fail("无法读取素材列表", e))?;
+            .map_err(|e| kit::wrap_fail(kit::tr("Failed to load asset list", "无法读取素材列表"), e))?;
         if sub.is_empty() || sub == "list" || sub == "ls" {
             return self.list(inv, &catalog).await;
         }
         let Some(selected) = catalog.get(&sub).cloned() else {
-            return Err(kit::fail(format!(
-                "找不到 {sub}，发 {}eatgif list 看全部动画",
-                inv.prefix()
-            )));
+            return Err(kit::fail(if kit::is_zh() {
+                format!("找不到 {sub}，发 {}eatgif list 看全部动画", inv.prefix())
+            } else {
+                format!("Unknown animation {sub}; send {}eatgif list to view all", inv.prefix())
+            }));
         };
         let Some(reply) = kit::reply_msg(inv).await? else {
-            return Err(kit::fail("请回复一条消息后再生成，用户或频道发的都可以"));
+            return Err(kit::fail(kit::tr(
+                "Reply to a message (user or channel) first",
+                "请回复一条消息后再生成，用户或频道发的都可以",
+            )));
         };
         let Some(_running) = self.start() else {
-            return Err(kit::fail("已有一个动图正在生成，请稍候"));
+            return Err(kit::fail(kit::tr(
+                "Another animation is already being generated; please wait",
+                "已有一个动图正在生成，请稍候",
+            )));
         };
         self.generate(inv, &selected, &reply).await
     }
@@ -365,9 +395,12 @@ impl EatgifService {
             guard.catalog = None;
             guard.catalog_at = None;
         }
-        inv.edit_text("✅ 已清理素材缓存，下次使用时重新下载")
-            .await
-            .map_err(Into::into)
+        inv.edit_text(kit::tr(
+            "✅ Asset cache cleared; will re-download on next use",
+            "✅ 已清理素材缓存，下次使用时重新下载",
+        ))
+        .await
+        .map_err(Into::into)
     }
 
     async fn list(
@@ -377,11 +410,19 @@ impl EatgifService {
     ) -> Result<(), CmdError> {
         let mut names: Vec<&String> = catalog.keys().collect();
         names.sort();
-        let mut lines = vec![
-            "🎬 <b>头像动画贴纸</b>".to_owned(),
-            format!("回复一条消息发 {} 生成", code(&format!("{}eatgif 名称", inv.prefix()))),
-            String::new(),
-        ];
+        let mut lines = if kit::is_zh() {
+            vec![
+                "🎬 <b>头像动画贴纸</b>".to_owned(),
+                format!("回复一条消息发 {} 生成", code(&format!("{}eatgif 名称", inv.prefix()))),
+                String::new(),
+            ]
+        } else {
+            vec![
+                "🎬 <b>Avatar Animated Stickers</b>".to_owned(),
+                format!("Reply to a message with {}", code(&format!("{}eatgif name", inv.prefix()))),
+                String::new(),
+            ]
+        };
         for name in names {
             lines.push(format!("• {} {}", code(name), escape(&catalog[name].desc)));
         }
@@ -396,12 +437,16 @@ impl EatgifService {
         selected: &EatgifEntry,
         reply: &Message,
     ) -> Result<(), CmdError> {
-        inv.edit_text(&kit::working(&format!("正在生成「{}」", selected.desc)))
-            .await?;
+        inv.edit_text(&kit::working(&if kit::is_zh() {
+            format!("正在生成「{}」", selected.desc)
+        } else {
+            format!("Generating \"{}\"", selected.desc)
+        }))
+        .await?;
         let spec: EatgifSpec = self
             .asset_json(&inv.cancel, &selected.url)
             .await
-            .map_err(|e| kit::wrap_fail("无法读取动画定义", e))?;
+            .map_err(|e| kit::wrap_fail(kit::tr("Failed to load animation spec", "无法读取动画定义"), e))?;
         if spec.width < 1
             || spec.height < 1
             || spec.width > 512
@@ -409,7 +454,7 @@ impl EatgifService {
             || spec.frames.is_empty()
             || spec.frames.len() > EATGIF_MAX_FRAMES
         {
-            return Err(kit::fail("动画定义无效"));
+            return Err(kit::fail(kit::tr("Invalid animation spec", "动画定义无效")));
         }
         let faces = load_faces(inv, reply).await?;
         let webm = self.render(&inv.cancel, &spec, &faces).await?;
@@ -433,7 +478,8 @@ impl EatgifService {
         spec: &EatgifSpec,
         faces: &AvatarPair,
     ) -> Result<Vec<u8>, CmdError> {
-        let workdir = TempWorkdir::create().map_err(|e| kit::fail_with("视频编码失败", e))?;
+        let workdir = TempWorkdir::create()
+            .map_err(|e| kit::fail_with(kit::tr("Video encoding failed", "视频编码失败"), e))?;
         let mut frames = Vec::with_capacity(spec.frames.len());
         for (idx, entry) in spec.frames.iter().enumerate() {
             if cancel.is_cancelled() {
@@ -442,21 +488,23 @@ impl EatgifService {
             let canvas_data = self
                 .asset(cancel, &entry.url, 5 << 20)
                 .await
-                .map_err(|e| kit::wrap_fail("素材下载失败", e))?;
-            let mut canvas = frame_canvas(&canvas_data).map_err(|_| kit::fail("素材图片无效"))?;
+                .map_err(|e| kit::wrap_fail(kit::tr("Asset download failed", "素材下载失败"), e))?;
+            let mut canvas = frame_canvas(&canvas_data)
+                .map_err(|_| kit::fail(kit::tr("Invalid asset image", "素材图片无效")))?;
             if let Some(ref you) = entry.you {
                 self.paste(cancel, &mut canvas, you, &faces.you)
                     .await
-                    .map_err(|e| kit::wrap_fail("合成失败", e))?;
+                    .map_err(|e| kit::wrap_fail(kit::tr("Composition failed", "合成失败"), e))?;
             }
             if let Some(ref me) = entry.me {
                 self.paste(cancel, &mut canvas, me, &faces.me)
                     .await
-                    .map_err(|e| kit::wrap_fail("合成失败", e))?;
+                    .map_err(|e| kit::wrap_fail(kit::tr("Composition failed", "合成失败"), e))?;
             }
             let frame_path = workdir.path().join(format!("frame{idx:04}.png"));
             let mut file = File::create(&frame_path)?;
-            write_png(&mut file, &canvas).map_err(|e| kit::fail_with("合成失败", e))?;
+            write_png(&mut file, &canvas)
+                .map_err(|e| kit::fail_with(kit::tr("Composition failed", "合成失败"), e))?;
             let delay = entry.delay.map(|d| d.clamp(20, 5000)).unwrap_or(100) as u64;
             frames.push(Frame {
                 path: frame_path,
@@ -465,7 +513,7 @@ impl EatgifService {
         }
         sticker_webm(workdir.path(), &frames, spec.width, spec.height)
             .await
-            .map_err(|e| kit::fail_with("视频编码失败", e))
+            .map_err(|e| kit::fail_with(kit::tr("Video encoding failed", "视频编码失败"), e))
     }
 }
 
@@ -479,24 +527,28 @@ fn paste_with_mask(
     face: &PremulImage,
     mask_data: &[u8],
 ) -> Result<(), CmdError> {
-    let mask = decode_png(mask_data).map_err(|e| kit::fail_with("合成失败", e))?;
+    let comp_err = || kit::tr("Composition failed", "合成失败");
+    let mask = decode_png(mask_data).map_err(|e| kit::fail_with(comp_err(), e))?;
     if mask.width() > 512 || mask.height() > 512 {
-        return Err(kit::fail("素材遮罩尺寸异常"));
+        return Err(kit::fail(kit::tr(
+            "Invalid asset mask dimensions",
+            "素材遮罩尺寸异常",
+        )));
     }
     let mut shaped = resize(face, mask.width(), mask.height())
-        .map_err(|e| kit::fail_with("合成失败", e))?;
+        .map_err(|e| kit::fail_with(comp_err(), e))?;
     if let Some(deg) = role.rotate
         && deg != 0.0
     {
-        shaped =
-            rotate(&shaped, deg.clamp(-360.0, 360.0)).map_err(|e| kit::fail_with("合成失败", e))?;
+        shaped = rotate(&shaped, deg.clamp(-360.0, 360.0))
+            .map_err(|e| kit::fail_with(comp_err(), e))?;
     }
     if let Some(factor) = role.brightness
         && (factor - 1.0).abs() > f64::EPSILON
     {
         shaped = brightness(&shaped, factor.clamp(0.1, 2.0));
     }
-    let masked = apply_mask(&shaped, &mask).map_err(|e| kit::fail_with("合成失败", e))?;
+    let masked = apply_mask(&shaped, &mask).map_err(|e| kit::fail_with(comp_err(), e))?;
     composite(canvas, &masked, role.x, role.y);
     Ok(())
 }
@@ -507,12 +559,12 @@ struct AvatarPair {
 }
 
 async fn load_faces(inv: &Invocation, reply: &Message) -> Result<AvatarPair, CmdError> {
-    let me = load_face(&inv.client, &own_face(inv), "你").await?;
+    let me = load_face(&inv.client, &own_face(inv), true).await?;
     let peer = inv
         .client
         .input_peer(&reply.sender)
-        .map_err(|_| kit::fail("无法解析对方的身份"))?;
-    let you = load_face(&inv.client, &peer, "对方").await?;
+        .map_err(|_| kit::fail(kit::tr("Cannot resolve target user", "无法解析对方的身份")))?;
+    let you = load_face(&inv.client, &peer, false).await?;
     Ok(AvatarPair { me, you })
 }
 
@@ -532,8 +584,29 @@ fn speaker_of(client: &Client, message: &Message) -> tl::enums::InputPeer {
 async fn load_face(
     client: &Client,
     peer: &tl::enums::InputPeer,
-    who: &str,
+    is_self: bool,
 ) -> Result<PremulImage, CmdError> {
+    let no_photo = || {
+        if is_self {
+            kit::tr("You have no public profile photo", "你没有公开头像，合成不了")
+        } else {
+            kit::tr("Target has no public profile photo", "对方没有公开头像，合成不了")
+        }
+    };
+    let fetch_err = || {
+        if is_self {
+            kit::tr("Failed to fetch your profile photo", "无法获取你的头像")
+        } else {
+            kit::tr("Failed to fetch target profile photo", "无法获取对方的头像")
+        }
+    };
+    let decode_err = || {
+        if is_self {
+            kit::tr("Failed to decode your profile photo", "无法解析你的头像")
+        } else {
+            kit::tr("Failed to decode target profile photo", "无法解析对方的头像")
+        }
+    };
     let mut data = client
         .download_profile_photo(peer, false, 2 << 20)
         .await
@@ -543,14 +616,14 @@ async fn load_face(
     if data.is_empty() {
         data = match client.download_profile_photo(peer, true, 2 << 20).await {
             Ok(Some(bytes)) => bytes,
-            Ok(None) => return Err(kit::fail(format!("{who}没有公开头像，合成不了"))),
-            Err(_) => return Err(kit::fail(format!("无法获取{who}的头像"))),
+            Ok(None) => return Err(kit::fail(no_photo())),
+            Err(_) => return Err(kit::fail(fetch_err())),
         };
     }
     if data.is_empty() {
-        return Err(kit::fail(format!("{who}没有公开头像，合成不了")));
+        return Err(kit::fail(no_photo()));
     }
-    decode(&data).map_err(|_| kit::fail(format!("无法解析{who}的头像")))
+    decode(&data).map_err(|_| kit::fail(decode_err()))
 }
 
 async fn send_sticker_doc(
@@ -658,15 +731,16 @@ fn eat_key_re() -> &'static Regex {
 }
 
 fn eat_root(source: &str) -> Result<String, CmdError> {
+    let bad_host = || kit::tr("Source URL must be on raw.githubusercontent.com", "素材目录只能是 raw.githubusercontent.com 上的链接");
     let Ok(parsed) = Url::parse(source) else {
-        return Err(kit::fail("素材目录只能是 raw.githubusercontent.com 上的链接"));
+        return Err(kit::fail(bad_host()));
     };
     if parsed.scheme() != "https"
         || parsed.host_str() != Some("raw.githubusercontent.com")
         || !parsed.username().is_empty()
         || parsed.password().is_some()
     {
-        return Err(kit::fail("素材目录只能是 raw.githubusercontent.com 上的链接"));
+        return Err(kit::fail(bad_host()));
     }
     let parts: Vec<&str> = parsed.path().trim_start_matches('/').split('/').collect();
     let keep = if parts.len() > 4 && parts[2] == "refs" && parts[3] == "heads" {
@@ -675,7 +749,10 @@ fn eat_root(source: &str) -> Result<String, CmdError> {
         3
     };
     if parts.len() <= keep {
-        return Err(kit::fail("素材目录链接不完整，要指向仓库里的 config.json"));
+        return Err(kit::fail(kit::tr(
+            "Incomplete source URL; must point to config.json in a repo",
+            "素材目录链接不完整，要指向仓库里的 config.json",
+        )));
     }
     Ok(format!(
         "https://raw.githubusercontent.com/{}/",
@@ -685,15 +762,16 @@ fn eat_root(source: &str) -> Result<String, CmdError> {
 
 fn eat_asset_url(root: &str, value: &str) -> Result<String, CmdError> {
     if value.starts_with("https://") {
+        let bad_url = || kit::tr("Asset URL must point to GitHub", "素材链接只能指向 GitHub");
         let Ok(parsed) = Url::parse(value) else {
-            return Err(kit::fail("素材链接只能指向 GitHub"));
+            return Err(kit::fail(bad_url()));
         };
         let host = parsed.host_str().unwrap_or("");
         if !parsed.username().is_empty()
             || parsed.password().is_some()
             || (host != "github.com" && host != "raw.githubusercontent.com")
         {
-            return Err(kit::fail("素材链接只能指向 GitHub"));
+            return Err(kit::fail(bad_url()));
         }
         return Ok(value.to_owned());
     }
@@ -734,11 +812,12 @@ impl EatService {
         if !resp.ok() {
             return Err(mibot_httpx::HttpxError::Status(resp.status).into());
         }
+        let bad_fmt = || kit::tr("Invalid asset catalog format", "素材目录格式不对");
         let Ok(doc) = serde_json::from_slice::<EatConfigDoc>(&resp.body) else {
-            return Err(kit::fail("素材目录格式不对"));
+            return Err(kit::fail(bad_fmt()));
         };
         if doc.resources.is_empty() || doc.resources.len() > 200 {
-            return Err(kit::fail("素材目录格式不对"));
+            return Err(kit::fail(bad_fmt()));
         }
         for (key, entry) in &doc.resources {
             if !eat_key_re().is_match(key)
@@ -746,7 +825,7 @@ impl EatService {
                 || entry.name.chars().count() > 100
                 || entry.url.is_empty()
             {
-                return Err(kit::fail("素材目录格式不对"));
+                return Err(kit::fail(bad_fmt()));
             }
         }
         {
@@ -784,7 +863,8 @@ impl EatService {
         you: &PremulImage,
     ) -> Result<PremulImage, CmdError> {
         let base_data = self.asset(&inv.cancel, root, &entry.url).await?;
-        let base = decode(&base_data).map_err(|_| kit::fail("素材图片无效"))?;
+        let base = decode(&base_data)
+            .map_err(|_| kit::fail(kit::tr("Invalid asset image", "素材图片无效")))?;
         if let Some(ref st) = entry.stamp {
             return stamp(st, you, &base);
         }
@@ -794,7 +874,7 @@ impl EatService {
             paste_with_mask(&mut canvas, role, you, &mask_data)?;
         }
         if let Some(ref role) = entry.me {
-            let me = load_face(&inv.client, &own_face(inv), "你").await?;
+            let me = load_face(&inv.client, &own_face(inv), true).await?;
             let mask_data = self.asset(&inv.cancel, root, &role.mask).await?;
             paste_with_mask(&mut canvas, role, &me, &mask_data)?;
         }
@@ -815,15 +895,16 @@ impl EatService {
             let peer = inv
                 .client
                 .input_peer(&reply.sender)
-                .map_err(|_| kit::fail("无法解析对方的身份"))?;
-            load_face(&inv.client, &peer, "对方").await?
+                .map_err(|_| kit::fail(kit::tr("Cannot resolve target user", "无法解析对方的身份")))?;
+            load_face(&inv.client, &peer, false).await?
         };
         let composed = self.compose(inv, root, entry, &you).await?;
-        let resized = resize_sticker(&composed).map_err(|e| kit::fail_with("生成失败", e))?;
-        let png = mibot_imaging::encode_png(&resized).map_err(|e| kit::fail_with("生成失败", e))?;
+        let gen_err = || kit::tr("Generation failed", "生成失败");
+        let resized = resize_sticker(&composed).map_err(|e| kit::fail_with(gen_err(), e))?;
+        let png = mibot_imaging::encode_png(&resized).map_err(|e| kit::fail_with(gen_err(), e))?;
         sticker_webp(&png)
             .await
-            .map_err(|e| kit::fail_with("生成失败", e))
+            .map_err(|e| kit::fail_with(gen_err(), e))
     }
 
     async fn set(
@@ -841,17 +922,25 @@ impl EatService {
             };
             kit::update_ok(&self.settings, move |s| s.source = source)?;
         }
-        inv.edit_text(&kit::working("正在重新下载素材目录")).await?;
+        inv.edit_text(&kit::working(kit::tr(
+            "Re-downloading asset catalog",
+            "正在重新下载素材目录",
+        )))
+        .await?;
         let (catalog, _) = self
             .load(&inv.cancel, true)
             .await
-            .map_err(|e| kit::wrap_fail("读不到素材目录", e))?;
+            .map_err(|e| kit::wrap_fail(kit::tr("Failed to read asset catalog", "读不到素材目录"), e))?;
         let dir = self.data_dir.join("eat");
         if dir.exists() {
             fs::remove_dir_all(&dir)?;
         }
         inv.respond_pages(&html_pages(
-            &format!("✅ 素材目录已更新\n{}", eat_list(&catalog, inv.prefix(), name)),
+            &format!(
+                "{}\n{}",
+                kit::tr("✅ Asset catalog updated", "✅ 素材目录已更新"),
+                eat_list(&catalog, inv.prefix(), name)
+            ),
             PAGE_LIMIT,
         ))
         .await
@@ -860,16 +949,29 @@ impl EatService {
 
     fn help(&self, prefix: &str) -> String {
         let p = escape(prefix);
-        let text = format!(
-            "😋 <b>头像表情贴纸</b>\n\n\
-            把头像合成到表情图里，发成贴纸。\n\n\
-            <b>用法</b>\n\
-            • 回复一条消息发 <code>{p}eat 名称</code>，用对方的头像生成，比如 <code>{p}eat bc</code>；不写名称随机挑一款\n\
-            • <code>{p}eat2 名称</code> 同上，但用被回复的图片或贴纸代替头像\n\
-            • 不回复消息发 <code>{p}eat</code> 也能看到下面这份列表\n\
-            • <code>{p}eat set</code> 重新下载素材目录；<code>{p}eat set 链接</code> 换成别的目录\
-            （要是 raw.githubusercontent.com 上的 config.json），<code>{p}eat set default</code> 换回默认\n\n"
-        );
+        let text = if kit::is_zh() {
+            format!(
+                "😋 <b>头像表情贴纸</b>\n\n\
+                把头像合成到表情图里，发成贴纸。\n\n\
+                <b>用法</b>\n\
+                • 回复一条消息发 <code>{p}eat 名称</code>，用对方的头像生成，比如 <code>{p}eat bc</code>；不写名称随机挑一款\n\
+                • <code>{p}eat2 名称</code> 同上，但用被回复的图片或贴纸代替头像\n\
+                • 不回复消息发 <code>{p}eat</code> 也能看到下面这份列表\n\
+                • <code>{p}eat set</code> 重新下载素材目录；<code>{p}eat set 链接</code> 换成别的目录\
+                （要是 raw.githubusercontent.com 上的 config.json），<code>{p}eat set default</code> 换回默认\n\n"
+            )
+        } else {
+            format!(
+                "😋 <b>Avatar Meme Stickers</b>\n\n\
+                Compose avatars onto meme templates and send as stickers.\n\n\
+                <b>Usage</b>\n\
+                • Reply to a message with <code>{p}eat name</code> using the sender's avatar (e.g. <code>{p}eat bc</code>); omit name for random\n\
+                • <code>{p}eat2 name</code> same as above, but uses the replied image or sticker instead of avatar\n\
+                • <code>{p}eat</code> without replying to view the list below\n\
+                • <code>{p}eat set</code> re-download catalog; <code>{p}eat set url</code> use a custom catalog \
+                (must be config.json on raw.githubusercontent.com); <code>{p}eat set default</code> restore default\n\n"
+            )
+        };
         let cat_opt = self
             .state
             .lock()
@@ -877,19 +979,32 @@ impl EatService {
             .as_ref()
             .map(|(c, _)| c.clone());
         let Some(catalog) = cat_opt else {
-            return format!(
-                "{text}素材目录暂时读不到，稍后发 <code>{p}eat</code> 查看全部款式。"
-            );
+            return if kit::is_zh() {
+                format!("{text}素材目录暂时读不到，稍后发 <code>{p}eat</code> 查看全部款式。")
+            } else {
+                format!("{text}Catalog is unavailable right now; send <code>{p}eat</code> later to view all styles.")
+            };
         };
         let mut lines = vec![
-            format!("😋 <b>全部款式</b>（{} 款）", catalog.len()),
-            EAT_LEGEND.to_owned(),
+            if kit::is_zh() {
+                format!("😋 <b>全部款式</b>（{} 款）", catalog.len())
+            } else {
+                format!("😋 <b>All Styles</b> ({})", catalog.len())
+            },
+            eat_legend().to_owned(),
         ];
         lines.extend(eat_catalog_lines(&catalog));
-        format!(
-            "{text}{}\n\n素材来自 TeleBox 插件仓库，首次使用时下载并缓存，需要主机装有 ffmpeg。",
-            lines.join("\n")
-        )
+        if kit::is_zh() {
+            format!(
+                "{text}{}\n\n素材来自 TeleBox 插件仓库，首次使用时下载并缓存，需要主机装有 ffmpeg。",
+                lines.join("\n")
+            )
+        } else {
+            format!(
+                "{text}{}\n\nAssets from TeleBox plugin repo, downloaded and cached on first use; requires ffmpeg on host.",
+                lines.join("\n")
+            )
+        }
     }
 }
 
@@ -899,17 +1014,18 @@ fn stamp(config: &EatStamp, face: &PremulImage, mark: &PremulImage) -> Result<Pr
     let deg = config.rotate.map(|v| v.clamp(-360.0, 360.0)).unwrap_or(-12.0);
     let alpha = config.opacity.map(|v| v.clamp(0.0, 1.0)).unwrap_or(0.6);
 
-    let mut canvas = resize_cover(face, size, size).map_err(|e| kit::fail_with("生成失败", e))?;
+    let gen_err = || kit::tr("Generation failed", "生成失败");
+    let mut canvas = resize_cover(face, size, size).map_err(|e| kit::fail_with(gen_err(), e))?;
     let width = ((f64::from(size) * scale).round() as i64).max(1) as u32;
     let height = ((f64::from(mark.height()) * f64::from(width) / f64::from(mark.width().max(1))).round() as i64).max(1) as u32;
-    let resized_mark = resize(mark, width, height).map_err(|e| kit::fail_with("生成失败", e))?;
-    let rotated = rotate_expand(&resized_mark, deg).map_err(|e| kit::fail_with("生成失败", e))?;
+    let resized_mark = resize(mark, width, height).map_err(|e| kit::fail_with(gen_err(), e))?;
+    let rotated = rotate_expand(&resized_mark, deg).map_err(|e| kit::fail_with(gen_err(), e))?;
     let turned = opacity(&rotated, alpha);
     let fit = (f64::from(size) / f64::from(turned.width().max(1)))
         .min(f64::from(size) / f64::from(turned.height().max(1)));
     let fit_w = ((f64::from(turned.width()) * fit) as i64).max(1) as u32;
     let fit_h = ((f64::from(turned.height()) * fit) as i64).max(1) as u32;
-    let fitted = resize(&turned, fit_w, fit_h).map_err(|e| kit::fail_with("生成失败", e))?;
+    let fitted = resize(&turned, fit_w, fit_h).map_err(|e| kit::fail_with(gen_err(), e))?;
     let x = ((size as i32) - (fitted.width() as i32)) / 2;
     let y = ((size as i32) - (fitted.height() as i32)) / 2;
     composite(&mut canvas, &fitted, x, y);
@@ -941,13 +1057,16 @@ async fn replied_image(inv: &Invocation, reply: &Message) -> Result<PremulImage,
             if let Some(ref d) = doc {
                 return document_thumb(&inv.client, d).await;
             }
-            Err(kit::fail("这张图片解析不了"))
+            Err(kit::fail(kit::tr("Cannot decode this image", "这张图片解析不了")))
         }
         Err(_) => {
             if let Some(ref d) = doc {
                 return document_thumb(&inv.client, d).await;
             }
-            Err(kit::fail("请回复一条图片或贴纸"))
+            Err(kit::fail(kit::tr(
+                "Reply to an image or sticker",
+                "请回复一条图片或贴纸",
+            )))
         }
     }
 }
@@ -1012,7 +1131,10 @@ async fn document_thumb(
         }
     }
     if best.is_empty() {
-        return Err(kit::fail("这个文件没有可用的预览图"));
+        return Err(kit::fail(kit::tr(
+            "No preview available for this file",
+            "这个文件没有可用的预览图",
+        )));
     }
     let location = tl::types::InputDocumentFileLocation {
         id: doc.id,
@@ -1024,11 +1146,16 @@ async fn document_thumb(
     let data = client
         .download_file(location, doc.dc_id, 5 << 20)
         .await
-        .map_err(|_| kit::fail("预览图下载失败"))?;
-    decode(&data).map_err(|_| kit::fail("预览图解析不了"))
+        .map_err(|_| kit::fail(kit::tr("Failed to download preview", "预览图下载失败")))?;
+    decode(&data).map_err(|_| kit::fail(kit::tr("Cannot decode preview", "预览图解析不了")))
 }
 
-const EAT_LEGEND: &str = "👥 同时用对方和你的头像　🙋 只用你的头像　其余只用对方的";
+fn eat_legend() -> &'static str {
+    kit::tr(
+        "👥 Uses both avatars  🙋 Uses your avatar only  Others use target's avatar",
+        "👥 同时用对方和你的头像　🙋 只用你的头像　其余只用对方的",
+    )
+}
 
 fn eat_catalog_lines(catalog: &HashMap<String, EatEntry>) -> Vec<String> {
     let mut keys: Vec<&String> = catalog.keys().collect();
@@ -1048,15 +1175,27 @@ fn eat_catalog_lines(catalog: &HashMap<String, EatEntry>) -> Vec<String> {
 }
 
 fn eat_list(catalog: &HashMap<String, EatEntry>, prefix: &str, name: &str) -> String {
-    let mut lines = vec![
-        format!("😋 <b>头像表情贴纸</b>（{} 款）", catalog.len()),
-        format!(
-            "回复一条消息发 {}，不写名称随机挑一款",
-            code(&format!("{prefix}{name} 名称"))
-        ),
-        EAT_LEGEND.to_owned(),
-        String::new(),
-    ];
+    let mut lines = if kit::is_zh() {
+        vec![
+            format!("😋 <b>头像表情贴纸</b>（{} 款）", catalog.len()),
+            format!(
+                "回复一条消息发 {}，不写名称随机挑一款",
+                code(&format!("{prefix}{name} 名称"))
+            ),
+            eat_legend().to_owned(),
+            String::new(),
+        ]
+    } else {
+        vec![
+            format!("😋 <b>Avatar Meme Stickers</b> ({})", catalog.len()),
+            format!(
+                "Reply to a message with {}; omit name for random",
+                code(&format!("{prefix}{name} name"))
+            ),
+            eat_legend().to_owned(),
+            String::new(),
+        ]
+    };
     lines.extend(eat_catalog_lines(catalog));
     lines.join("\n")
 }
@@ -1068,9 +1207,9 @@ pub fn register(a: &Arc<App>) {
         settings: kit::new_store(a, "eat.json", EatSettings::default),
         state: Mutex::new(None),
     });
-    for (cmd_name, desc, from_image) in [
-        ("eat", "用头像生成表情贴纸", false),
-        ("eat2", "用图片生成表情贴纸", true),
+    for (cmd_name, desc_en, desc_zh, from_image) in [
+        ("eat", "Avatar meme sticker", "用头像生成表情贴纸", false),
+        ("eat2", "Image meme sticker", "用图片生成表情贴纸", true),
     ] {
         let svc_help = Arc::clone(&eat_svc);
         let svc_handle = Arc::clone(&eat_svc);
@@ -1078,8 +1217,8 @@ pub fn register(a: &Arc<App>) {
             cmd_name,
             &[],
             group::MEDIA,
-            desc,
-            "[名称|set 链接]",
+            desc_en,
+            "[name|set url]",
             move |p| svc_help.help(p),
             move |inv| {
                 let svc = Arc::clone(&svc_handle);
@@ -1092,7 +1231,7 @@ pub fn register(a: &Arc<App>) {
                     let (catalog, root) = svc
                         .load(&inv.cancel, false)
                         .await
-                        .map_err(|e| kit::wrap_fail("读不到素材目录", e))?;
+                        .map_err(|e| kit::wrap_fail(kit::tr("Failed to read asset catalog", "读不到素材目录"), e))?;
                     let Some(reply) = reply else {
                         return inv
                             .respond_pages(&html_pages(
@@ -1111,18 +1250,30 @@ pub fn register(a: &Arc<App>) {
                         sub.to_owned()
                     };
                     let Some(entry) = catalog.get(&key).cloned() else {
-                        return Err(kit::fail(format!(
-                            "找不到 {key}，不回复消息发 {}{} 看全部款式",
-                            inv.prefix(),
-                            cmd_name
-                        )));
+                        return Err(kit::fail(if kit::is_zh() {
+                            format!(
+                                "找不到 {key}，不回复消息发 {}{} 看全部款式",
+                                inv.prefix(),
+                                cmd_name
+                            )
+                        } else {
+                            format!(
+                                "Unknown style {key}; send {}{} without replying to view all",
+                                inv.prefix(),
+                                cmd_name
+                            )
+                        }));
                     };
-                    inv.edit_text(&kit::working(&format!("正在生成「{}」", entry.name)))
-                        .await?;
+                    inv.edit_text(&kit::working(&if kit::is_zh() {
+                        format!("正在生成「{}」", entry.name)
+                    } else {
+                        format!("Generating \"{}\"", entry.name)
+                    }))
+                    .await?;
                     let result = svc
                         .render(&inv, &reply, &root, &entry, from_image)
                         .await
-                        .map_err(|e| kit::wrap_fail("生成失败", e))?;
+                        .map_err(|e| kit::wrap_fail(kit::tr("Generation failed", "生成失败"), e))?;
                     let peer = inv.peer_result()?;
                     send_sticker_doc(
                         &inv.client,
@@ -1137,7 +1288,8 @@ pub fn register(a: &Arc<App>) {
                     inv.delete().await.map_err(Into::into)
                 })
             },
-        );
+        )
+        .zh(desc_zh, "[名称|set 链接]");
         cmd.timeout = Some(Duration::from_secs(120));
         a.registry.register(cmd);
     }
@@ -1153,14 +1305,15 @@ pub fn register(a: &Arc<App>) {
         "eatgif",
         &[],
         group::MEDIA,
-        "用双方头像合成动画贴纸",
-        "[名称|list|clear]",
+        "Animated avatar sticker",
+        "[name|list|clear]",
         move |p| gif_help.help(p),
         move |inv| {
             let svc = Arc::clone(&gif_handle);
             Box::pin(async move { svc.handle(&inv).await })
         },
-    );
+    )
+    .zh("用双方头像合成动画贴纸", "[名称|list|clear]");
     gif_cmd.timeout = Some(Duration::from_secs(300));
     a.registry.register(gif_cmd);
 }

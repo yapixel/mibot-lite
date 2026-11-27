@@ -1,6 +1,6 @@
 use crate::kit;
 use mibot_app::App;
-use mibot_command::{CmdResult, Command, Invocation, code, escape, group};
+use mibot_command::{CmdResult, Invocation, code, escape, group};
 use mibot_httpx::{Request, do_request};
 use regex::Regex;
 use serde::Deserialize;
@@ -8,7 +8,12 @@ use std::net::IpAddr;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-const IP_API: &str = "http://ip-api.com/json/{}?lang=zh-CN&fields=status,message,country,regionName,city,isp,org,as,query,timezone,proxy,hosting";
+fn ip_api_url(encoded: &str) -> String {
+    let lang = kit::tr("en", "zh-CN");
+    format!(
+        "http://ip-api.com/json/{encoded}?lang={lang}&fields=status,message,country,regionName,city,isp,org,as,query,timezone,proxy,hosting"
+    )
+}
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
@@ -97,12 +102,13 @@ fn pct_encode_path(s: &str) -> String {
 }
 
 fn render_ip(result: &IpResult) -> String {
+    let zh = kit::is_zh();
     let mut lines = Vec::new();
     if result.proxy {
-        lines.push("⚠️ 可能是代理 IP".to_owned());
+        lines.push(kit::tr("⚠️ Possible proxy IP", "⚠️ 可能是代理 IP").to_owned());
     }
     if result.hosting {
-        lines.push("🖥 可能是数据中心 IP".to_owned());
+        lines.push(kit::tr("🖥 Possible datacenter IP", "🖥 可能是数据中心 IP").to_owned());
     }
     if !lines.is_empty() {
         lines.push(String::new());
@@ -112,45 +118,69 @@ fn render_ip(result: &IpResult) -> String {
         .filter(|v| !v.trim().is_empty())
         .collect::<Vec<_>>()
         .join(" · ");
-    lines.push("🌍 <b>IP 查询</b>".to_owned());
-    lines.push(String::new());
-    lines.push(format!("🔍 地址：{}", code(&result.query)));
-    lines.push(format!("📍 位置：{}", escape(kit::or_dash(&place))));
-    lines.push(format!("🏢 ISP：{}", escape(kit::or_dash(&result.isp))));
-    lines.push(format!("🏦 组织：{}", escape(kit::or_dash(&result.org))));
-    lines.push(format!("🔢 AS：{}", code(kit::or_dash(&result.as_field))));
-    if !result.timezone.is_empty() {
-        lines.push(format!("⏰ 时区：{}", escape(&result.timezone)));
+    if zh {
+        lines.push("🌍 <b>IP 查询</b>".to_owned());
+        lines.push(String::new());
+        lines.push(format!("🔍 地址：{}", code(&result.query)));
+        lines.push(format!("📍 位置：{}", escape(kit::or_dash(&place))));
+        lines.push(format!("🏢 ISP：{}", escape(kit::or_dash(&result.isp))));
+        lines.push(format!("🏦 组织：{}", escape(kit::or_dash(&result.org))));
+        lines.push(format!("🔢 AS：{}", code(kit::or_dash(&result.as_field))));
+        if !result.timezone.is_empty() {
+            lines.push(format!("⏰ 时区：{}", escape(&result.timezone)));
+        }
+    } else {
+        lines.push("🌍 <b>IP Lookup</b>".to_owned());
+        lines.push(String::new());
+        lines.push(format!("🔍 Address: {}", code(&result.query)));
+        lines.push(format!("📍 Location: {}", escape(kit::or_dash(&place))));
+        lines.push(format!("🏢 ISP: {}", escape(kit::or_dash(&result.isp))));
+        lines.push(format!("🏦 Org: {}", escape(kit::or_dash(&result.org))));
+        lines.push(format!("🔢 AS: {}", code(kit::or_dash(&result.as_field))));
+        if !result.timezone.is_empty() {
+            lines.push(format!("⏰ Timezone: {}", escape(&result.timezone)));
+        }
     }
     if let Some(rest) = result.as_field.strip_prefix("AS")
         && let Some((number, _)) = rest.split_once(' ')
     {
         let esc = escape(number);
         lines.push(String::new());
-        lines.push(format!(
-            "<a href=\"https://bgp.he.net/AS{esc}\">在 bgp.he.net 查看 AS{esc}</a>"
-        ));
+        lines.push(if zh {
+            format!("<a href=\"https://bgp.he.net/AS{esc}\">在 bgp.he.net 查看 AS{esc}</a>")
+        } else {
+            format!("<a href=\"https://bgp.he.net/AS{esc}\">View AS{esc} on bgp.he.net</a>")
+        });
     }
     lines.join("\n")
 }
 
 fn ip_failure(message: &str) -> &'static str {
     match message.trim().to_ascii_lowercase().as_str() {
-        "private range" => "这是内网地址",
-        "reserved range" => "这是保留地址",
-        "invalid query" => "不是有效的 IP 或域名",
-        _ => "没有这个地址的记录",
+        "private range" => kit::tr("Private IP range", "这是内网地址"),
+        "reserved range" => kit::tr("Reserved IP range", "这是保留地址"),
+        "invalid query" => kit::tr("Invalid IP or domain", "不是有效的 IP 或域名"),
+        _ => kit::tr("No record found", "没有这个地址的记录"),
     }
 }
 
 fn ip_help(prefix: &str) -> String {
     let p = escape(prefix);
-    format!(
-        "🌍 <b>IP 查询</b>\n\n查 IP 或域名的地理位置、运营商和 AS 号。\n\n\
-         • <code>{p}ip 8.8.8.8</code>\n\
-         • <code>{p}ip example.com</code>\n\
-         • 回复一条含 IP、域名或链接的消息发 <code>{p}ip</code>\n\n数据来自 ip-api.com。"
-    )
+    if kit::is_zh() {
+        format!(
+            "🌍 <b>IP 查询</b>\n\n查 IP 或域名的地理位置、运营商和 AS 号。\n\n\
+             • <code>{p}ip 8.8.8.8</code>\n\
+             • <code>{p}ip example.com</code>\n\
+             • 回复一条含 IP、域名或链接的消息发 <code>{p}ip</code>\n\n数据来自 ip-api.com。"
+        )
+    } else {
+        format!(
+            "🌍 <b>IP Lookup</b>\n\nLook up geolocation, ISP, and ASN for an IP or domain.\n\n\
+             • <code>{p}ip 8.8.8.8</code>\n\
+             • <code>{p}ip example.com</code>\n\
+             • Reply to a message containing an IP, domain, or URL with <code>{p}ip</code>\n\nPowered by ip-api.com."
+        )
+    }
 }
 
 async fn handle(inv: &Invocation) -> CmdResult {
@@ -168,8 +198,13 @@ async fn handle(inv: &Invocation) -> CmdResult {
     if !found.is_empty() {
         query = found;
     }
-    inv.edit_text(&kit::working(&format!("正在查询 {query}"))).await?;
-    let endpoint = IP_API.replacen("{}", &pct_encode_path(&query), 1);
+    inv.edit_text(&kit::working(&if kit::is_zh() {
+        format!("正在查询 {query}")
+    } else {
+        format!("Looking up {query}")
+    }))
+    .await?;
+    let endpoint = ip_api_url(&pct_encode_path(&query));
     let resp = do_request(Request {
         url: endpoint,
         timeout: Some(Duration::from_secs(15)),
@@ -177,35 +212,52 @@ async fn handle(inv: &Invocation) -> CmdResult {
         ..Default::default()
     })
     .await
-    .map_err(|e| kit::fail_with("查询服务暂时连不上，稍后再试", e))?;
+    .map_err(|e| {
+        kit::fail_with(
+            kit::tr(
+                "Lookup service unreachable; try again later",
+                "查询服务暂时连不上，稍后再试",
+            ),
+            e,
+        )
+    })?;
     if !resp.ok() {
-        return Err(kit::fail(format!(
-            "查询服务出错了（HTTP {}），稍后再试",
-            resp.status
-        )));
+        return Err(kit::fail(if kit::is_zh() {
+            format!("查询服务出错了（HTTP {}），稍后再试", resp.status)
+        } else {
+            format!("Lookup service error (HTTP {}); try again later", resp.status)
+        }));
     }
-    let result: IpResult = serde_json::from_slice(&resp.body)
-        .map_err(|_| kit::fail("查询服务返回了无法解析的内容"))?;
+    let result: IpResult = serde_json::from_slice(&resp.body).map_err(|_| {
+        kit::fail(kit::tr(
+            "Lookup service returned invalid response",
+            "查询服务返回了无法解析的内容",
+        ))
+    })?;
     if result.status != "success" {
-        return Err(kit::fail(format!(
-            "查不到 {query}：{}",
-            ip_failure(&result.message)
-        )));
+        return Err(kit::fail(if kit::is_zh() {
+            format!("查不到 {query}：{}", ip_failure(&result.message))
+        } else {
+            format!("Lookup failed for {query}: {}", ip_failure(&result.message))
+        }));
     }
     inv.edit(&render_ip(&result)).await?;
     Ok(())
 }
 
 pub fn register(app: &Arc<App>) {
-    app.registry.register(Command {
-        name: "ip".into(),
-        group: group::TOOLS.into(),
-        description: "查 IP 或域名的位置与运营商".into(),
-        usage: "[IP|域名]".into(),
-        help_fn: Some(Arc::new(ip_help)),
-        handle: Arc::new(|inv| Box::pin(async move { handle(&inv).await })),
-        ..Default::default()
-    });
+    app.registry.register(
+        kit::make_cmd(
+            "ip",
+            &[],
+            group::TOOLS,
+            "Look up IP or domain info",
+            "[IP|domain]",
+            ip_help,
+            |inv| Box::pin(async move { handle(&inv).await }),
+        )
+        .zh("查 IP 或域名的位置与运营商", "[IP|域名]"),
+    );
 }
 
 #[cfg(test)]
@@ -251,11 +303,11 @@ mod tests {
             "8.8.8.8",
             "美国 · 弗吉尼亚州 · Ashburn",
             "Google LLC",
-            "数据中心",
+            "datacenter",
             "bgp.he.net/AS15169",
         ] {
             assert!(text.contains(wanted), "missing {wanted} in {text}");
         }
-        assert!(!text.contains("代理"));
+        assert!(!text.contains("proxy"));
     }
 }

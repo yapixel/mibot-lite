@@ -67,7 +67,8 @@ pub fn format_uptime_secs(total_secs: i64) -> String {
     );
     let days = total_secs / 86400;
     if days > 0 {
-        format!("{days}天 {clock}")
+        let unit = mibot_i18n::tr("d", "天");
+        format!("{days}{unit} {clock}")
     } else {
         clock
     }
@@ -434,8 +435,14 @@ mod tests {
         assert_eq!(format_uptime_secs(31 * 60 + 9), "00:31:09");
         assert_eq!(
             format_uptime_secs(2 * 86400 + 3 * 3600 + 4 * 60 + 5),
-            "2天 03:04:05"
+            "2d 03:04:05"
         );
+        mibot_i18n::with_lang(mibot_i18n::Lang::Zh, || {
+            assert_eq!(
+                format_uptime_secs(2 * 86400 + 3 * 3600 + 4 * 60 + 5),
+                "2天 03:04:05"
+            );
+        });
         assert_eq!(format_uptime_secs(-1), "--");
 
         assert_eq!(format_bytes(12), "12 B");

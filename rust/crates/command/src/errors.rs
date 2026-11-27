@@ -110,10 +110,10 @@ pub fn brief(err: &(dyn Error + 'static)) -> String {
             return code;
         }
         if bot_err.is_unaddressable_peer() {
-            return "无法定位目标对话".into();
+            return mibot_i18n::tr("Cannot locate target chat", "无法定位目标对话").into();
         }
         if matches!(bot_err, BotError::Cancelled) {
-            return "超时".into();
+            return mibot_i18n::tr("Timed out", "超时").into();
         }
     }
 
@@ -124,12 +124,12 @@ pub fn brief(err: &(dyn Error + 'static)) -> String {
     }
 
     if find_in_chain::<tokio::time::error::Elapsed>(err).is_some() {
-        return "超时".into();
+        return mibot_i18n::tr("Timed out", "超时").into();
     }
 
     if let Some(http_err) = find_in_chain::<HttpxError>(err) {
         if http_err.is_timeout() {
-            return "超时".into();
+            return mibot_i18n::tr("Timed out", "超时").into();
         }
         return mibot_httpx::reason(http_err);
     }
@@ -137,7 +137,7 @@ pub fn brief(err: &(dyn Error + 'static)) -> String {
     if let Some(io_err) = find_in_chain::<std::io::Error>(err)
         && io_err.kind() == std::io::ErrorKind::TimedOut
     {
-        return "超时".into();
+        return mibot_i18n::tr("Timed out", "超时").into();
     }
 
     let raw = err.to_string();
@@ -147,7 +147,7 @@ pub fn brief(err: &(dyn Error + 'static)) -> String {
         return m.as_str().to_owned();
     }
 
-    "内部错误，详情见日志".into()
+    mibot_i18n::tr("Internal error, see log for details", "内部错误，详情见日志").into()
 }
 
 #[cfg(test)]
@@ -173,7 +173,7 @@ mod tests {
         assert!(wrapped.source().is_some());
 
         let peer_err: CmdError = Box::new(BotError::UnaddressablePeer("123".into()));
-        assert_eq!(brief(peer_err.as_ref()), "无法定位目标对话");
+        assert_eq!(brief(peer_err.as_ref()), "Cannot locate target chat");
 
         let rpc_err: CmdError = Box::new(BotError::Invocation(InvocationError::Rpc(RpcError {
             code: 400,
@@ -184,10 +184,19 @@ mod tests {
         assert_eq!(brief(rpc_err.as_ref()), "CHANNEL_PRIVATE");
 
         let timeout_err: CmdError = Box::new(BotError::Cancelled);
-        assert_eq!(brief(timeout_err.as_ref()), "超时");
+        assert_eq!(brief(timeout_err.as_ref()), "Timed out");
 
         let url_with_upper = io::Error::other("https://user:secret_KEY@10.0.0.1/FOO_BAR failed");
-        assert_eq!(brief(&url_with_upper), "内部错误，详情见日志");
+        assert_eq!(
+            brief(&url_with_upper),
+            "Internal error, see log for details"
+        );
+
+        mibot_i18n::with_lang(mibot_i18n::Lang::Zh, || {
+            assert_eq!(brief(peer_err.as_ref()), "无法定位目标对话");
+            assert_eq!(brief(timeout_err.as_ref()), "超时");
+            assert_eq!(brief(&url_with_upper), "内部错误，详情见日志");
+        });
 
         let plain_code = io::Error::other("rpc returned FLOOD_WAIT_30");
         assert_eq!(brief(&plain_code), "FLOOD_WAIT_30");

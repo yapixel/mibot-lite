@@ -17,6 +17,7 @@ mibot-commands.workspace = true
 mibot-config.workspace = true
 mibot-fsutil.workspace = true
 mibot-httpx.workspace = true
+mibot-i18n.workspace = true
 mibot-login.workspace = true
 mibot-logtail.workspace = true
 mibot-sysinfo.workspace = true
