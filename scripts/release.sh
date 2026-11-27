@@ -16,9 +16,30 @@ targets=(
   "linux-arm64:aarch64-unknown-linux-musl"
 )
 
+host_arch=$(uname -m)
 for entry in "${targets[@]}"; do
   name=${entry%%:*}
   rust_target=${entry#*:}
+  case "$rust_target" in
+    x86_64-unknown-linux-musl)
+      if [[ -z "${CC_x86_64_unknown_linux_musl:-}" ]]; then
+        if [[ "$host_arch" == "x86_64" ]]; then
+          export CC_x86_64_unknown_linux_musl=musl-gcc
+        else
+          export CC_x86_64_unknown_linux_musl=x86_64-linux-musl-gcc
+        fi
+      fi
+      ;;
+    aarch64-unknown-linux-musl)
+      if [[ -z "${CC_aarch64_unknown_linux_musl:-}" ]]; then
+        if [[ "$host_arch" == "aarch64" || "$host_arch" == "arm64" ]]; then
+          export CC_aarch64_unknown_linux_musl=musl-gcc
+        else
+          export CC_aarch64_unknown_linux_musl=aarch64-linux-musl-gcc
+        fi
+      fi
+      ;;
+  esac
   RUST_TARGET=$rust_target MIBOT_VERSION=$version bash "$root/scripts/build.sh" "$out/mibot-lite-$name"
 done
 

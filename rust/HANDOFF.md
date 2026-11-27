@@ -8,7 +8,7 @@
 - **Completed (68/68 units across Checkpoints 2–4, all 22 workspace crates)**:
   - **Checkpoints 2 & 3 (20 crates)**: `delivery`, `fsutil`, `httpx` (incl. `do_request_with_headers`), `logtail`, `mibox`, `sysinfo`, `imaging`, `config`, `store`, `botapi`, `statuscard`, `backup`, `media`, `session`, `tgstate`, `bot` (incl. `make_reply_to` forum topic routing + `flush` before `metadata`), `command` (incl. `WorkGuard` / `track_work`), `verify`, `app` (incl. `checkpoint_state`), `login`.
   - **Checkpoint 4 (`crates/commands` + `crates/mibot-lite`)**:
-    - `crates/commands`: `kit` + all 45 command modules (Wave 5: 39 units including `ai/{mod,markdown,check}`; Wave 6: `gt`, `re`, `checkapi`, `update`, `sum`, `yvlu`), plus `register_all`, `import_mibox` (including `TB_PREFIX` -> `MIBOT_PREFIX` and root lock refusal), and style / 4-language README / delegable / standalone-help / read-only tests in `crates/commands/src/lib.rs`.
+    - `crates/commands`: `kit` + all 45 command modules (Wave 5: 39 units including `ai/{mod,markdown,check}`; Wave 6: `gt`, `re`, `checkapi`, `update`, `sum`, `yvlu`), plus `register_all`, `import_mibox` (including `TB_PREFIX` -> `MIBOT_PREFIX` and root lock refusal), and style / 2-language README (EN/JA) / delegable / standalone-help / read-only tests in `crates/commands/src/lib.rs`.
     - `crates/mibot-lite`: CLI entrypoint binary (`--serve`, `--check`, `--verify`, `--login`, `--force`, `--backup`, `--restore`, `--import-mibox`, `--api-id`, `--api-hash`, `--root`, `--verbose`, `--version`) with `rustls` `ring` provider initialization and Go-aligned exit codes (`0` / `1` / `2`).
 - **Verified**:
   - `cargo clippy --all-targets -- -D warnings`: passed (`0` warnings across all 22 crates).

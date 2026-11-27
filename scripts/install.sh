@@ -71,7 +71,7 @@ command -v sha256sum > /dev/null || command -v shasum > /dev/null || die "need s
 if [ -n "$RESTORE" ]; then
   [ -f "$RESTORE" ] && [ -r "$RESTORE" ] || die "cannot read the backup file: $RESTORE"
   RESTORE=$(cd "$(dirname "$RESTORE")" && pwd -P)/$(basename "$RESTORE")
-  if grep -q '"session"' "$ROOT/config.json" 2>/dev/null; then
+  if grep -Eq '"session"[[:space:]]*:[[:space:]]*"[^"]+"' "$ROOT/config.json" 2>/dev/null; then
     die "$ROOT already has an account, and --restore is for a fresh install.
   To replace that account with the backup, stop the service and run:
     systemctl stop mibot-lite
@@ -187,7 +187,7 @@ fi
 
 # Sign in before anything is installed: a deployment with no account is
 # not worth starting, and the prompts need a keyboard.
-if ! grep -q '"session"' "$ROOT/config.json" 2>/dev/null; then
+if ! grep -Eq '"session"[[:space:]]*:[[:space:]]*"[^"]+"' "$ROOT/config.json" 2>/dev/null; then
   say "This directory has no account yet; signing in"
   echo "   You will need the api_id and api_hash from https://my.telegram.org,"
   echo "   your phone number, and the code Telegram sends you."

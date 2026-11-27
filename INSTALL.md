@@ -5,10 +5,10 @@
 服务器上执行（Linux + systemd + root）：
 
 ```sh
-bash <(curl -fsSL https://raw.githubusercontent.com/MiCat-S/mibot-lite/main/scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Yapixel/mibot-lite/rust/scripts/install.sh)
 ```
 
-它会检测架构、下载对应构件、按发布自带的 `checksums.txt` 校验 SHA-256、
+它会检测架构（`linux/amd64` 或 `linux/arm64`）、下载对应构件、按发布自带的 `checksums.txt` 校验 SHA-256、
 没有会话就先带你登录、装好 systemd 单元并启动。重跑即升级，`config.json`
 和 `data/` 原样保留。
 
@@ -17,25 +17,25 @@ bash <(curl -fsSL https://raw.githubusercontent.com/MiCat-S/mibot-lite/main/scri
 
 常用选项：`--root 目录`（默认 `/root/mibot-lite`）、`--no-service`（只装二进制不碰 systemd）、
 `--restore 备份文件`（用 `.bf` 的备份装，不用重新登录，见第 10 节）、`--repo 所有者/仓库`
-（从别的 GitHub 仓库下载发布，默认 `MiCat-S/mibot-lite`）。部署目录和仓库也可以用环境变量
+（从别的 GitHub 仓库下载发布，默认 `Yapixel/mibot-lite`）。部署目录和仓库也可以用环境变量
 `MIBOT_ROOT`、`MIBOT_REPO` 给。
 
 下面是手动分步的流程，想清楚每一步做了什么再看。
 
 ---
 
-每一步都注明在哪执行。服务器需要 Linux + systemd + root。
+每一步都注明在哪执行。服务器需要 Linux（`amd64` / `arm64`）+ systemd + root。
 
 ## 1. 本机：编译
 
-任意装了 Go 1.26 的机器都能交叉编译，产物是静态单文件，服务器上不需要 Go。
+在安装了 Rust 工具链与 `musl-tools` 的对应架构 Linux 主机上可直接编译静态 `musl` 单文件（服务器上不需要 Rust）：
 
 ```sh
-GOOS=linux GOARCH=amd64 bash scripts/build.sh /tmp/mibot-lite
+CC_x86_64_unknown_linux_musl=musl-gcc RUST_TARGET=x86_64-unknown-linux-musl bash scripts/build.sh /tmp/mibot-lite
 ```
 
-**用这个脚本，不要直接 `go build`。** 版本号是链接期注入的，直接 build 会
-留空，`.version` 报 `dev`，`.update` 也认不出自己是不是已经最新。
+**用这个脚本，不要直接脱离 `MIBOT_VERSION` 执行 `cargo build`。** 版本号通过环境变量在编译期注入，直接 build 会
+退回 `Cargo.toml` 默认版本或缺少 tag 标识，`.version` 和 `.update` 版本比对可能与预期不一致。
 
 传到服务器：
 
@@ -115,7 +115,7 @@ sticker、privacy、save、speedtest 的数据和别名表搬过来，`.env` 里
 两个目录一起传上去：
 
 ```sh
-git clone https://github.com/MiCat-S/mibot-lite.git /tmp/mibot-lite-src
+git clone -b rust https://github.com/Yapixel/mibot-lite.git /tmp/mibot-lite-src
 bash /tmp/mibot-lite-src/scripts/install-service.sh \
   --binary /tmp/mibot-lite --root /root/mibot-lite
 ```
@@ -142,7 +142,7 @@ systemctl status mibot-lite     # 看状态
 |---|---|---|
 | `MIBOT_PREFIX` | 命令前缀，空格分隔 | `. 。 $` |
 | `MIBOT_SERVICE` | `.restart` 要重启的 unit 名 | `mibot-lite.service` |
-| `MIBOT_UPDATE_REPO` | `.update` 读的 GitHub 仓库 | `MiCat-S/mibot-lite` |
+| `MIBOT_UPDATE_REPO` | `.update` 读的 GitHub 仓库 | `Yapixel/mibot-lite` |
 
 `.eatgif`、`.eat`、`.eat2`、`.t` 需要主机装有 ffmpeg（要带 libvpx-vp9、libwebp、libopus、libmp3lame，Debian/Ubuntu 的 ffmpeg 包都带），`.yvlu` 引用视频时也要用：
 
@@ -179,7 +179,7 @@ AI、摘要、翻译这些命令的配置在 Telegram 里用命令完成，见 `
 
 ## 9. 内存
 
-服务单元里只设了 `MemoryMax=512M`，没有 `MemoryHigh`。程序常驻 30–50 MB，限额留的余量是给
+服务单元里只设了 `MemoryMax=512M`，没有 `MemoryHigh`。程序本身为无 GC / 无 JS 引擎的纯 Rust 静态二进制，限额留的余量是给
 生成贴纸时临时起的 ffmpeg 子进程的，它跑几秒钟就要一百多 MB；真撞到 512M 说明确实出了问题，
 这时进程会被杀掉重启，而不是让机器开始换页。
 
@@ -212,7 +212,7 @@ JSON 配置。没有：eatgif 素材和测速 CLI 这类缓存（用到时自己
 传到新服务器上，然后：
 
 ```sh
-bash <(curl -fsSL https://raw.githubusercontent.com/MiCat-S/mibot-lite/main/scripts/install.sh) --restore /root/backup.tar.gz
+bash <(curl -fsSL https://raw.githubusercontent.com/Yapixel/mibot-lite/rust/scripts/install.sh) --restore /root/backup.tar.gz
 ```
 
 安装脚本会先恢复配置，看到已有会话就跳过登录，直接装服务启动。
