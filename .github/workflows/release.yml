@@ -54,24 +54,16 @@ jobs:
             os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             cc_var: CC_x86_64_unknown_linux_musl
-            cc_bin: musl-gcc
           - asset: mibot-lite-linux-arm64
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             cc_var: CC_aarch64_unknown_linux_musl
-            cc_bin: musl-gcc
-          - asset: mibot-lite-darwin-arm64
-            os: macos-latest
-            target: aarch64-apple-darwin
-            cc_var: ""
-            cc_bin: ""
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install musl-tools on Linux
-        if: runner.os == 'Linux'
+      - name: Install musl-tools
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
 
       - name: Install Rust toolchain & target
@@ -84,23 +76,19 @@ jobs:
         with:
           workspaces: rust
 
-      - name: Build static/native binary
+      - name: Build static Linux binary
         working-directory: rust
         env:
           MIBOT_VERSION: ${{ inputs.tag || github.ref_name }}
         run: |
-          if [ -n "${{ matrix.cc_var }}" ]; then
-            export "${{ matrix.cc_var }}=${{ matrix.cc_bin }}"
-          fi
+          export "${{ matrix.cc_var }}=musl-gcc"
           cargo build --release --locked --target "${{ matrix.target }}" -p mibot-lite
           mkdir -p ../dist
           cp "target/${{ matrix.target }}/release/mibot-lite" "../dist/${{ matrix.asset }}"
           strip "../dist/${{ matrix.asset }}"
           chmod 755 "../dist/${{ matrix.asset }}"
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            file "../dist/${{ matrix.asset }}"
-            ! ldd "../dist/${{ matrix.asset }}" 2>&1 | grep -q 'libc\.so'
-          fi
+          file "../dist/${{ matrix.asset }}"
+          ! ldd "../dist/${{ matrix.asset }}" 2>&1 | grep -q 'libc\.so'
           "../dist/${{ matrix.asset }}" --version
 
       - name: Upload artifact
