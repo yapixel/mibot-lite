@@ -1,0 +1,15 @@
+[package]
+name = "mibot-session"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+base64.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+grammers-crypto.workspace = true
+grammers-session.workspace = true
+grammers-tl-types.workspace = true
+mibot-fsutil.workspace = true
