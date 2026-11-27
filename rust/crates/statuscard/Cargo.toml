@@ -1,0 +1,11 @@
+[package]
+name = "mibot-statuscard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tiny-skia.workspace = true
+ab_glyph.workspace = true
+mibot-sysinfo.workspace = true

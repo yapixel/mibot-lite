@@ -1,0 +1,11 @@
+[package]
+name = "mibot-imaging"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+image.workspace = true
+fast_image_resize.workspace = true
+tiny-skia.workspace = true
