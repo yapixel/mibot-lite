@@ -1,0 +1,24 @@
+# built binaries
+/mibot-lite
+/mibot-lite-*
+/dist/
+
+# deployment state (never commit an account)
+config.json
+gotd-session.json
+updates.json
+restart-receipt.json
+mibot-lite.lock
+/data/
+.env
+
+# 只留在本地的测试：假 Telegram、快照、连真服务的测试
+*_local_test.go
+/internal/commands/testkit/
+/internal/commands/*/testdata/
+
+# Rust build artifacts & test cache
+/rust/target/
+*.rs.bk
+__pycache__/
+*.pyc
