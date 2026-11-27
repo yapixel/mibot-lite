@@ -1,0 +1,4 @@
+bin.name = "mibot-lite-ref"
+args = []
+status.code = 2
+fs.sandbox = true

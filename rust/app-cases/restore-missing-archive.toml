@@ -1,0 +1,4 @@
+bin.name = "mibot-lite-ref"
+args = ["--restore", "missing.tar.gz", "--root", "restore-dir"]
+status.code = 1
+fs.sandbox = true

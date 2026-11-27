@@ -1,0 +1,4 @@
+bin.name = "mibot-lite-ref"
+args = ["--verify", "--root", "/部署目錄"]
+status.code = 1
+fs.sandbox = true

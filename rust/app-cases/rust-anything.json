@@ -1,0 +1,28 @@
+{
+  "schema": "rust-anything/app-cases@1",
+  "name": "mibot-lite-ref",
+  "run": [
+    "/tmp/mibot-lite-ref"
+  ],
+  "timeout_secs": 30,
+  "recorded": [
+    "example-001-login",
+    "example-002-import-mibox",
+    "example-003-serve",
+    "example-004-verify",
+    "example-005-backup",
+    "example-006-restore",
+    "example-007-verify",
+    "example-008-verify",
+    "example-009-verify",
+    "example-010-verify",
+    "example-011-restore",
+    "example-012-login",
+    "version",
+    "no-args-usage",
+    "check-missing-root",
+    "backup-missing-root",
+    "restore-missing-archive",
+    "import-mibox-missing"
+  ]
+}

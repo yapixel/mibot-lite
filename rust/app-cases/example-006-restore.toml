@@ -1,0 +1,4 @@
+bin.name = "mibot-lite-ref"
+args = ["--restore", "/root/backup.tar.gz", "--root", "/root/mibot-lite", "--force"]
+status.code = 1
+fs.sandbox = true

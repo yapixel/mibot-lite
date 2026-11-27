@@ -1,0 +1,4 @@
+bin.name = "mibot-lite-ref"
+args = ["--import-mibox", "missing-mibox", "--root", "dst-dir"]
+status.code = 1
+fs.sandbox = true

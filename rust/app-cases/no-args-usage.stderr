@@ -1,0 +1,44 @@
+用法：mibot-lite 模式 [--root 部署目录]
+
+模式（选一个）：
+  --serve                 连上 Telegram 提供服务（systemd 就是这样启动的）
+  --check                 只检查部署目录能不能读，不连网、不改文件
+  --verify                连上真实账号，在收藏夹里跑一组只读命令做自检（要先停掉服务）
+  --login [--force]       登录账号，写 config.json；--api-id、--api-hash 可以省掉前两个提问
+  --backup 文件           把 .bf 会发的那份备份写到文件，不连网
+  --restore 文件 [--force] 用备份恢复部署目录（服务要先停掉；--force 覆盖已有账号）
+  --import-mibox 目录     把 MiBox 部署里的命令配置搬进 --root/data，并把 TB_PREFIX 写进 .env；
+                          可以和 --serve、--check、--verify 一起用
+  --version               显示版本
+
+通用：
+  --root 部署目录          默认是当前目录 .
+  --verbose               日志用 debug 级别，包括协议细节
+
+参数：
+  -api-hash string
+    	和 --login 一起用：my.telegram.org 上的 api_hash
+  -api-id int
+    	和 --login 一起用：my.telegram.org 上的 api_id
+  -backup string
+    	把 .bf 会发的那份备份写到这个文件，不连网
+  -check
+    	只检查部署目录能不能读，不连网、不改文件
+  -force
+    	和 --login 或 --restore 一起用：替换已有的账号
+  -import-mibox string
+    	把这个 MiBox 部署目录里的命令配置搬进 --root/data
+  -login
+    	登录 Telegram 账号，把 config.json 写进 --root
+  -restore string
+    	把 .bf 或 --backup 做的备份解到 --root；那个目录上的服务要先停掉
+  -root string
+    	部署目录，里面有 config.json (default ".")
+  -serve
+    	连上 Telegram 提供服务
+  -verbose
+    	日志用 debug 级别，包括协议细节
+  -verify
+    	连上真实账号，在收藏夹里跑一组只读命令做自检
+  -version
+    	显示版本后退出

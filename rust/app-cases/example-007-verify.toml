@@ -1,0 +1,4 @@
+bin.name = "mibot-lite-ref"
+args = ["--verify", "--root", "/deployment/dir"]
+status.code = 1
+fs.sandbox = true

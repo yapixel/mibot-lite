@@ -1,0 +1,4 @@
+bin.name = "mibot-lite-ref"
+args = ["--restore", "$RESTORE", "--root", "$ROOT", "--force"]
+status.code = 1
+fs.sandbox = true

@@ -1,0 +1,4 @@
+bin.name = "mibot-lite-ref"
+args = ["--check", "--root", "missing-dir"]
+status.code = 1
+fs.sandbox = true
