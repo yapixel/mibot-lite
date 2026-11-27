@@ -18,6 +18,9 @@ REPO=${MIBOT_REPO:-Yapixel/mibot-lite}
 ROOT=${MIBOT_ROOT:-/root/mibot-lite}
 SERVICE=mibot-lite.service
 UNIT=/etc/systemd/system/$SERVICE
+OPENRC_NAME=mibot-lite
+OPENRC_SCRIPT=/etc/init.d/$OPENRC_NAME
+OPENRC_LOG=/var/log/mibot-lite.log
 WITH_SERVICE=1
 
 RESTORE=
@@ -62,8 +65,15 @@ die() { printf '\033[1;31mError:\033[0m %s\n' "$*" >&2; exit 1; }
 for tool in curl install; do
   command -v "$tool" > /dev/null || die "missing required command: $tool"
 done
+INIT_SYSTEM=
 if [ "$WITH_SERVICE" = 1 ]; then
-  command -v systemctl > /dev/null || die "missing required command: systemctl"
+  if [ "${MIBOT_INIT_SYSTEM:-}" = "openrc" ] || { [ -z "${MIBOT_INIT_SYSTEM:-}" ] && ! command -v systemctl > /dev/null && command -v rc-service > /dev/null && command -v rc-update > /dev/null; }; then
+    INIT_SYSTEM=openrc
+  elif command -v systemctl > /dev/null; then
+    INIT_SYSTEM=systemd
+  else
+    die "missing required service manager: need systemd (systemctl) or OpenRC (rc-service + rc-update)"
+  fi
 fi
 command -v sha256sum > /dev/null || command -v shasum > /dev/null || die "need sha256sum or shasum to verify the download"
 
@@ -94,12 +104,21 @@ ASSET="mibot-lite-linux-$ARCH"
 # at is what keeps `--root somewhere-else` from taking down a live bot,
 # which is exactly what an earlier version of this script did.
 OWNS_SERVICE=0
-if [ "$WITH_SERVICE" = 1 ] && systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
-  RUNNING_ROOT=$(systemctl show "$SERVICE" -p WorkingDirectory --value 2>/dev/null || true)
-  if [ "$RUNNING_ROOT" = "$ROOT" ]; then
-    OWNS_SERVICE=1
-  else
-    say "A mibot-lite service is running on ${RUNNING_ROOT:-another directory}; leaving it alone"
+if [ "$WITH_SERVICE" = 1 ]; then
+  if [ "$INIT_SYSTEM" = systemd ] && systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+    RUNNING_ROOT=$(systemctl show "$SERVICE" -p WorkingDirectory --value 2>/dev/null || true)
+    if [ "$RUNNING_ROOT" = "$ROOT" ]; then
+      OWNS_SERVICE=1
+    else
+      say "A mibot-lite service is running on ${RUNNING_ROOT:-another directory}; leaving it alone"
+    fi
+  elif [ "$INIT_SYSTEM" = openrc ] && rc-service "$OPENRC_NAME" status 2>/dev/null | grep -q 'status: started'; then
+    RUNNING_ROOT=$(sed -n 's/^directory="\([^"]*\)".*/\1/p' "$OPENRC_SCRIPT" 2>/dev/null | head -1)
+    if [ "$RUNNING_ROOT" = "$ROOT" ]; then
+      OWNS_SERVICE=1
+    else
+      say "A mibot-lite service is running on ${RUNNING_ROOT:-another directory}; leaving it alone"
+    fi
   fi
 fi
 
@@ -120,7 +139,11 @@ cleanup() {
     # 切换失败时先停止候选，再换回原文件；恢复失败则保留暂存目录供人工处理。
     recovered=1
     if [ "$WITH_SERVICE" = 1 ]; then
-      systemctl stop "$SERVICE" || recovered=0
+      if [ "$INIT_SYSTEM" = openrc ]; then
+        rc-service "$OPENRC_NAME" stop || recovered=0
+      else
+        systemctl stop "$SERVICE" || recovered=0
+      fi
     fi
     if [ -e "$STAGING/previous" ] || [ -L "$STAGING/previous" ]; then
       mv -f "$STAGING/previous" "$ROOT/mibot-lite" || recovered=0
@@ -128,15 +151,27 @@ cleanup() {
       rm -f "$ROOT/mibot-lite" || recovered=0
     fi
     if [ "$UNIT_CHANGED" = 1 ]; then
-      if [ "$HAD_UNIT" = 1 ]; then
-        install -m 644 "$STAGING/previous.service" "$UNIT" || recovered=0
+      if [ "$INIT_SYSTEM" = openrc ]; then
+        if [ "$HAD_UNIT" = 1 ]; then
+          install -m 755 "$STAGING/previous.service" "$OPENRC_SCRIPT" || recovered=0
+        else
+          rm -f "$OPENRC_SCRIPT" || recovered=0
+        fi
       else
-        rm -f "$UNIT" || recovered=0
+        if [ "$HAD_UNIT" = 1 ]; then
+          install -m 644 "$STAGING/previous.service" "$UNIT" || recovered=0
+        else
+          rm -f "$UNIT" || recovered=0
+        fi
+        systemctl daemon-reload || recovered=0
       fi
-      systemctl daemon-reload || recovered=0
     fi
     if [ "$STOPPED" = 1 ]; then
-      systemctl start "$SERVICE" || recovered=0
+      if [ "$INIT_SYSTEM" = openrc ]; then
+        rc-service "$OPENRC_NAME" start || recovered=0
+      else
+        systemctl start "$SERVICE" || recovered=0
+      fi
     fi
     if [ "$recovered" = 0 ]; then
       printf 'Recovery failed; retained installation files at %s\n' "$STAGING" >&2
@@ -210,12 +245,19 @@ say "Checking that this build can read $ROOT"
 "$WORK/$ASSET" --check --root "$ROOT" || die "the new binary cannot read this deployment; nothing was installed"
 
 if [ "$WITH_SERVICE" = 1 ]; then
-  if [ -f "$UNIT" ]; then
+  if [ "$INIT_SYSTEM" = systemd ] && [ -f "$UNIT" ]; then
     EXISTING_ROOT=$(systemctl show "$SERVICE" -p WorkingDirectory --value 2>/dev/null || true)
     if [ -n "$EXISTING_ROOT" ] && [ "$EXISTING_ROOT" != "$ROOT" ]; then
       die "$SERVICE already points at $EXISTING_ROOT.
   Installing here would repoint it at $ROOT and orphan that deployment.
   Use --root $EXISTING_ROOT to upgrade it, or remove the unit first."
+    fi
+  elif [ "$INIT_SYSTEM" = openrc ] && [ -f "$OPENRC_SCRIPT" ]; then
+    EXISTING_ROOT=$(sed -n 's/^directory="\([^"]*\)".*/\1/p' "$OPENRC_SCRIPT" 2>/dev/null | head -1)
+    if [ -n "$EXISTING_ROOT" ] && [ "$EXISTING_ROOT" != "$ROOT" ]; then
+      die "$OPENRC_NAME already points at $EXISTING_ROOT.
+  Installing here would repoint it at $ROOT and orphan that deployment.
+  Use --root $EXISTING_ROOT to upgrade it, or remove $OPENRC_SCRIPT first."
     fi
   fi
   [ "${ROOT#/}" != "$ROOT" ] || die "the deployment path must be absolute: $ROOT"
@@ -226,19 +268,30 @@ fi
 STAGING=$(mktemp -d "$ROOT/.install-XXXXXX")
 install -m 755 "$WORK/$ASSET" "$STAGING/candidate"
 if [ "$WITH_SERVICE" = 1 ]; then
-  curl -fsSL "https://raw.githubusercontent.com/$REPO/$TAG/deploy/mibot-lite.service" -o "$STAGING/template" \
-    || die "could not download the service template"
-  sed -e "s|@ROOT@|$ROOT|g" -e "s|@BINARY@|$ROOT/mibot-lite|g" "$STAGING/template" > "$STAGING/$SERVICE"
-  grep -q '@[A-Z][A-Z]*@' "$STAGING/$SERVICE" && die "service template has unsubstituted placeholders"
-  if command -v systemd-analyze > /dev/null; then
-    # 首次安装的正式路径还没有程序，用同一候选验证 ExecStart 可执行性。
-    mkdir "$STAGING/verify"
-    sed -e "s|@ROOT@|$ROOT|g" -e "s|@BINARY@|$STAGING/candidate|g" "$STAGING/template" > "$STAGING/verify/$SERVICE"
-    systemd-analyze verify "$STAGING/verify/$SERVICE"
-  fi
-  if [ -f "$UNIT" ]; then
-    cp "$UNIT" "$STAGING/previous.service"
-    HAD_UNIT=1
+  if [ "$INIT_SYSTEM" = openrc ]; then
+    curl -fsSL "https://raw.githubusercontent.com/$REPO/$TAG/deploy/mibot-lite.openrc" -o "$STAGING/template" \
+      || die "could not download the OpenRC service template"
+    sed -e "s|@ROOT@|$ROOT|g" -e "s|@BINARY@|$ROOT/mibot-lite|g" "$STAGING/template" > "$STAGING/$OPENRC_NAME"
+    grep -q '@[A-Z][A-Z]*@' "$STAGING/$OPENRC_NAME" && die "service template has unsubstituted placeholders"
+    if [ -f "$OPENRC_SCRIPT" ]; then
+      cp "$OPENRC_SCRIPT" "$STAGING/previous.service"
+      HAD_UNIT=1
+    fi
+  else
+    curl -fsSL "https://raw.githubusercontent.com/$REPO/$TAG/deploy/mibot-lite.service" -o "$STAGING/template" \
+      || die "could not download the service template"
+    sed -e "s|@ROOT@|$ROOT|g" -e "s|@BINARY@|$ROOT/mibot-lite|g" "$STAGING/template" > "$STAGING/$SERVICE"
+    grep -q '@[A-Z][A-Z]*@' "$STAGING/$SERVICE" && die "service template has unsubstituted placeholders"
+    if command -v systemd-analyze > /dev/null; then
+      # 首次安装的正式路径还没有程序，用同一候选验证 ExecStart 可执行性。
+      mkdir "$STAGING/verify"
+      sed -e "s|@ROOT@|$ROOT|g" -e "s|@BINARY@|$STAGING/candidate|g" "$STAGING/template" > "$STAGING/verify/$SERVICE"
+      systemd-analyze verify "$STAGING/verify/$SERVICE"
+    fi
+    if [ -f "$UNIT" ]; then
+      cp "$UNIT" "$STAGING/previous.service"
+      HAD_UNIT=1
+    fi
   fi
 fi
 
@@ -249,7 +302,11 @@ SWITCHING=1
 if [ "$OWNS_SERVICE" = 1 ]; then
   say "Stopping the running service to replace its binary"
   STOPPED=1
-  systemctl stop "$SERVICE"
+  if [ "$INIT_SYSTEM" = openrc ]; then
+    rc-service "$OPENRC_NAME" stop
+  else
+    systemctl stop "$SERVICE"
+  fi
 fi
 # 旧文件挪开后就必须由退出钩子负责恢复；先前的失败不触发恢复。
 if [ "$HAD_BINARY" = 1 ]; then
@@ -263,6 +320,30 @@ if [ "$WITH_SERVICE" = 0 ]; then
   exit 0
 fi
 UNIT_CHANGED=1
+if [ "$INIT_SYSTEM" = openrc ]; then
+  install -m 755 "$STAGING/$OPENRC_NAME" "$OPENRC_SCRIPT"
+  LOG_START_BYTES=$(wc -c < "$OPENRC_LOG" 2>/dev/null || echo 0)
+  rc-update add "$OPENRC_NAME" default > /dev/null 2>&1 || true
+  rc-service "$OPENRC_NAME" start
+  for _ in $(seq 30); do
+    LOG=$(tail -c +"$((LOG_START_BYTES + 1))" "$OPENRC_LOG" 2>/dev/null || true)
+    case $LOG in
+      *msg=runtime.ready*)
+        SWITCHING=0
+        say "MiBot Lite $TAG is running and enabled at boot (OpenRC)"
+        printf '%s\n' \
+          "   Try .help and .ping in Telegram." \
+          "   Logs:    tail -f $OPENRC_LOG" \
+          "   Upgrade: re-run this installer, or .update run in Telegram"
+        exit 0
+        ;;
+    esac
+    rc-service "$OPENRC_NAME" status 2>/dev/null | grep -q 'status: started' || break
+    sleep 2
+  done
+  die "the service did not report runtime.ready; inspect: tail -n 50 $OPENRC_LOG"
+fi
+
 install -m 644 "$STAGING/$SERVICE" "$UNIT"
 
 systemctl daemon-reload

@@ -130,6 +130,76 @@ case "$1" in */candidate) [ "$FAILURE" != swap ] || exit 1;; esac
         self.assertEqual(unit, "old unit\n")
         self.assertEqual(state, "active")
 
+    def test_openrc_install_and_rollback(self):
+        for failure, want_rc in [("", 0), ("readiness", 1)]:
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory(prefix="mibot-openrc-") as folder:
+                temp = Path(folder)
+                root, tools = temp / "deployment", temp / "bin"
+                root.mkdir()
+                tools.mkdir()
+                (root / "config.json").write_text('{"session":"existing"}')
+                (root / "mibot-lite").write_text("old working binary\n")
+                init_script = temp / "mibot-lite.openrc"
+                init_script.write_text(f'directory="{root}"\n')
+                (temp / "state").write_text("started")
+                asset = temp / "mibot-lite-linux-amd64"
+                asset.write_text('#!/bin/bash\ntrue\n')
+                asset.chmod(0o755)
+                (temp / "checksums.txt").write_text(
+                    hashlib.sha256(asset.read_bytes()).hexdigest() + "  " + asset.name + "\n")
+                (temp / "release.json").write_text(json.dumps({
+                    "tag_name": "v999.0.0", "assets": [
+                        {"browser_download_url": "https://fixture/" + asset.name},
+                        {"browser_download_url": "https://fixture/checksums.txt"}]}, indent=2))
+                stubs = {
+                    "uname": 'case "$1" in -s) echo Linux;; -m) echo x86_64;; esac',
+                    "curl": '''
+url="$2"; out="$4"
+case "$url" in
+ *releases/latest) cp "$FIXTURE/release.json" "$out";;
+ *checksums.txt) cp "$FIXTURE/checksums.txt" "$out";;
+ *mibot-lite-linux-amd64) cp "$FIXTURE/mibot-lite-linux-amd64" "$out";;
+ */deploy/mibot-lite.openrc)
+  printf 'directory="@ROOT@"\\ncommand="@BINARY@"\\n' > "$out";;
+ *) exit 22;;
+esac''',
+                    "rc-service": '''
+printf '%s\\n' "$*" >> "$FIXTURE/calls"
+case "$2" in
+ status) echo " * status: $(cat "$FIXTURE/state")";;
+ stop) echo stopped > "$FIXTURE/state";;
+ start)
+  echo started > "$FIXTURE/state"
+  [ "$FAILURE" = readiness ] || echo "level=INFO msg=runtime.ready" >> "$FIXTURE/mibot-lite.log";;
+esac''',
+                    "rc-update": 'printf "%s\\n" "$*" >> "$FIXTURE/calls"',
+                    "sleep": ':',
+                }
+                for name, body in stubs.items():
+                    path = tools / name
+                    path.write_text("#!/bin/bash\n" + body + "\n")
+                    path.chmod(0o755)
+                script = SCRIPT.replace(
+                    '[ "${EUID:-$(id -u)}" = 0 ] || die "run as root (the service and its unit are installed system-wide)"',
+                    ': # 离线桩不需要 root')
+                script = script.replace("OPENRC_SCRIPT=/etc/init.d/$OPENRC_NAME", 'OPENRC_SCRIPT="$FIXTURE/mibot-lite.openrc"')
+                script = script.replace("OPENRC_LOG=/var/log/mibot-lite.log", 'OPENRC_LOG="$FIXTURE/mibot-lite.log"')
+                copied = temp / "install.sh"
+                copied.write_text(script)
+                env = dict(os.environ, PATH=str(tools) + ":" + os.environ["PATH"],
+                           MIBOT_ROOT=str(root), MIBOT_INIT_SYSTEM="openrc",
+                           FIXTURE=str(temp), FAILURE=failure)
+                result = subprocess.run(["bash", str(copied)], env=env, capture_output=True, text=True, timeout=15)
+                if want_rc == 0:
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn(f'command="{root}/mibot-lite"', init_script.read_text())
+                    self.assertNotEqual((root / "mibot-lite").read_text(), "old working binary\n")
+                else:
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual((root / "mibot-lite").read_text(), "old working binary\n")
+                    self.assertEqual(init_script.read_text(), f'directory="{root}"\n')
+                    self.assertEqual((temp / "state").read_text().strip(), "started")
+
 
 if __name__ == "__main__":
     unittest.main()

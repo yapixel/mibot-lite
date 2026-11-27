@@ -1,0 +1,25 @@
+#!/sbin/openrc-run
+# Installed as /etc/init.d/mibot-lite by scripts/install-service.sh / scripts/install.sh.
+# Placeholders are substituted at install time.
+
+name="mibot-lite"
+description="MiBot Lite"
+supervisor="supervise-daemon"
+command="@BINARY@"
+command_args="--serve --root @ROOT@"
+directory="@ROOT@"
+respawn_delay=5
+respawn_max=5
+respawn_period=60
+output_log="/var/log/mibot-lite.log"
+error_log="/var/log/mibot-lite.log"
+
+depend() {
+	need net
+	after firewall tailscale
+	use logger
+}
+
+start_pre() {
+	checkpath -f -m 0640 -o root:root "$output_log"
+}

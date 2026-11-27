@@ -330,6 +330,54 @@ impl LimitedBuf {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InitSystem {
+    Systemd,
+    OpenRc,
+}
+
+pub(crate) fn rc_service_path() -> Option<String> {
+    for dir in ["/sbin", "/usr/sbin", "/bin", "/usr/bin", "/usr/local/sbin", "/usr/local/bin"] {
+        let p = format!("{dir}/rc-service");
+        if Path::new(&p).exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub(crate) fn detect_init_system() -> Option<InitSystem> {
+    if Path::new("/run/systemd/system").exists() {
+        return Some(InitSystem::Systemd);
+    }
+    if Path::new("/run/openrc").exists() {
+        return Some(InitSystem::OpenRc);
+    }
+    if systemctl_path().is_ok() {
+        return Some(InitSystem::Systemd);
+    }
+    if rc_service_path().is_some() {
+        return Some(InitSystem::OpenRc);
+    }
+    None
+}
+
+pub(crate) fn openrc_service_name(value: &str) -> Option<String> {
+    if value.is_empty()
+        || value.len() > 256
+        || value.starts_with('-')
+        || value.starts_with('.')
+        || !unit_pattern().is_match(value)
+    {
+        return None;
+    }
+    let stripped = value.strip_suffix(".service").unwrap_or(value);
+    if stripped.is_empty() || stripped.starts_with('-') || stripped.starts_with('.') {
+        return None;
+    }
+    Some(stripped.to_owned())
+}
+
 fn systemctl_path() -> Result<String, SysctlErr> {
     if Path::new("/usr/bin/systemctl").exists() {
         return Ok("/usr/bin/systemctl".into());
@@ -343,8 +391,11 @@ fn systemctl_path() -> Result<String, SysctlErr> {
     Err(SysctlErr::NoSystemctl)
 }
 
-async fn run_systemctl(cancel: &CancellationToken, args: &[String]) -> Result<String, SysctlErr> {
-    let bin_path = systemctl_path()?;
+async fn run_cmd_limited(
+    cancel: &CancellationToken,
+    bin_path: String,
+    args: &[String],
+) -> Result<(std::process::ExitStatus, String, String), SysctlErr> {
     let args_owned = args.to_vec();
     let child_cancel = cancel.child_token();
     let res = tokio::time::timeout(
@@ -353,7 +404,7 @@ async fn run_systemctl(cancel: &CancellationToken, args: &[String]) -> Result<St
             let mut cmd = std::process::Command::new(&bin_path);
             cmd.args(&args_owned)
                 .env_clear()
-                .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+                .env("PATH", "/usr/sbin:/sbin:/usr/bin:/bin")
                 .env("LC_ALL", "C")
                 .env("SYSTEMD_PAGER", "")
                 .env("SYSTEMD_COLORS", "0")
@@ -399,13 +450,7 @@ async fn run_systemctl(cancel: &CancellationToken, args: &[String]) -> Result<St
             };
             let out_s = t_out.join().unwrap_or_default();
             let err_s = t_err.join().unwrap_or_default();
-            if !status.success() {
-                return Err(SysctlErr::Failed(format!(
-                    "exit {status}: {}",
-                    kit::truncate_runes(err_s.trim(), 300)
-                )));
-            }
-            Ok(out_s)
+            Ok((status, out_s, err_s))
         }),
     )
     .await;
@@ -415,6 +460,18 @@ async fn run_systemctl(cancel: &CancellationToken, args: &[String]) -> Result<St
         Ok(Err(join_err)) => Err(SysctlErr::Failed(join_err.to_string())),
         Err(_) => Err(SysctlErr::Timeout),
     }
+}
+
+async fn run_systemctl(cancel: &CancellationToken, args: &[String]) -> Result<String, SysctlErr> {
+    let bin_path = systemctl_path()?;
+    let (status, out_s, err_s) = run_cmd_limited(cancel, bin_path, args).await?;
+    if !status.success() {
+        return Err(SysctlErr::Failed(format!(
+            "exit {status}: {}",
+            kit::truncate_runes(err_s.trim(), 300)
+        )));
+    }
+    Ok(out_s)
 }
 
 fn no_systemd(msg: &str) -> bool {
@@ -486,13 +543,202 @@ fn inspect_with<F, Fut>(
     }
 }
 
+struct OpenRcProc {
+    pid: u32,
+    rss_bytes: Option<u64>,
+    cpu_ns: Option<u64>,
+    started_mono_us: Option<u64>,
+    threads: Option<u64>,
+}
+
+fn read_pid_file(path: &Path) -> Option<u32> {
+    std::fs::read_to_string(path).ok()?.trim().parse::<u32>().ok().filter(|&p| p > 0)
+}
+
+fn find_openrc_pid(name: &str) -> Option<u32> {
+    for direct in [
+        Path::new("/run").join(format!("{name}.pid")),
+        Path::new("/run").join(name).join(format!("{name}.pid")),
+    ] {
+        if let Some(pid) = read_pid_file(&direct)
+            && Path::new(&format!("/proc/{pid}")).exists()
+        {
+            return Some(pid);
+        }
+    }
+    let sup_pid = read_pid_file(&Path::new("/run").join(format!("supervise-{name}.pid")))?;
+    let task_dir = Path::new("/proc").join(sup_pid.to_string()).join("task");
+    let entries = std::fs::read_dir(task_dir).ok()?;
+    for entry in entries.flatten() {
+        if let Ok(children) = std::fs::read_to_string(entry.path().join("children"))
+            && let Some(child_pid) = children
+                .split_whitespace()
+                .filter_map(|s| s.parse::<u32>().ok())
+                .find(|&p| p > 0)
+        {
+            return Some(child_pid);
+        }
+    }
+    None
+}
+
+fn parse_proc_metrics(pid: u32, status_raw: &str, stat_raw: &str) -> OpenRcProc {
+    let mut rss_bytes = None;
+    for line in status_raw.lines() {
+        if let Some(rest) = line.strip_prefix("VmRSS:") {
+            let kb = rest.split_whitespace().next().and_then(|s| s.parse::<u64>().ok());
+            rss_bytes = kb.map(|v| v.saturating_mul(1024));
+            break;
+        }
+    }
+    let mut cpu_ns = None;
+    let mut started_mono_us = None;
+    let mut threads = None;
+    if let Some(after_comm) = stat_raw.rfind(')').map(|idx| &stat_raw[idx + 1..]) {
+        let fields: Vec<&str> = after_comm.split_whitespace().collect();
+        if fields.len() > 19 {
+            let utime = fields[11].parse::<u64>().ok();
+            let stime = fields[12].parse::<u64>().ok();
+            if let (Some(u), Some(s)) = (utime, stime) {
+                cpu_ns = Some(u.saturating_add(s).saturating_mul(10_000_000));
+            }
+            threads = fields[17].parse::<u64>().ok();
+            started_mono_us = fields[19]
+                .parse::<u64>()
+                .ok()
+                .map(|ticks| ticks.saturating_mul(10_000));
+        }
+    }
+    OpenRcProc {
+        pid,
+        rss_bytes,
+        cpu_ns,
+        started_mono_us,
+        threads,
+    }
+}
+
+fn openrc_proc_metrics(name: &str) -> Option<OpenRcProc> {
+    let pid = find_openrc_pid(name)?;
+    let status_raw = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    let stat_raw = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+    Some(parse_proc_metrics(pid, &status_raw, &stat_raw))
+}
+
+fn parse_openrc_status_word(combined: &str) -> (&'static str, String) {
+    for line in combined.lines() {
+        if let Some((_, rhs)) = line.split_once("status:") {
+            let word = rhs.trim().to_ascii_lowercase();
+            return match word.as_str() {
+                "started" => ("active", "running".into()),
+                "stopped" => ("inactive", "dead".into()),
+                "crashed" => ("failed", "failed".into()),
+                "starting" => ("activating", "start".into()),
+                "stopping" => ("deactivating", "stop".into()),
+                _ => ("inactive", word),
+            };
+        }
+    }
+    ("inactive", String::new())
+}
+
+fn build_openrc_status(
+    name: &str,
+    combined: &str,
+    init_exists: bool,
+    enabled: bool,
+    proc_info: Option<OpenRcProc>,
+) -> Status {
+    let mut s = Status::new();
+    s.insert("Id".into(), name.to_owned());
+    if !init_exists || combined.contains("does not exist") {
+        s.insert("LoadState".into(), "not-found".into());
+        s.insert("ActiveState".into(), "inactive".into());
+        return s;
+    }
+    s.insert("LoadState".into(), "loaded".into());
+    let (active, sub) = parse_openrc_status_word(combined);
+    s.insert("ActiveState".into(), active.into());
+    if !sub.is_empty() {
+        s.insert("SubState".into(), sub);
+    }
+    s.insert(
+        "UnitFileState".into(),
+        if enabled { "enabled" } else { "disabled" }.into(),
+    );
+    if active == "active"
+        && let Some(p) = proc_info
+    {
+        s.insert("MainPID".into(), p.pid.to_string());
+        if let Some(rss) = p.rss_bytes {
+            s.insert("MemoryCurrent".into(), rss.to_string());
+        }
+        if let Some(cpu) = p.cpu_ns {
+            s.insert("CPUUsageNSec".into(), cpu.to_string());
+        }
+        if let Some(started) = p.started_mono_us {
+            s.insert("ActiveEnterTimestampMonotonic".into(), started.to_string());
+        }
+        if let Some(t) = p.threads {
+            s.insert("TasksCurrent".into(), t.to_string());
+        }
+    }
+    s
+}
+
+async fn inspect_openrc(
+    cancel: &CancellationToken,
+    prefix: &str,
+    name: &str,
+    origin: &str,
+) -> mibot_command::CmdResult<String> {
+    let Some(bin_path) = rc_service_path() else {
+        return Err(kit::fail_err("主机上没有 rc-service 或 systemctl，查不了服务状态"));
+    };
+    let init_exists = Path::new("/etc/init.d").join(name).exists();
+    if !init_exists {
+        let missing = build_openrc_status(name, "", false, false, None);
+        let raw = format!("Id={name}\nLoadState={}\n", missing["LoadState"]);
+        return inspect_with::<(), ()>(prefix, name, origin, host_uptime(), Ok(raw));
+    }
+    let args = vec![name.to_owned(), "status".into()];
+    let (status, out_s, err_s) = match run_cmd_limited(cancel, bin_path, &args).await {
+        Ok(res) => res,
+        Err(SysctlErr::Timeout) => return Err(kit::fail_err("rc-service 没有应答，稍后再试")),
+        Err(e) => return Err(kit::fail_with_err("读取服务状态失败", e)),
+    };
+    let combined = format!("{out_s}\n{err_s}");
+    if !status.success() && !combined.contains("status:") && !combined.contains("does not exist") {
+        return Err(kit::fail_err("读取服务状态失败"));
+    }
+    let enabled = Path::new("/etc/runlevels/default").join(name).exists();
+    let proc_info = openrc_proc_metrics(name);
+    let parsed = build_openrc_status(name, &combined, init_exists, enabled, proc_info);
+    if parsed.get("LoadState").map(String::as_str) == Some("not-found") {
+        let raw = format!("Id={name}\nLoadState=not-found\n");
+        return inspect_with::<(), ()>(prefix, name, origin, host_uptime(), Ok(raw));
+    }
+    Ok(report(name, origin, &parsed, host_uptime()))
+}
+
+fn detect_openrc(a: &App) -> (String, &'static str) {
+    if let Ok(svc) = std::env::var("RC_SVCNAME")
+        && let Some(clean) = openrc_service_name(svc.trim())
+    {
+        return (clean, "当前进程");
+    }
+    let raw = a.env.get("MIBOT_SERVICE", "mibot-lite.service");
+    let clean = openrc_service_name(raw).unwrap_or_else(|| "mibot-lite".to_owned());
+    (clean, "默认")
+}
+
 fn help(prefix: &str) -> String {
     let p = escape(prefix);
     format!(
-        "⚙️ <b>服务状态</b>\n\n查看 systemd 服务的运行状态、运行时间、内存和 CPU。\n\n\
+        "⚙️ <b>服务状态</b>\n\n查看系统服务（systemd / OpenRC）的运行状态、运行时间、内存和 CPU。\n\n\
          • <code>{p}service</code> 查看本程序所在的服务\n\
          • <code>{p}service 服务名</code> 查看指定服务，如 {}\n\n\
-         不写后缀时按 .service 查，也可以写 .timer、.socket 等其他单元。需要主机上有 systemd。",
+         systemd 下不写后缀时按 .service 查，也可查 .timer、.socket 等；OpenRC 下会自动匹配 /etc/init.d/ 服务名。",
         code(&format!("{prefix}service ssh"))
     )
 }
@@ -503,7 +749,7 @@ pub fn register(a: &Arc<App>) {
         "service",
         &[],
         group::SYSTEM,
-        "查看 systemd 服务状态",
+        "查看系统服务状态",
         "[服务名]",
         help,
         move |inv: Invocation| {
@@ -511,6 +757,20 @@ pub fn register(a: &Arc<App>) {
             Box::pin(async move {
                 if inv.args.len() > 1 {
                     return Err(kit::usage(inv.prefix(), "service [服务名]"));
+                }
+                if detect_init_system() == Some(InitSystem::OpenRc) {
+                    let (name, origin) = if !inv.arg(0).is_empty() {
+                        let Some(checked) = openrc_service_name(inv.arg(0)) else {
+                            return Err(kit::fail_err("服务名只能有字母、数字和 - _ . @"));
+                        };
+                        (checked, "")
+                    } else {
+                        detect_openrc(&app)
+                    };
+                    inv.edit_text(&kit::working(&format!("正在查询 {name}")))
+                        .await?;
+                    let text = inspect_openrc(&inv.cancel, inv.prefix(), &name, origin).await?;
+                    return inv.edit(&text).await.map_err(Into::into);
                 }
                 let (name, origin) = if !inv.arg(0).is_empty() {
                     let Some(checked) = unit_name(inv.arg(0)) else {
@@ -697,5 +957,34 @@ Unknown=value
             lb.push_slice(chunk.as_bytes());
         }
         assert_eq!(lb.into_string_lossy(), "abcde");
+    }
+
+    #[test]
+    fn test_openrc_parsing_and_proc_metrics() {
+        assert_eq!(openrc_service_name("mibot-lite.service").as_deref(), Some("mibot-lite"));
+        assert_eq!(openrc_service_name("stat_client").as_deref(), Some("stat_client"));
+        assert_eq!(openrc_service_name(".service"), None);
+        assert_eq!(openrc_service_name("../bad"), None);
+
+        let proc_info = parse_proc_metrics(
+            2142,
+            "Name:\tmibot-lite\nVmRSS:\t   28672 kB\nThreads:\t6\n",
+            "2142 (mibot lite) S 2141 2141 1 0 -1 4194304 10 0 0 0 150 50 0 0 20 0 6 0 360000 100 200",
+        );
+        assert_eq!(proc_info.rss_bytes, Some(28672 * 1024));
+        assert_eq!(proc_info.cpu_ns, Some(200 * 10_000_000));
+        assert_eq!(proc_info.started_mono_us, Some(360_000 * 10_000));
+        assert_eq!(proc_info.threads, Some(6));
+
+        let st = build_openrc_status("mibot-lite", " * status: started\n", true, true, Some(proc_info));
+        let txt = report("mibot-lite", "默认", &st, Duration::from_secs(7200));
+        assert!(txt.contains("<code>mibot-lite</code>（默认）"));
+        assert!(txt.contains("• 状态：活跃（运行中）"));
+        assert!(txt.contains("• 主进程 PID：<code>2142</code>"));
+        assert!(txt.contains("• 内存：<code>28.0 MB</code>"));
+        assert!(txt.contains("• 开机启动：开启"));
+
+        let missing = build_openrc_status("nope", "", false, false, None);
+        assert_eq!(missing.get("LoadState").map(String::as_str), Some("not-found"));
     }
 }

@@ -132,10 +132,7 @@ enum TriggerFailure {
     Exit(String),
 }
 
-async fn default_trigger_restart(cancel: CancellationToken, service: String) -> Result<(), TriggerFailure> {
-    if cancel.is_cancelled() {
-        return Err(TriggerFailure::Interrupted);
-    }
+async fn trigger_systemd_restart(cancel: CancellationToken, service: String) -> Result<(), TriggerFailure> {
     let bin = systemctl_path();
     let res = tokio::time::timeout(
         Duration::from_secs(5),
@@ -162,6 +159,69 @@ async fn default_trigger_restart(cancel: CancellationToken, service: String) -> 
             }
             Err(TriggerFailure::Exit(format!("exit status {st}")))
         }
+    }
+}
+
+async fn trigger_openrc_restart(cancel: CancellationToken, service: String) -> Result<(), TriggerFailure> {
+    let Some(svc) = crate::service::openrc_service_name(&service) else {
+        return Err(TriggerFailure::Exit(format!("无效的 OpenRC 服务名: {service}")));
+    };
+    let Some(bin) = crate::service::rc_service_path() else {
+        return Err(TriggerFailure::Exit("主机上没有 rc-service".into()));
+    };
+    let script = Path::new("/etc/init.d").join(&svc);
+    if !script.exists() {
+        return Err(TriggerFailure::Exit(format!(
+            "未找到 OpenRC 服务脚本 /etc/init.d/{svc}"
+        )));
+    }
+    let mut cmd = std::process::Command::new(&bin);
+    cmd.args([svc.as_str(), "restart"])
+        .env_clear()
+        .env("PATH", "/usr/sbin:/sbin:/usr/bin:/bin")
+        .env("LC_ALL", "C")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        // Isolate PGID so supervise-daemon stopping this process does not kill rc-service mid-restart.
+        cmd.process_group(0);
+    }
+    let mut child = cmd.spawn().map_err(|e| TriggerFailure::Exit(e.to_string()))?;
+    for _ in 0..16 {
+        if cancel.is_cancelled() {
+            return Err(TriggerFailure::Interrupted);
+        }
+        match child.try_wait() {
+            Ok(Some(st)) if st.success() => return Ok(()),
+            Ok(Some(st)) => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::process::ExitStatusExt as _;
+                    if st.signal().is_some() {
+                        return Err(TriggerFailure::Interrupted);
+                    }
+                }
+                return Err(TriggerFailure::Exit(format!("rc-service exit status {st}")));
+            }
+            Ok(None) => tokio::time::sleep(Duration::from_millis(25)).await,
+            Err(e) => return Err(TriggerFailure::Exit(e.to_string())),
+        }
+    }
+    // rc-service is actively running `stop` -> `start`; allow this process to exit cleanly on SIGTERM.
+    Ok(())
+}
+
+async fn default_trigger_restart(cancel: CancellationToken, service: String) -> Result<(), TriggerFailure> {
+    if cancel.is_cancelled() {
+        return Err(TriggerFailure::Interrupted);
+    }
+    if crate::service::detect_init_system() == Some(crate::service::InitSystem::OpenRc) {
+        trigger_openrc_restart(cancel, service).await
+    } else {
+        trigger_systemd_restart(cancel, service).await
     }
 }
 
@@ -270,6 +330,55 @@ impl Restarter {
     }
 
     async fn status_rows(&self) -> String {
+        if crate::service::detect_init_system() == Some(crate::service::InitSystem::OpenRc) {
+            let svc = crate::service::openrc_service_name(&self.service)
+                .unwrap_or_else(|| self.service.clone());
+            let script_path = format!("/etc/init.d/{svc}");
+            let script_state = if Path::new(&script_path).exists() {
+                script_path
+            } else {
+                "missing".into()
+            };
+            let autostart = if Path::new("/etc/runlevels/default").join(&svc).exists() {
+                "enabled"
+            } else {
+                "disabled"
+            };
+            let status_val = match crate::service::rc_service_path() {
+                Some(bin) => {
+                    let out = tokio::time::timeout(
+                        Duration::from_millis(1500),
+                        tokio::process::Command::new(&bin)
+                            .args([svc.as_str(), "status"])
+                            .output(),
+                    )
+                    .await;
+                    match out {
+                        Ok(Ok(o)) => {
+                            let combined = format!(
+                                "{}{}",
+                                String::from_utf8_lossy(&o.stdout),
+                                String::from_utf8_lossy(&o.stderr)
+                            );
+                            combined
+                                .lines()
+                                .find(|l| !l.trim().is_empty())
+                                .map(|l| l.trim().trim_start_matches('*').trim().to_owned())
+                                .unwrap_or_else(|| "unknown".into())
+                        }
+                        _ => "unavailable".into(),
+                    }
+                }
+                None => "unavailable".into(),
+            };
+            return [
+                format!("Service: {}", escape(&svc)),
+                format!("Status: {}", escape(&status_val)),
+                format!("Autostart: {}", escape(autostart)),
+                format!("Script: {}", escape(&script_state)),
+            ]
+            .join("\n");
+        }
         let bin = systemctl_path();
         let mut rows = Vec::with_capacity(4);
         for field in ["LoadState", "ActiveState", "SubState", "FragmentPath"] {
@@ -319,10 +428,19 @@ impl Restarter {
                 .map_err(Into::into),
             Err(ScheduleError::Trigger(_)) => {
                 let st = self.status().await;
+                let inspect_cmd = if crate::service::detect_init_system()
+                    == Some(crate::service::InitSystem::OpenRc)
+                {
+                    let svc = crate::service::openrc_service_name(&self.service)
+                        .unwrap_or_else(|| self.service.clone());
+                    format!("rc-service {svc} status")
+                } else {
+                    format!("systemctl status {} --no-pager", self.service)
+                };
                 let msg = format!(
                     "{}\n状态：\n{st}\n\n可执行 {} 查看详情。",
                     escape(failure),
-                    code(&format!("systemctl status {} --no-pager", self.service))
+                    code(&inspect_cmd)
                 );
                 inv.edit(&msg).await.map_err(Into::into)
             }
@@ -442,8 +560,8 @@ fn owner_hint() -> String {
 
 fn restart_help(prefix: &str) -> String {
     format!(
-        "🔄 <b>重启服务</b>\n\n{} 通过 systemd 重启服务。正在跑的命令会被中断，重启前发的命令重启后也不会补跑；\
-         重启完成后这条消息会改成「重启成功」。",
+        "🔄 <b>重启服务</b>\n\n{} 通过系统服务管理器（systemd / OpenRC）重启服务。正在跑的命令会被中断，重启前发的命令重启后也不会补跑；\
+         重启完成后这条消息会改成「重启成功」。\n\n如果跑在另一个服务名下，可在 .env 里写 MIBOT_SERVICE=服务名。",
         code(&format!("{prefix}restart"))
     )
 }
@@ -455,7 +573,7 @@ pub fn register(a: &Arc<App>) -> Arc<Restarter> {
         "restart",
         &[],
         group::SYSTEM,
-        "重启 systemd 服务",
+        "重启系统服务",
         "",
         restart_help,
         move |inv: Invocation| {

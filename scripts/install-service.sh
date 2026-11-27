@@ -40,9 +40,56 @@ root=$(cd -- "$root" && pwd -P)
 [[ "$root" =~ ^/[A-Za-z0-9._/-]*$ ]] || { echo "Deployment path must be absolute and free of unit metacharacters: $root" >&2; exit 1; }
 [[ -f "$root/config.json" ]] || { echo "Log in first: $root/config.json is missing" >&2; exit 1; }
 
-for executable in /usr/bin/systemctl /usr/bin/systemd-analyze; do
-  [[ -x "$executable" ]] || { echo "Missing executable: $executable" >&2; exit 1; }
-done
+if [[ -x /usr/bin/systemctl && -x /usr/bin/systemd-analyze ]] && [[ -d /run/systemd/system || ! -d /run/openrc ]]; then
+  init_system=systemd
+elif command -v rc-service >/dev/null && command -v rc-update >/dev/null; then
+  init_system=openrc
+else
+  echo "Need systemd (systemctl + systemd-analyze) or OpenRC (rc-service + rc-update)" >&2
+  exit 1
+fi
+
+if [[ "$init_system" == "openrc" ]]; then
+  openrc_script=/etc/init.d/mibot-lite
+  openrc_log=/var/log/mibot-lite.log
+  if rc-service mibot-lite status 2>/dev/null | grep -q 'status: started'; then
+    echo "mibot-lite is started; stop it before installing over it" >&2; exit 1
+  fi
+  "$binary" --check --root "$root"
+  installed="$root/mibot-lite"
+  template=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../deploy" && pwd -P)/mibot-lite.openrc
+  [[ -f "$template" ]] || { echo "Missing OpenRC template: $template" >&2; exit 1; }
+  staging=$(mktemp -d "$root/.install-XXXXXX")
+  trap 'rm -rf "$staging"' EXIT
+  rendered="$staging/mibot-lite"
+  sed -e "s|@ROOT@|$root|g" -e "s|@BINARY@|$installed|g" "$template" > "$rendered"
+  if grep -q '@[A-Z][A-Z]*@' "$rendered"; then
+    echo "OpenRC template has unsubstituted placeholders" >&2; exit 1
+  fi
+  if [[ -f "$openrc_script" ]]; then
+    existing_root=$(sed -n 's/^directory="\([^"]*\)".*/\1/p' "$openrc_script" 2>/dev/null | head -1)
+    [[ -z "$existing_root" || "$existing_root" == "$root" ]] || { echo "mibot-lite already serves $existing_root" >&2; exit 1; }
+  fi
+  install -m 755 "$binary" "$staging/candidate"
+  mv -f "$staging/candidate" "$installed"
+  install -m 755 "$rendered" "$openrc_script"
+  log_start_bytes=$(wc -c < "$openrc_log" 2>/dev/null || echo 0)
+  rc-update add mibot-lite default >/dev/null 2>&1 || true
+  rc-service mibot-lite start
+  for _ in $(seq 30); do
+    log=$(tail -c +"$((log_start_bytes + 1))" "$openrc_log" 2>/dev/null || true)
+    case $log in
+      *msg=runtime.ready*)
+        printf '%s\n' 'MiBot Lite is ready and enabled at boot (OpenRC).' 'Verify .help and .ping in Telegram.' "Logs: tail -f $openrc_log"
+        exit 0
+        ;;
+    esac
+    rc-service mibot-lite status 2>/dev/null | grep -q 'status: started' || break
+    sleep 2
+  done
+  echo "Startup did not reach runtime.ready; inspect: tail -n 50 $openrc_log" >&2
+  exit 1
+fi
 
 state=$(/usr/bin/systemctl show mibot-lite -p ActiveState --value)
 case "$state" in inactive|failed|"") ;; *) echo "mibot-lite is $state; stop it before installing over it" >&2; exit 1 ;; esac
