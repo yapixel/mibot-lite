@@ -1,0 +1,29 @@
+[package]
+name = "mibot-lite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mibot-lite"
+path = "src/main.rs"
+
+[dependencies]
+chrono.workspace = true
+mibot-app.workspace = true
+mibot-backup.workspace = true
+mibot-bot.workspace = true
+mibot-commands.workspace = true
+mibot-config.workspace = true
+mibot-fsutil.workspace = true
+mibot-httpx.workspace = true
+mibot-login.workspace = true
+mibot-logtail.workspace = true
+mibot-sysinfo.workspace = true
+mibot-verify.workspace = true
+rustls.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+mibot-session.workspace = true

@@ -1,0 +1,91 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/delivery",
+    "crates/fsutil",
+    "crates/mibox",
+    "crates/sysinfo",
+    "crates/imaging",
+    "crates/store",
+    "crates/config",
+    "crates/statuscard",
+    "crates/logtail",
+    "crates/httpx",
+    "crates/botapi",
+    "crates/backup",
+    "crates/media",
+    "crates/session",
+    "crates/tgstate",
+    "crates/bot",
+    "crates/verify",
+    "crates/command",
+    "crates/app",
+    "crates/login",
+    "crates/commands",
+    "crates/mibot-lite",
+]
+
+[workspace.package]
+version = "0.4.0"
+edition = "2024"
+license = "LGPL-2.1-only"
+
+[workspace.dependencies]
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
+fast_image_resize = { version = "6.2.0", features = ["image"] }
+tiny-skia = { version = "0.12.0", default-features = false, features = ["std", "simd", "png-format"] }
+ab_glyph = "0.2.32"
+libc = "0.2"
+regex = "1"
+url = "2"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "socks", "http2", "charset", "json"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+sha2 = "0.10"
+hex = "0.4"
+flate2 = "1"
+tar = "0.4"
+base64 = "0.23"
+tokio-util = "0.7"
+futures-util = "0.3"
+getrandom = "0.2"
+md5 = "0.8"
+rpassword = "7.5.5"
+fancy-regex = "0.20.2"
+croner = "4.0.3"
+chrono-tz = "0.10.4"
+serde-saphyr = "2.2.0"
+scraper = "0.29.0"
+idna = "1.1.0"
+grammers-client = { version = "=0.12.0", default-features = false, features = ["proxy"] }
+grammers-mtsender = { version = "=0.12.0", features = ["proxy"] }
+grammers-session = { version = "=0.12.0", default-features = false, features = ["serde"] }
+grammers-tl-types = { version = "=0.12.0", features = ["impl-debug", "impl-from-enum", "impl-from-type"] }
+grammers-mtproto = "=0.12.0"
+grammers-crypto = "=0.12.0"
+mibot-fsutil = { path = "crates/fsutil" }
+mibot-sysinfo = { path = "crates/sysinfo" }
+mibot-config = { path = "crates/config" }
+mibot-delivery = { path = "crates/delivery" }
+mibot-httpx = { path = "crates/httpx" }
+mibot-imaging = { path = "crates/imaging" }
+mibot-session = { path = "crates/session" }
+mibot-tgstate = { path = "crates/tgstate" }
+mibot-bot = { path = "crates/bot" }
+mibot-verify = { path = "crates/verify" }
+mibot-command = { path = "crates/command" }
+mibot-logtail = { path = "crates/logtail" }
+mibot-app = { path = "crates/app" }
+mibot-login = { path = "crates/login" }
+mibot-commands = { path = "crates/commands" }
+mibot-store = { path = "crates/store" }
+mibot-mibox = { path = "crates/mibox" }
+mibot-botapi = { path = "crates/botapi" }
+mibot-backup = { path = "crates/backup" }
+mibot-statuscard = { path = "crates/statuscard" }
+mibot-media = { path = "crates/media" }
