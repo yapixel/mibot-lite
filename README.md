@@ -233,11 +233,11 @@ deletes them). One account cannot be connected twice at once, so stop the servic
 ./mibot-lite --verify --root /deployment/dir
 ```
 
-### Verification summary (v0.4.1)
+### Verification summary (v0.4.2)
 
 - **Workspace**: **22 crates** under `rust/` covering all 45 command groups and runtime subsystems.
 - **Lint**: `cargo clippy --locked --all-targets -- -D warnings` — **0 warnings**.
-- **Unit & parity tests**: `cargo test --locked` — **245 / 245 passed** (`mibot-commands`: 144, `mibot-bot`: 17, `mibot-imaging`: 9, `mibot-tgstate`: 8, `mibot-command`: 8, `mibot-app`: 7, `mibot-backup`: 5, `mibot-config`: 5, `mibot-logtail`: 5, `mibot-session`: 5, `mibot-botapi`: 5, `mibot-httpx`: 4, `mibot-mibox`: 4, `mibot-store`: 4, `mibot-media`: 3, `mibot-statuscard`: 3, `mibot-lite`: 2, `mibot-login`: 2, `mibot-verify`: 2, `mibot-delivery`: 1, `mibot-fsutil`: 1, `mibot-sysinfo`: 1).
+- **Unit & parity tests**: `cargo test --locked` — **246 / 246 passed** (`mibot-commands`: 145, `mibot-bot`: 17, `mibot-imaging`: 9, `mibot-tgstate`: 8, `mibot-command`: 8, `mibot-app`: 7, `mibot-backup`: 5, `mibot-config`: 5, `mibot-logtail`: 5, `mibot-session`: 5, `mibot-botapi`: 5, `mibot-httpx`: 4, `mibot-mibox`: 4, `mibot-store`: 4, `mibot-media`: 3, `mibot-statuscard`: 3, `mibot-lite`: 2, `mibot-login`: 2, `mibot-verify`: 2, `mibot-delivery`: 1, `mibot-fsutil`: 1, `mibot-sysinfo`: 1).
 - **Pure-Rust dependency audit**: 0 occurrences of `openssl-sys`, `libsqlite3-sys`, `rusqlite`, `sqlite`, `libsql`, `aws-lc-sys`, `aws-lc-fips-sys`, `libyaml`, `webp-sys`, or `libwebp-sys` in `rust/Cargo.lock`.
 - **CLI & installer checks**: `python3 -m unittest scripts/install_test.py` (5/5 OK); offline CLI smoke checks (`--version`, no-args exit `2`, missing-root `--check` exit `1`) pass; GitHub Actions CI Run `45984816612` green.
 - **Scope note**: live Telegram DC modes (`--serve`, `--verify`, interactive `--login`) require real account credentials and network access, and are verified in CI via offline mock harnesses.
