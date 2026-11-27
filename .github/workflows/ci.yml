@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [rust, main]
+  pull_request:
+    branches: [rust, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Clippy, Tests & Offline CLI Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Cargo dependencies & artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Audit Cargo.lock for forbidden C system dependencies
+        run: |
+          if grep -E 'name = "(openssl-sys|libsqlite3-sys|rusqlite|sqlite|libsql|aws-lc-sys|aws-lc-fips-sys|libyaml|webp-sys|libwebp-sys)"' rust/Cargo.lock; then
+            echo "::error::Forbidden C system dependency found in rust/Cargo.lock"
+            exit 1
+          fi
+
+      - name: Clippy (--all-targets -D warnings)
+        working-directory: rust
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Unit & parity tests
+        working-directory: rust
+        run: cargo test --locked
+
+      - name: Build release binary & run offline CLI smoke checks
+        working-directory: rust
+        env:
+          MIBOT_VERSION: ${{ github.ref_name }}
+        run: |
+          cargo build --locked --release -p mibot-lite
+          bin="./target/release/mibot-lite"
+
+          test "$("$bin" --version)" = "${{ github.ref_name }}"
+
+          set +e
+          "$bin" >/dev/null 2>&1
+          code_empty=$?
+          "$bin" --serve --check >/dev/null 2>&1
+          code_conflict=$?
+          "$bin" --check --root /tmp/mibot-ci-missing >/dev/null 2>&1
+          code_missing_check=$?
+          "$bin" --backup /tmp/mibot-ci-out.tar.gz --root /tmp/mibot-ci-missing >/dev/null 2>&1
+          code_missing_backup=$?
+          "$bin" --restore /tmp/mibot-ci-missing.tar.gz --root /tmp/mibot-ci-missing >/dev/null 2>&1
+          code_missing_restore=$?
+          "$bin" --import-mibox /tmp/mibot-ci-missing-mibox --root /tmp/mibot-ci-missing >/dev/null 2>&1
+          code_missing_import=$?
+          set -e
+
+          test "$code_empty" -eq 2
+          test "$code_conflict" -eq 2
+          test "$code_missing_check" -eq 1
+          test "$code_missing_backup" -eq 1
+          test "$code_missing_restore" -eq 1
+          test "$code_missing_import" -eq 1
+
+      - name: Installer offline unit tests
+        run: python3 -m unittest scripts/install_test.py
