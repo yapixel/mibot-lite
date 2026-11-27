@@ -2055,11 +2055,7 @@ async fn delete_command(inv: &Invocation, peer: &tl::enums::InputPeer) {
     } else {
         vec![inv.message.id]
     };
-    if let Err(_err) = inv.client.delete_messages(peer, &ids).await
-        && let Some(app) = None::<&Arc<App>>
-    {
-        let _ = app;
-    }
+    let _ = inv.client.delete_messages(peer, &ids).await;
 }
 
 async fn deliver_answer(inv: &Invocation, pages: &[String], anchor: i32) -> CmdResult {

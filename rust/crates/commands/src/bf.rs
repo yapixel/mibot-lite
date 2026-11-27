@@ -8,7 +8,7 @@ use mibot_logtail::Level;
 use std::sync::Arc;
 use std::time::Duration;
 
-const INSTALL_URL: &str = "https://raw.githubusercontent.com/MiCat-S/mibot-lite/main/scripts/install.sh";
+const INSTALL_URL: &str = "https://raw.githubusercontent.com/Yapixel/mibot-lite/rust/scripts/install.sh";
 const CAPTION_FILE_LIMIT: usize = 12;
 
 pub fn backup_caption(version: &str, names: &[String], size: usize) -> String {

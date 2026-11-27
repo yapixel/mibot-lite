@@ -295,9 +295,7 @@ impl App {
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
         let started_at = Instant::now();
-        let boot_id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
-            .map(|s| s.trim().to_owned())
-            .unwrap_or_default();
+        let boot_id = format!("{}-{:016x}", std::process::id(), mibot_bot::random_id() as u64);
         let initial_foreign: Vec<ForeignListener> = opts.foreign.take().into_iter().collect();
 
         let app = Arc::new(Self {
@@ -739,7 +737,17 @@ mod tests {
 
         let mut opts = Options::new(&dir);
         opts.read_only = true;
-        let _app = App::prepare(opts).unwrap();
+        let app1 = App::prepare(opts).unwrap();
+
+        let mut opts2 = Options::new(&dir);
+        opts2.read_only = true;
+        let app2 = App::prepare(opts2).unwrap();
+
+        assert!(!app1.boot_id.is_empty());
+        assert_ne!(
+            app1.boot_id, app2.boot_id,
+            "consecutive App::prepare calls must produce distinct per-instance boot_id"
+        );
 
         assert!(!dir.join(LOCK_FILE).exists());
         assert!(!dir.join("data").exists());
