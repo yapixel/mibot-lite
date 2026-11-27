@@ -1,0 +1,17 @@
+[package]
+name = "mibot-login"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tokio.workspace = true
+rpassword.workspace = true
+grammers-client.workspace = true
+grammers-mtsender.workspace = true
+grammers-session.workspace = true
+mibot-config.workspace = true
+mibot-fsutil.workspace = true
+mibot-session.workspace = true
+mibot-app.workspace = true

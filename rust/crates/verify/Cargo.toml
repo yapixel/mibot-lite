@@ -1,0 +1,16 @@
+[package]
+name = "mibot-verify"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio.workspace = true
+tokio-util.workspace = true
+grammers-tl-types.workspace = true
+mibot-bot.workspace = true
+mibot-sysinfo.workspace = true
+
+[dev-dependencies]
+grammers-mtsender.workspace = true
+mibot-command.workspace = true

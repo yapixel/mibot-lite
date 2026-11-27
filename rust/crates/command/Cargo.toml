@@ -1,0 +1,16 @@
+[package]
+name = "mibot-command"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio.workspace = true
+tokio-util.workspace = true
+futures-util.workspace = true
+regex.workspace = true
+grammers-mtsender.workspace = true
+grammers-tl-types.workspace = true
+mibot-bot.workspace = true
+mibot-httpx.workspace = true
+mibot-logtail.workspace = true
