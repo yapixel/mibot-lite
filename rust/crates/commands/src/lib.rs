@@ -526,9 +526,7 @@ mod tests {
         let root = repo_root();
         let cmd_re = Regex::new(r"`\.([a-z0-9_]+)").expect("cmd_re");
         let langs = [
-            ("README.md", "## 命令", "部分"),
-            ("README.en.md", "## Commands", "partly"),
-            ("README.zh-TW.md", "## 指令", "部分"),
+            ("README.md", "## Commands", "partly"),
             ("README.ja.md", "## コマンド", "一部"),
         ];
 

@@ -1,6 +1,12 @@
 # MiBot Lite
 
-[简体中文](README.md) | [English](README.en.md) | [繁體中文](README.zh-TW.md) | **日本語**
+[![CI](https://github.com/Yapixel/mibot-lite/actions/workflows/ci.yml/badge.svg?branch=rust)](https://github.com/Yapixel/mibot-lite/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Yapixel/mibot-lite?label=release)](https://github.com/Yapixel/mibot-lite/releases)
+[![Rust 2024](https://img.shields.io/badge/Rust-2024%20Pure%20Rust-orange?logo=rust)](rust/Cargo.toml)
+[![Platform](https://img.shields.io/badge/platform-linux--amd64%20%7C%20linux--arm64-blue)](.github/workflows/release.yml)
+[![License: LGPL-2.1](https://img.shields.io/badge/License-LGPL--2.1-green)](LICENSE)
+
+[English](README.md) | **日本語**
 
 省メモリな純 Rust 製 Telegram ユーザーボットです。上流の Go 版 `mibot-lite` をベースに全面リライトし、静的リンクされた単一のネイティブバイナリ（GC なし・C システムライブラリ依存なし）として動作し、コマンドと状態はそれぞれバイナリと JSON ファイルに収まります。
 
@@ -251,11 +257,11 @@ Base64 と URL の 4 つのコマンド、`subinfo.rs` は `.cha` を含み、`.
 基本コマンドは `core.rs` にあります。短縮形（`.st`、`.h` など）は登録時の別名で、本来の名前と同じモジュールにあります。
 
 コマンドがチャットに返す文言（見出し、失敗メッセージ、使い方、用語、句読点）は [STYLE.md](STYLE.md)（中国語）に従います。
-機械的に確認できる部分と 4 言語 README の一致は `test_command_text_style` と `test_readme_matches_registry` がチェックします。
+機械的に確認できる部分と英語・日本語 README の一致は `test_command_text_style` と `test_readme_matches_registry` がチェックします。
 
 コマンドを追加するには、`rust/crates/commands/src/xxx.rs` を作成して `pub fn register(a: &Arc<App>)` を書き、
 `rust/crates/commands/src/lib.rs` の公開モジュールと `register_all` に追加します。他の人に貸し出せるようにするには、
-`rust/crates/commands/src/sudo.rs` のホワイトリストおよび 4 言語 README のコマンド表への追加も必要です。
+`rust/crates/commands/src/sudo.rs` のホワイトリストおよび `README.md`・`README.ja.md` のコマンド表への追加も必要です。
 
 リポジトリ内のテストは外部環境に依存しない純粋なロジックとローカルモックを検証しており、オフラインで完結します。
 実際の Telegram アカウントを使った検証は `./mibot-lite --verify` で行えます。
