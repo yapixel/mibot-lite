@@ -771,9 +771,35 @@ mod tests {
         let status = status.to_owned();
         let handle = tokio::spawn(async move {
             if let Ok((mut sock, _)) = listener.accept().await {
-                let mut buf = [0u8; 4096];
-                let n = sock.read(&mut buf).await.unwrap_or(0);
-                let raw = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let mut raw_bytes = Vec::new();
+                let mut tmp = [0u8; 4096];
+                let mut need_total: Option<usize> = None;
+                while let Ok(n) = sock.read(&mut tmp).await {
+                    if n == 0 {
+                        break;
+                    }
+                    raw_bytes.extend_from_slice(&tmp[..n]);
+                    if need_total.is_none()
+                        && let Some(pos) = raw_bytes.windows(4).position(|w| w == b"\r\n\r\n")
+                    {
+                        let hdr = String::from_utf8_lossy(&raw_bytes[..pos]);
+                        let cl = hdr
+                            .lines()
+                            .find_map(|l| {
+                                let (k, v) = l.split_once(':')?;
+                                k.trim().eq_ignore_ascii_case("content-length")
+                                    .then(|| v.trim().parse::<usize>().ok())?
+                            })
+                            .unwrap_or(0);
+                        need_total = Some(pos + 4 + cl);
+                    }
+                    if let Some(total) = need_total
+                        && raw_bytes.len() >= total
+                    {
+                        break;
+                    }
+                }
+                let raw = String::from_utf8_lossy(&raw_bytes).into_owned();
                 if let Some((_, body_part)) = raw.split_once("\r\n\r\n") {
                     *seen.lock().unwrap() = Some(body_part.to_owned());
                 }
@@ -894,7 +920,7 @@ mod tests {
         };
         let q = parse_args(&["example.com".into(), "@1.1.1.1".into()]).unwrap();
         let text = lookup_with(&CancellationToken::new(), None, &q, &runner, &url).await.unwrap();
-        let _ = jh.await;
+        let _ = tokio::time::timeout(Duration::from_secs(5), jh).await;
         assert_eq!(ran.lock().unwrap()[0], "@1.1.1.1");
         assert!(text.contains("Edgecast") && text.contains("新加坡 · AS13335"));
         let body = seen.lock().unwrap().clone().unwrap();

@@ -23,3 +23,12 @@ depend() {
 start_pre() {
 	checkpath -f -m 0640 -o root:root "$output_log"
 }
+
+stop_post() {
+	local i=0
+	while [ "$i" -lt 20 ] && pgrep -f "^@BINARY@" >/dev/null 2>&1; do
+		i=$((i + 1))
+		sleep 1
+	done
+	return 0
+}

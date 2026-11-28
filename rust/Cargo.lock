@@ -1754,7 +1754,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "mibot-app"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "futures-util",
  "grammers-mtsender",
@@ -1776,7 +1776,7 @@ dependencies = [
 
 [[package]]
 name = "mibot-backup"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "chrono",
  "flate2",
@@ -1790,7 +1790,7 @@ dependencies = [
 
 [[package]]
 name = "mibot-bot"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "futures-util",
  "getrandom 0.2.17",
@@ -1812,7 +1812,7 @@ dependencies = [
 
 [[package]]
 name = "mibot-botapi"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "mibot-delivery",
  "mibot-httpx",
@@ -1826,7 +1826,7 @@ dependencies = [
 
 [[package]]
 name = "mibot-command"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "futures-util",
  "grammers-mtsender",
@@ -1842,7 +1842,7 @@ dependencies = [
 
 [[package]]
 name = "mibot-commands"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "base64",
  "chrono",
@@ -1890,7 +1890,7 @@ dependencies = [
 
 [[package]]
 name = "mibot-config"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "mibot-fsutil",
  "serde",
@@ -1900,18 +1900,18 @@ dependencies = [
 
 [[package]]
 name = "mibot-delivery"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "mibot-fsutil"
-version = "0.5.0"
+version = "0.5.1"
 
 [[package]]
 name = "mibot-httpx"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "hex",
  "mibot-i18n",
@@ -1927,11 +1927,11 @@ dependencies = [
 
 [[package]]
 name = "mibot-i18n"
-version = "0.5.0"
+version = "0.5.1"
 
 [[package]]
 name = "mibot-imaging"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "fast_image_resize",
  "image",
@@ -1941,7 +1941,7 @@ dependencies = [
 
 [[package]]
 name = "mibot-lite"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "chrono",
  "mibot-app",
@@ -1964,7 +1964,7 @@ dependencies = [
 
 [[package]]
 name = "mibot-login"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "grammers-client",
  "grammers-mtsender",
@@ -1980,7 +1980,7 @@ dependencies = [
 
 [[package]]
 name = "mibot-logtail"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "chrono",
  "regex",
@@ -1989,7 +1989,7 @@ dependencies = [
 
 [[package]]
 name = "mibot-media"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "mibot-i18n",
  "mibot-imaging",
@@ -2000,14 +2000,14 @@ dependencies = [
 
 [[package]]
 name = "mibot-mibox"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "mibot-session"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "base64",
  "grammers-crypto",
@@ -2021,7 +2021,7 @@ dependencies = [
 
 [[package]]
 name = "mibot-statuscard"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "ab_glyph",
  "mibot-i18n",
@@ -2032,7 +2032,7 @@ dependencies = [
 
 [[package]]
 name = "mibot-store"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "mibot-fsutil",
  "serde",
@@ -2042,7 +2042,7 @@ dependencies = [
 
 [[package]]
 name = "mibot-sysinfo"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "libc",
  "mibot-i18n",
@@ -2051,7 +2051,7 @@ dependencies = [
 
 [[package]]
 name = "mibot-tgstate"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "grammers-session",
  "mibot-fsutil",
@@ -2065,7 +2065,7 @@ dependencies = [
 
 [[package]]
 name = "mibot-verify"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "grammers-mtsender",
  "grammers-tl-types",

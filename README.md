@@ -15,7 +15,7 @@ Drop-in compatible with both the Go edition and [MiBox](https://github.com/MiCat
 | | MiBot Lite (Go / `main`) | MiBot Lite (Rust / `rust`) |
 |---|---|---|
 | Language & runtime | Go 1.26 (with GC runtime) | **Pure Rust 2024 (Tokio async, no GC, zero C system deps)** |
-| Binary size | ~21 MB | **~34 MB stripped on Linux `musl` (static single binary)** |
+| Binary size | ~21 MB | **~18 MB stripped on Linux `musl` (LTO static binary)** |
 | MTProto stack | `gotd/td` (Layer 229) | **Pure Rust `grammers =0.12.0` + `rustls` (`ring`)** |
 | Concurrency & dispatch | Goroutines + 3-pool channels | **Tokio + 3-pool bounded semaphore dispatcher (panic-isolated & drainable)** |
 | Imaging & status card | `image/draw` + `golang.org/x/image` | **`image` + `fast_image_resize` + `tiny-skia` + `ab_glyph`** |
@@ -235,7 +235,7 @@ deletes them). One account cannot be connected twice at once, so stop the servic
 ./mibot-lite --verify --root /deployment/dir
 ```
 
-### Verification summary (v0.5.0)
+### Verification summary (v0.5.1)
 
 - **Workspace**: **23 crates** under `rust/` covering all 45+ command modules, `mibot-i18n`, and runtime subsystems.
 - **Lint**: `cargo clippy --workspace --all-targets --locked -- -D warnings` — **0 warnings**.

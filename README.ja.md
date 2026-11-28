@@ -15,7 +15,7 @@ Go 原版および [MiBox](https://github.com/MiCat-S/Mi-Box) との互換性を
 | | MiBot Lite（Go 原版 / `main`） | MiBot Lite（Rust 版 / `rust`） |
 |---|---|---|
 | 言語・メモリモデル | Go 1.26（GC ランタイムあり） | **純 Rust 2024（Tokio 非同期・GC なし・C 依存ゼロ）** |
-| バイナリサイズ | 約 21 MB | **Linux `musl` strip 後 約 34 MB（完全静的単一ファイル）** |
+| バイナリサイズ | 約 21 MB | **Linux `musl` LTO・strip 後 約 18 MB（完全静的単一ファイル）** |
 | MTProto スタック | `gotd/td`（Layer 229） | **純 Rust `grammers =0.12.0` + `rustls`（`ring`）** |
 | 並行制御・ディスパッチ | Goroutine + 3 プールチャネル | **Tokio + 3 プール有界セマフォ（Panic 隔離・ドレイン対応）** |
 | 画像処理・状態カード | `image/draw` + `golang.org/x/image` | **`image` + `fast_image_resize` + `tiny-skia` + `ab_glyph`** |
@@ -232,7 +232,7 @@ bash ../scripts/build.sh  # バージョン番号付きでビルド
 ./mibot-lite --verify --root /デプロイ先ディレクトリ
 ```
 
-### 検証サマリー（v0.5.0）
+### 検証サマリー（v0.5.1）
 
 - **ワークスペース**：`rust/` 配下の **23 クレート**（全コマンド群、`mibot-i18n`、およびランタイムを網羅）。
 - **静的解析**：`cargo clippy --workspace --all-targets --locked -- -D warnings` — **警告ゼロ**で通過。

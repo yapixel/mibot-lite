@@ -430,7 +430,12 @@ where
         return 0;
     }
 
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get().clamp(1, 2))
+        .unwrap_or(1);
     let rt = match tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(workers)
+        .max_blocking_threads(8)
         .enable_all()
         .build()
     {
